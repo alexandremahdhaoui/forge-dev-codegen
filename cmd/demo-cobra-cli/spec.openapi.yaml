@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: demo-cobra-cli Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        greeting:
+          type: string
+          description: The greeting the demo answers with.

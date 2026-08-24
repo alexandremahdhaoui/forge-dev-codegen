@@ -1,0 +1,4 @@
+/build/
+/.forge/
+.envrc
+/tmp/

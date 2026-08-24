@@ -1,0 +1,16 @@
+name: demo-cobra-cli
+kind: cli
+version: 0.1.0
+description: A cli whose dispatcher is emitted by cli-cobra. The living proof that a generator cell is a drop-in swap.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/cli-cobra
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  commands:
+    - name: greet
+      description: Print the greeting and the args.
+    - name: fail
+      description: Exit with the given code.
