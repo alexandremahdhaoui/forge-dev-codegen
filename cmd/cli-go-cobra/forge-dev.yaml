@@ -1,0 +1,15 @@
+name: cli-go-cobra
+kind: mcp-server
+version: 0.1.0
+description: Emits a cobra dispatcher for the cli kind. A drop-in swap for the builtin cell - same handlers file, same behavior contract, different library.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer a cobra dispatcher for a cli cell from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

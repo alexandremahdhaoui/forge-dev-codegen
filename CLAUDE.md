@@ -31,7 +31,8 @@ behavior; if the library disagrees with the contract, wrap the library.
 
 ## Adding an engine
 
-One `cmd/<kind>-<library>` directory: forge-dev.yaml (an mcp-server with
+One `cmd/<kind>-<language>-<library>` directory - the cell, then the
+library: forge-dev.yaml (an mcp-server with
 the one `generate` tool), spec.openapi.yaml, handlers.go doing the
 emitting, docs/usage.md. Add a demo consumer and its test. Nothing else
 changes; the registry is the factory, not a table in code.

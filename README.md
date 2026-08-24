@@ -10,7 +10,7 @@ that engine wraps:
 ```yaml
 name: my-tool
 kind: cli
-generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/cli-cobra
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/cli-go-cobra
 ```
 
 Swap the URI and the skeleton changes library; the author contract and
@@ -25,12 +25,20 @@ plugs in exactly the way these do; see `docs/model.md` in forge's
 
 ## Engines
 
+An engine is named `<kind>-<language>-<library>`: the cell it fills,
+then the library that fills it.
+
 | Engine | Cell | Library |
 |---|---|---|
-| cli-cobra | cli x go | github.com/spf13/cobra |
+| cli-go-cobra | cli x go | github.com/spf13/cobra |
+| cli-rust-clap | cli x rust | clap |
+| cli-python-typer | cli x python | typer |
+| cli-typescript-commander | cli x typescript | commander |
 
-`cmd/demo-cobra-cli` consumes cli-cobra and pins its behavior against the
-built binary.
+`cmd/demo-cli-go-cobra` consumes cli-go-cobra and pins its behavior
+against the built binary; the other cells' demos live in the matching
+golden repos, and golden-e2e's clidemo-conformance stage holds all four
+libraries to one behavior.
 
 ## Build and test
 

@@ -5,51 +5,51 @@ artifactStorePath: .forge/artifact-store.yaml
 build:
   # The engine: forge-dev generates its MCP surface, go-build makes the
   # binary a generator: URI resolves to.
-  - name: gen-cli-cobra
-    src: ./cmd/cli-cobra
+  - name: gen-cli-go-cobra
+    src: ./cmd/cli-go-cobra
     engine: forge://forge-dev
 
-  - name: cli-cobra
-    src: ./cmd/cli-cobra
+  - name: cli-go-cobra
+    src: ./cmd/cli-go-cobra
     dest: ./build/bin
     engine: forge://go-build
 
-  - name: gen-cli-clap
-    src: ./cmd/cli-clap
+  - name: gen-cli-rust-clap
+    src: ./cmd/cli-rust-clap
     engine: forge://forge-dev
 
-  - name: cli-clap
-    src: ./cmd/cli-clap
+  - name: cli-rust-clap
+    src: ./cmd/cli-rust-clap
     dest: ./build/bin
     engine: forge://go-build
 
-  - name: gen-cli-typer
-    src: ./cmd/cli-typer
+  - name: gen-cli-python-typer
+    src: ./cmd/cli-python-typer
     engine: forge://forge-dev
 
-  - name: cli-typer
-    src: ./cmd/cli-typer
+  - name: cli-python-typer
+    src: ./cmd/cli-python-typer
     dest: ./build/bin
     engine: forge://go-build
 
-  - name: gen-cli-commander
-    src: ./cmd/cli-commander
+  - name: gen-cli-typescript-commander
+    src: ./cmd/cli-typescript-commander
     engine: forge://forge-dev
 
-  - name: cli-commander
-    src: ./cmd/cli-commander
+  - name: cli-typescript-commander
+    src: ./cmd/cli-typescript-commander
     dest: ./build/bin
     engine: forge://go-build
 
-  # The proof: a cli whose dispatcher is emitted by cli-cobra over real MCP
+  # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.
-  - name: gen-demo-cobra-cli
-    src: ./cmd/demo-cobra-cli
+  - name: gen-demo-cli-go-cobra
+    src: ./cmd/demo-cli-go-cobra
     engine: forge://forge-dev
 
-  - name: demo-cobra-cli
-    src: ./cmd/demo-cobra-cli
+  - name: demo-cli-go-cobra
+    src: ./cmd/demo-cli-go-cobra
     dest: ./build/bin
     engine: forge://go-build
 
