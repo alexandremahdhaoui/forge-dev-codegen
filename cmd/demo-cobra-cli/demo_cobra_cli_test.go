@@ -58,7 +58,7 @@ func TestTheCobraCellKeepsTheBuiltinContract(t *testing.T) {
 
 	t.Run("a handler gets its args and its output through", func(t *testing.T) {
 		out, code := run(t, bin, "greet", "world")
-		if code != 0 || !strings.Contains(out, "hello [world]") {
+		if code != 0 || !strings.Contains(out, `{"args":["world"],"command":"greet"}`) {
 			t.Errorf("greet answered %q with code %d", out, code)
 		}
 	})
@@ -78,7 +78,7 @@ func TestTheCobraCellKeepsTheBuiltinContract(t *testing.T) {
 
 	t.Run("flags reach the handler unparsed", func(t *testing.T) {
 		out, code := run(t, bin, "greet", "--loud", "world")
-		if code != 0 || !strings.Contains(out, "hello [--loud world]") {
+		if code != 0 || !strings.Contains(out, `{"args":["--loud","world"],"command":"greet"}`) {
 			t.Errorf("the handler owns its args, got %q with code %d", out, code)
 		}
 	})

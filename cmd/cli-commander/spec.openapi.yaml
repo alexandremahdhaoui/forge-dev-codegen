@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: cli-commander Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+          description: Unused. The engine has no configuration; the model it receives carries everything.
+    GenerateInput:
+      type: object
+      description: The normalized model forge-dev hands every generator.
+      properties:
+        name:
+          type: string
+          description: The program name. The cobra root command uses it.
+        version:
+          type: string
+          description: The program version.
+        description:
+          type: string
+          description: The program description. The root command's short help.
+        kind:
+          type: string
+          description: What the program is. This engine emits the cli kind only.
+        language:
+          type: string
+          description: The cell's language. This engine emits typescript only.
+        packageName:
+          type: string
+          description: The package the emitted file belongs to. Absent means main.
+        surface:
+          type: object
+          additionalProperties: true
+          description: The kind's surface. commands decides the subcommands.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
+        openapiSpec:
+          type: string
+          description: The raw OpenAPI document. Unused here; forge-dev core derives the manifest from it.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed. Stamped into the emitted header.
+        srcDir:
+          type: string
+          description: The engine source directory. Informational; paths answered are relative.
+      required:
+        - name
+        - kind
+    GeneratedFile:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The file path, relative to the engine source directory.
+        content:
+          type: string
+          description: The file content.
+      required:
+        - path
+        - content
+    GenerateOutput:
+      type: object
+      properties:
+        files:
+          type: array
+          description: The emitted files. forge-dev core writes them.
+          items:
+            $ref: "#/components/schemas/GeneratedFile"
+      required:
+        - files

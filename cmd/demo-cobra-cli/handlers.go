@@ -15,17 +15,31 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 )
 
 // NewCLIHandlers is byte-for-byte the handlers file the builtin cli cell
 // would take: the dispatcher around it comes from cli-cobra instead, and
-// nothing here knows or cares.
+// nothing here knows or cares. greet prints the canonical JSON every cli
+// demo prints, so golden-e2e can compare the four languages' cells.
 func NewCLIHandlers() CLIHandlers {
 	return CLIHandlers{
 		Greet: func(args []string) int {
-			fmt.Println("hello", args)
+			if args == nil {
+				args = []string{}
+			}
+
+			out, err := json.Marshal(map[string]any{"command": "greet", "args": args})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "demo-cobra-cli: rendering the answer: %v\n", err)
+
+				return 1
+			}
+
+			fmt.Println(string(out))
 
 			return 0
 		},

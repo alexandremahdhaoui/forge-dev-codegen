@@ -14,6 +14,33 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-cli-clap
+    src: ./cmd/cli-clap
+    engine: forge://forge-dev
+
+  - name: cli-clap
+    src: ./cmd/cli-clap
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-cli-typer
+    src: ./cmd/cli-typer
+    engine: forge://forge-dev
+
+  - name: cli-typer
+    src: ./cmd/cli-typer
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-cli-commander
+    src: ./cmd/cli-commander
+    engine: forge://forge-dev
+
+  - name: cli-commander
+    src: ./cmd/cli-commander
+    dest: ./build/bin
+    engine: forge://go-build
+
   # The proof: a cli whose dispatcher is emitted by cli-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.

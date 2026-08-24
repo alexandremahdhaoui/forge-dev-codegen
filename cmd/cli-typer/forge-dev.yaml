@@ -1,0 +1,15 @@
+name: cli-typer
+kind: mcp-server
+version: 0.1.0
+description: Emits typer dispatchers in python for the cli kind - the same behavior contract as every cli cell, a different library.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer a python cli dispatcher from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput
