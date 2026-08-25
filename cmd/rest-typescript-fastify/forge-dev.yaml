@@ -1,0 +1,15 @@
+name: rest-typescript-fastify
+kind: mcp-server
+version: 0.1.0
+description: Emits a fastify server in typescript for the rest-api kind - the paths are the surface, typed handlers per operation, LISTENING line on bind.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer a fastify server module from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

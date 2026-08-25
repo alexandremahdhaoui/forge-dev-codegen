@@ -41,6 +41,33 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-rest-rust-axum
+    src: ./cmd/rest-rust-axum
+    engine: forge://forge-dev
+
+  - name: rest-rust-axum
+    src: ./cmd/rest-rust-axum
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-rest-python-fastapi
+    src: ./cmd/rest-python-fastapi
+    engine: forge://forge-dev
+
+  - name: rest-python-fastapi
+    src: ./cmd/rest-python-fastapi
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-rest-typescript-fastify
+    src: ./cmd/rest-typescript-fastify
+    engine: forge://forge-dev
+
+  - name: rest-typescript-fastify
+    src: ./cmd/rest-typescript-fastify
+    dest: ./build/bin
+    engine: forge://go-build
+
   # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.
