@@ -68,6 +68,42 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-logging-gen
+    src: ./cmd/logging-gen
+    engine: forge://forge-dev
+
+  - name: logging-gen
+    src: ./cmd/logging-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-telemetry-gen
+    src: ./cmd/telemetry-gen
+    engine: forge://forge-dev
+
+  - name: telemetry-gen
+    src: ./cmd/telemetry-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-resilience-gen
+    src: ./cmd/resilience-gen
+    engine: forge://forge-dev
+
+  - name: resilience-gen
+    src: ./cmd/resilience-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-delivery-gen
+    src: ./cmd/delivery-gen
+    engine: forge://forge-dev
+
+  - name: delivery-gen
+    src: ./cmd/delivery-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
   # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.

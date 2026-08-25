@@ -1,0 +1,15 @@
+name: telemetry-gen
+kind: mcp-server
+version: 0.1.0
+description: Emits the telemetry module for one language cell. One of the composable observability generators of forge-dev-codegen.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer the telemetry module for one language cell from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

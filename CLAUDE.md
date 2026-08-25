@@ -37,6 +37,16 @@ the one `generate` tool), spec.openapi.yaml, handlers.go doing the
 emitting, docs/usage.md. Add a demo consumer and its test. Nothing else
 changes; the registry is the factory, not a table in code.
 
+## The concern engines
+
+`logging-gen`, `telemetry-gen`, `resilience-gen` and `delivery-gen` each
+fill their own custom kind across all four languages. They render through
+one shared package, `internal/concerns`, so two cells naming one concern
+cannot drift: one template, one renderer. A concern engine is named
+`<concern>-gen` - no language in the name, because one engine serves
+every language cell of its concern. The golden repos consume them in
+place: the module directory is the engine cell.
+
 ## Build and test
 
 ```sh

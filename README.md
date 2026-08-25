@@ -25,8 +25,8 @@ plugs in exactly the way these do; see `docs/model.md` in forge's
 
 ## Engines
 
-An engine is named `<kind>-<language>-<library>`: the cell it fills,
-then the library that fills it.
+A library-backed engine is named `<kind>-<language>-<library>`: the cell
+it fills, then the library that fills it.
 
 | Engine | Cell | Library |
 |---|---|---|
@@ -34,11 +34,29 @@ then the library that fills it.
 | cli-rust-clap | cli x rust | clap |
 | cli-python-typer | cli x python | typer |
 | cli-typescript-commander | cli x typescript | commander |
+| rest-rust-axum | rest-api x rust | axum |
+| rest-python-fastapi | rest-api x python | fastapi |
+| rest-typescript-fastify | rest-api x typescript | fastify |
 
 `cmd/demo-cli-go-cobra` consumes cli-go-cobra and pins its behavior
 against the built binary; the other cells' demos live in the matching
 golden repos, and golden-e2e's clidemo-conformance stage holds all four
 libraries to one behavior.
+
+A concern engine is named `<concern>-gen`: it fills its own custom kind
+in any of the four languages, from one shared renderer
+(`internal/concerns`), so two cells naming one concern cannot drift.
+
+| Engine | Kind it fills | Answers |
+|---|---|---|
+| logging-gen | `kind: logging` | the logging module |
+| telemetry-gen | `kind: telemetry` | the metrics and tracing module |
+| resilience-gen | `kind: resilience` | the resilience module |
+| delivery-gen | `kind: delivery` | one Containerfile per surface binary |
+
+A module directory in a consuming repo is the engine cell: it holds a
+forge-dev.yaml naming the concern engine and receives the emitted files
+in place. The golden repos are the reference consumers.
 
 ## Build and test
 
