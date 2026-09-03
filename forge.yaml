@@ -68,6 +68,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-hexagonal-rust
+    src: ./cmd/hexagonal-rust
+    engine: forge://forge-dev
+
+  - name: hexagonal-rust
+    src: ./cmd/hexagonal-rust
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-logging-gen
     src: ./cmd/logging-gen
     engine: forge://forge-dev

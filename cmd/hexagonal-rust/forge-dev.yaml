@@ -1,0 +1,15 @@
+name: hexagonal-rust
+kind: mcp-server
+version: 0.1.0
+description: Emits the hexagonal rust skeleton of one service from its OpenAPI spec - types, ports, controllers and hand stubs in core, sqlite adapters, an axum driver and main in app.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer the core and app crates of one service from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

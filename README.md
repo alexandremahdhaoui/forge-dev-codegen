@@ -37,6 +37,7 @@ it fills, then the library that fills it.
 | rest-rust-axum | rest-api x rust | axum |
 | rest-python-fastapi | rest-api x python | fastapi |
 | rest-typescript-fastify | rest-api x typescript | fastify |
+| hexagonal-rust | hexagonal x rust | axum, rusqlite, thiserror, mockall |
 
 `cmd/demo-cli-go-cobra` consumes cli-go-cobra and pins its behavior
 against the built binary; the other cells' demos live in the matching
