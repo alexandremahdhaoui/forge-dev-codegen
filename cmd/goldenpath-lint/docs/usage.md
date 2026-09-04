@@ -52,10 +52,11 @@ flagged as `rust-layer-not-flat` and the message names the subdirectory.
 `src/bin/<name>.rs` and at `src/bin/<name>/main.rs`, so a binary directory
 there is legal.
 
-A layer holds rust files and the known manifests `mod.rs`, `forge-dev.yaml`,
-`zz_generated_cell.yaml` and `zz_generated.runnable.yaml`. Any other file is
-flagged as `rust-layer-stray-file` and the message names the file. `src/bin` is
-checked by this rule like every other layer.
+A layer holds rust files and the known manifests `forge-dev.yaml`,
+`zz_generated_cell.yaml` and `zz_generated.runnable.yaml`. `mod.rs` passes
+because it ends in `.rs`. Any other file is flagged as `rust-layer-stray-file`
+and the message names the file. The rule reads only the top level of `src/bin`,
+so a file inside a binary directory is never flagged.
 
 ## Pure layers
 

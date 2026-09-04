@@ -150,7 +150,7 @@ var pureLayers = []string{"controller", "port", "types"}
 
 const cargoDiscoveredLayer = "bin"
 
-var mountedRootLayers = namesWithout(rootLayers, cargoDiscoveredLayer)
+var layersCargoDoesNotDiscover = namesWithout(rootLayers, cargoDiscoveredLayer)
 
 func namesWithout(names []string, dropped string) []string {
 	var kept []string
@@ -348,7 +348,7 @@ var layerManifestFileNames = []string{cellMarker, cellManifestFileName, "zz_gene
 func checkLayersAreFlat(rootDir string, cells []string) ([]Finding, error) {
 	var findings []Finding
 
-	for _, dir := range flatLayerDirs(cells) {
+	for _, dir := range layerDirs(cells) {
 		entries, err := layerEntries(rootDir, dir)
 		if err != nil {
 			return nil, err
@@ -527,8 +527,10 @@ func bannedUseHits(content string) []useHit {
 
 	for index := 0; index < len(lines); index++ {
 		if isUseLine(lines[index]) {
-			statement, last := joinUntilSemicolon(lines, index)
-			hits = append(hits, bannedNameHits(statement, index+1)...)
+			statement, last, closed := joinUntilSemicolon(lines, index)
+			if closed {
+				hits = append(hits, bannedNameHits(statement, index+1)...)
+			}
 			index = last
 
 			continue
@@ -542,25 +544,42 @@ func bannedUseHits(content string) []useHit {
 	return hits
 }
 
-func joinUntilSemicolon(lines []string, start int) (string, int) {
+func joinUntilSemicolon(lines []string, start int) (string, int, bool) {
 	var joined strings.Builder
 
+	openBraces := 0
+
 	for index := start; index < len(lines); index++ {
+		if index > start && strings.TrimSpace(lines[index]) == "" {
+			return "", index - 1, false
+		}
+
 		joined.WriteString(" ")
 		joined.WriteString(strings.TrimSpace(lines[index]))
 
 		if strings.Contains(lines[index], ";") {
-			return joined.String(), index
+			return joined.String(), index, true
+		}
+
+		openBraces += braceDelta(lines[index])
+		if openBraces <= 0 {
+			return "", index, false
 		}
 	}
 
-	return joined.String(), len(lines) - 1
+	return "", len(lines) - 1, false
 }
+
+func braceDelta(line string) int {
+	return strings.Count(line, "{") - strings.Count(line, "}")
+}
+
+var leadingDoubleColonRe = regexp.MustCompile(`(^|\s)::`)
 
 func bannedNameHits(statement string, line int) []useHit {
 	var hits []useHit
 
-	flattened := flattenGroupedPaths(statement)
+	flattened := leadingDoubleColonRe.ReplaceAllString(flattenGroupedPaths(statement), "${1}")
 
 	for _, name := range bannedNames {
 		if bannedNamePatterns[name].MatchString(flattened) {
@@ -589,12 +608,10 @@ func flattenGroupedPaths(line string) string {
 	return flattened
 }
 
-func isUseLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	trimmed = strings.TrimPrefix(trimmed, "pub ")
-	trimmed = strings.TrimPrefix(trimmed, "pub(crate) ")
+var useLineRe = regexp.MustCompile(`^\s*(?:pub(?:\([^)]*\))?\s+)?use\s`)
 
-	return strings.HasPrefix(trimmed, "use ")
+func isUseLine(line string) bool {
+	return useLineRe.MatchString(line)
 }
 
 func isAttributeLine(line string) bool {
@@ -618,11 +635,7 @@ func checkEveryFileIsMounted(rootDir string, cells []string) ([]Finding, error) 
 }
 
 func layerDirs(cells []string) []string {
-	return dirsForLayers(mountedRootLayers, cells)
-}
-
-func flatLayerDirs(cells []string) []string {
-	return dirsForLayers(mountedRootLayers, cells)
+	return dirsForLayers(layersCargoDoesNotDiscover, cells)
 }
 
 func everyLayerDir(cells []string) []string {

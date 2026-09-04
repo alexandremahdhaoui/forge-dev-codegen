@@ -293,6 +293,55 @@ func TestAnAttributeLineNamingABannedCrateIsFlagged(t *testing.T) {
 	}
 }
 
+func TestALeadingDoubleColonNeverHidesABannedPath(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+	path := "src/controller/greeting_controller.rs"
+
+	tests := []struct {
+		name string
+		line int
+		crat string
+	}{
+		{name: "a leading double colon on a bare path is flagged", line: 23, crat: "std::fs"},
+		{name: "a leading double colon on a deeper path is flagged", line: 25, crat: "std::process"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !hitsLine(findings, path, test.line, test.crat) {
+				t.Fatalf("expected line %d to be flagged for %s, got %+v", test.line, test.crat, findings)
+			}
+		})
+	}
+}
+
+func TestAUseStatementNoSemicolonClosesIsReportedNowhereAndSwallowsNoLaterLine(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+	path := "src/controller/greeting_controller.rs"
+
+	for _, line := range []int{29, 33} {
+		if hitsAnythingOnLine(findings, path, line) {
+			t.Fatalf("a use statement no semicolon closes is reported nowhere, line %d, got %+v", line, findings)
+		}
+	}
+
+	if !hitsLine(findings, path, 31, "std::fs") {
+		t.Fatalf("expected line 31 to stay reachable and be flagged for std::fs, got %+v", findings)
+	}
+
+	if !hitsLine(findings, path, 37, "std::process") {
+		t.Fatalf("expected line 37 to stay reachable and be flagged for std::process, got %+v", findings)
+	}
+}
+
+func TestAUseStatementBehindAnyPubRestrictionIsScanned(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+
+	if !hitsLine(findings, "src/controller/greeting_controller.rs", 27, "tokio") {
+		t.Fatalf("expected the pub(super) use on line 27 to be flagged for tokio, got %+v", findings)
+	}
+}
+
 func TestAHandWrittenBinaryUnderSrcBinIsNeverFlagged(t *testing.T) {
 	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
 

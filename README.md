@@ -61,7 +61,7 @@ in any of the four languages, from one shared renderer
 | testenv-sqlite | testenv subengine | one sqlite file per x-store schema, seeded from vectors, exports SONGE_STORE_<UPPER>_PATH |
 | testenv-stack | testenv subengine | starts service binaries on free ports, waits for LISTENING, exports one address env per service |
 | no-comment-lint | test runner | fails on any comment in go, rust, python or typescript. license headers and generated files exempt |
-| goldenpath-lint | test runner | fails when a repo drifts from the go or rust layout, a layer is not flat, a layer holds a stray file, a file no generated mod line reaches, or a use line of a pure layer names an io crate or an io path |
+| goldenpath-lint | test runner | fails when a repo drifts from the go or rust layout, a layer is not flat, a layer holds a stray file, a file no generated mod line reaches, or a use statement or an attribute of a pure layer names an io crate or an io path |
 | forge-lint | test runner | fails on go:// URIs, an unknown engine scheme, a missing artifactStorePath, missing hack scripts, a unit stage with no runner, go-build on a Rust repo, or an adapter reached from a controller or a driver |
 
 A module directory in a consuming repo is the engine cell: it holds a
