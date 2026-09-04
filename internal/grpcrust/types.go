@@ -14,7 +14,6 @@
 
 package grpcrust
 
-// FieldKind names what a message field holds.
 type FieldKind string
 
 const (
@@ -22,7 +21,6 @@ const (
 	FieldMessage FieldKind = "message"
 )
 
-// Field is one field of a Message.
 type Field struct {
 	Name    string
 	Number  int
@@ -31,40 +29,34 @@ type Field struct {
 	Message string
 }
 
-// Message is one proto3 message with scalar and message fields only.
 type Message struct {
 	Name   string
 	Fields []Field
 }
 
-// Rpc is one unary RPC of a Service.
 type Rpc struct {
 	Name     string
 	Request  string
 	Response string
 }
 
-// Service is one proto3 service with unary RPCs only.
 type Service struct {
 	Name string
 	Rpcs []Rpc
 }
 
-// Spec is the parsed proto3 document.
 type Spec struct {
 	Package  string
 	Messages []Message
 	Services []Service
 }
 
-// Options controls where Generate answers its files.
 type Options struct {
 	Service string
 	CoreDir string
 	AppDir  string
 }
 
-// File is one answered file.
 type File struct {
 	Path    string
 	Content string

@@ -1,0 +1,3 @@
+package foocontroller
+
+func Do() {}

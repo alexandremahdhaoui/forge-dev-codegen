@@ -159,9 +159,6 @@ func (p *parser) expectIdent() (string, error) {
 	return t.text, nil
 }
 
-// Parse reads a proto3 document and returns its package, messages and
-// services. It refuses imports, streaming, nested types, oneofs, maps,
-// enums, repeated fields and anything else a unary service does not need.
 func Parse(doc []byte) (*Spec, error) {
 	tokens, err := lex(doc)
 	if err != nil {
@@ -559,6 +556,80 @@ func finishRpc(p *parser) error {
 }
 
 func validateReferences(spec *Spec) error {
+	if err := refuseDuplicateMessageNames(spec); err != nil {
+		return err
+	}
+
+	if err := refuseBadFieldNumbers(spec); err != nil {
+		return err
+	}
+
+	if err := refuseDuplicateRpcNames(spec); err != nil {
+		return err
+	}
+
+	if err := refuseUndefinedMessageFieldReferences(spec); err != nil {
+		return err
+	}
+
+	if err := refuseUndefinedRpcMessageReferences(spec); err != nil {
+		return err
+	}
+
+	return refuseMessageCycles(spec)
+}
+
+func refuseDuplicateMessageNames(spec *Spec) error {
+	seen := map[string]bool{}
+
+	for _, m := range spec.Messages {
+		if seen[m.Name] {
+			return fmt.Errorf("reading the proto document: message %q is declared more than once", m.Name)
+		}
+
+		seen[m.Name] = true
+	}
+
+	return nil
+}
+
+func refuseBadFieldNumbers(spec *Spec) error {
+	for _, m := range spec.Messages {
+		seenNumbers := map[int]string{}
+
+		for _, f := range m.Fields {
+			if f.Number == 0 {
+				return fmt.Errorf("reading message %q: field %q has field number 0, proto3 field numbers start at 1", m.Name, f.Name)
+			}
+
+			if other, ok := seenNumbers[f.Number]; ok {
+				return fmt.Errorf("reading message %q: field %q and field %q both use field number %d", m.Name, other, f.Name, f.Number)
+			}
+
+			seenNumbers[f.Number] = f.Name
+		}
+	}
+
+	return nil
+}
+
+func refuseDuplicateRpcNames(spec *Spec) error {
+	for _, s := range spec.Services {
+		seen := map[string]bool{}
+
+		for _, r := range s.Rpcs {
+			if seen[r.Name] {
+				return fmt.Errorf("reading service %q: rpc %q is declared more than once", s.Name, r.Name)
+			}
+
+			seen[r.Name] = true
+		}
+	}
+
+	return nil
+}
+
+func refuseUndefinedMessageFieldReferences(spec *Spec) error {
 	for _, m := range spec.Messages {
 		for _, f := range m.Fields {
 			if f.Kind != FieldMessage {
@@ -571,6 +642,10 @@ func validateReferences(spec *Spec) error {
 		}
 	}
 
+	return nil
+}
+
+func refuseUndefinedRpcMessageReferences(spec *Spec) error {
 	for _, s := range spec.Services {
 		for _, r := range s.Rpcs {
 			if _, ok := messageByName(spec.Messages, r.Request); !ok {
@@ -579,6 +654,68 @@ func validateReferences(spec *Spec) error {
 
 			if _, ok := messageByName(spec.Messages, r.Response); !ok {
 				return fmt.Errorf("reading service %q: rpc %q references undefined message %q", s.Name, r.Name, r.Response)
+			}
+		}
+	}
+
+	return nil
+}
+
+func refuseMessageCycles(spec *Spec) error {
+	const (
+		unvisited = 0
+		visiting  = 1
+		resolved  = 2
+	)
+
+	state := map[string]int{}
+	path := []string{}
+
+	var walk func(name string) error
+
+	walk = func(name string) error {
+		switch state[name] {
+		case resolved:
+			return nil
+		case visiting:
+			start := 0
+
+			for i, n := range path {
+				if n == name {
+					start = i
+
+					break
+				}
+			}
+
+			cycle := append(append([]string{}, path[start:]...), name)
+
+			return fmt.Errorf("reading the proto document: message cycle %s, a message cannot reach itself through message fields", strings.Join(cycle, " -> "))
+		}
+
+		state[name] = visiting
+		path = append(path, name)
+
+		m, _ := messageByName(spec.Messages, name)
+
+		for _, f := range m.Fields {
+			if f.Kind == FieldMessage {
+				if err := walk(f.Message); err != nil {
+					return err
+				}
+			}
+		}
+
+		path = path[:len(path)-1]
+		state[name] = resolved
+
+		return nil
+	}
+
+	for _, m := range spec.Messages {
+		if state[m.Name] == unvisited {
+			if err := walk(m.Name); err != nil {
+				return err
 			}
 		}
 	}

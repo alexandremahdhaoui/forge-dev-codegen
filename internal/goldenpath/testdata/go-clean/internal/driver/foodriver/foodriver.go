@@ -1,0 +1,3 @@
+package foodriver
+
+func Serve() {}

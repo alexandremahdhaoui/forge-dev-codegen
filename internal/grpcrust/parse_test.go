@@ -271,3 +271,99 @@ message Empty {}
 		})
 	}
 }
+
+func TestASelfReferencingMessageIsRefusedAsACycle(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Node {
+  string name = 1;
+  Node next = 2;
+}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), "Node") || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("want a cycle error naming Node, got %v", err)
+	}
+}
+
+func TestAMessageCycleThroughTwoMessagesIsRefused(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message A {
+  B b = 1;
+}
+message B {
+  A a = 1;
+}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), "cycle") || !strings.Contains(err.Error(), "A") || !strings.Contains(err.Error(), "B") {
+		t.Fatalf("want a cycle error naming A and B, got %v", err)
+	}
+}
+
+func TestADuplicateMessageNameIsRefused(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Empty {}
+message Empty {}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), `message "Empty" is declared more than once`) {
+		t.Fatalf("want a duplicate message error, got %v", err)
+	}
+}
+
+func TestADuplicateRpcNameIsRefused(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Empty {}
+service S {
+  rpc Do(Empty) returns (Empty);
+  rpc Do(Empty) returns (Empty);
+}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), `rpc "Do" is declared more than once`) {
+		t.Fatalf("want a duplicate rpc error, got %v", err)
+	}
+}
+
+func TestADuplicateFieldNumberInOneMessageIsRefused(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Group {
+  string a = 1;
+  string b = 1;
+}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), `field "a" and field "b" both use field number 1`) {
+		t.Fatalf("want a duplicate field number error, got %v", err)
+	}
+}
+
+func TestAFieldNumberZeroIsRefused(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Group {
+  string a = 0;
+}
+`
+
+	_, err := grpcrust.Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), "field number 0") {
+		t.Fatalf("want a field number 0 error, got %v", err)
+	}
+}

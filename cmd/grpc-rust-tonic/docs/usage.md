@@ -80,6 +80,12 @@ architecture rule. Core only depends on `serde`, `serde_json` and
 dependencies. `<Service>GrpcClient` bridges the synchronous trait to
 tonic's async client with `tokio::runtime::Handle::current().block_on`,
 so it must be called from inside a multi threaded tokio runtime.
+`tokio::task::block_in_place` panics on a current thread runtime, so
+the caller needs `#[tokio::main(flavor = "multi_thread")]` or plain
+`#[tokio::main]`, which already defaults to multi thread. A
+hexagonal-rust server main is `#[tokio::main]` with no flavor argument,
+so it already satisfies this and needs no change to host a grpc
+adapter alongside its axum driver.
 
 ## What the crates need
 

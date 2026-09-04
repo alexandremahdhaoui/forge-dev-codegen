@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: goldenpath-lint Spec Schema
+  version: 0.1.0
+  description: Configuration schema for goldenpath-lint test runner
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: Configuration for goldenpath-lint.
+      required:
+        - layout
+      properties:
+        layout:
+          type: string
+          description: The golden path layout to check, either go or rust-core-app
+        rootDir:
+          type: string
+          description: Root directory of the repo to check (default is current directory)
