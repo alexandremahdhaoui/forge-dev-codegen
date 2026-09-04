@@ -32,10 +32,10 @@ components:
         packageName:
           type: string
           description: The package the emitted file belongs to. Absent means main.
-        surface:
+        layout:
           type: object
           additionalProperties: true
-          description: The kind's surface. Unused; the Spec schema decides the keys.
+          description: The kind's layout. Unused; the Spec schema decides the keys.
         runtime:
           type: object
           additionalProperties: true

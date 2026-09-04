@@ -61,10 +61,10 @@ func TestTheEngineFillsTheGrpcRustCellOnly(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceCellNamesTheModuleTheCrateMounts(t *testing.T) {
+func TestTheLayoutCellNamesTheModuleTheCrateMounts(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-		Surface: map[string]interface{}{"cell": "wire"},
+		Layout: map[string]interface{}{"cell": "wire"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -118,7 +118,7 @@ func TestTheSurfaceSideAnswersOnlyItsOwnLayers(t *testing.T) {
 		t.Run("the "+tt.side+" side answers only its own files", func(t *testing.T) {
 			out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 				Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-				Surface: map[string]interface{}{"side": tt.side},
+				Layout: map[string]interface{}{"side": tt.side},
 			})
 			if err != nil {
 				t.Fatalf("generating: %v", err)
@@ -144,10 +144,10 @@ func TestTheSurfaceSideAnswersOnlyItsOwnLayers(t *testing.T) {
 	}
 }
 
-func TestASurfaceSideThatNamesNeitherCrateIsRefused(t *testing.T) {
+func TestALayoutSideThatNamesNeitherCrateIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-		Surface: map[string]interface{}{"side": "both"},
+		Layout: map[string]interface{}{"side": "both"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "side must be core, app or empty") {
 		t.Fatalf("want an error refusing the side, got %v", err)

@@ -482,12 +482,12 @@ func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceCarriesTheCellsList(t *testing.T) {
-	got, err := hexrust.CellsFromSurface(map[string]interface{}{
+func TestTheLayoutCarriesTheCellsList(t *testing.T) {
+	got, err := hexrust.CellsFromLayout(map[string]interface{}{
 		"cells": []interface{}{"grpc", "udp"},
 	})
 	if err != nil {
-		t.Fatalf("reading the surface: %v", err)
+		t.Fatalf("reading the layout: %v", err)
 	}
 
 	want := []string{"grpc", "udp"}
@@ -496,27 +496,27 @@ func TestTheSurfaceCarriesTheCellsList(t *testing.T) {
 	}
 }
 
-func TestASurfaceThatMalformsTheCellsListIsRefused(t *testing.T) {
+func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	tests := []struct {
-		name    string
-		surface map[string]interface{}
-		want    string
+		name   string
+		layout map[string]interface{}
+		want   string
 	}{
 		{
-			name:    "a list is required",
-			surface: map[string]interface{}{"cells": "grpc"},
-			want:    "it is a list of module directory names under src",
+			name:   "a list is required",
+			layout: map[string]interface{}{"cells": "grpc"},
+			want:   "it is a list of module directory names under src",
 		},
 		{
-			name:    "an entry is a name",
-			surface: map[string]interface{}{"cells": []interface{}{map[string]interface{}{"name": "grpc"}}},
-			want:    "it is a name",
+			name:   "an entry is a name",
+			layout: map[string]interface{}{"cells": []interface{}{map[string]interface{}{"name": "grpc"}}},
+			want:   "it is a name",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := hexrust.CellsFromSurface(tt.surface); err == nil || !strings.Contains(err.Error(), tt.want) {
+			if _, err := hexrust.CellsFromLayout(tt.layout); err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("want an error containing %q, got %v", tt.want, err)
 			}
 		})
@@ -655,12 +655,12 @@ func TestAnExtraHandModuleRustCannotSpellIsRefused(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceCarriesTheHandList(t *testing.T) {
-	got, err := hexrust.HandFromSurface(map[string]interface{}{
+func TestTheLayoutCarriesTheHandList(t *testing.T) {
+	got, err := hexrust.HandFromLayout(map[string]interface{}{
 		"hand": []interface{}{"echo_controller", "datagram"},
 	})
 	if err != nil {
-		t.Fatalf("reading the surface: %v", err)
+		t.Fatalf("reading the layout: %v", err)
 	}
 
 	want := []string{"echo_controller", "datagram"}
@@ -669,37 +669,37 @@ func TestTheSurfaceCarriesTheHandList(t *testing.T) {
 	}
 }
 
-func TestASurfaceThatMalformsTheHandListIsRefused(t *testing.T) {
+func TestALayoutThatMalformsTheHandListIsRefused(t *testing.T) {
 	tests := []struct {
-		name    string
-		surface map[string]interface{}
-		want    string
+		name   string
+		layout map[string]interface{}
+		want   string
 	}{
 		{
-			name:    "a list is required",
-			surface: map[string]interface{}{"hand": "datagram"},
-			want:    "it is a list of module names under src/hand",
+			name:   "a list is required",
+			layout: map[string]interface{}{"hand": "datagram"},
+			want:   "it is a list of module names under src/hand",
 		},
 		{
-			name:    "an entry is a name",
-			surface: map[string]interface{}{"hand": []interface{}{map[string]interface{}{"name": "datagram"}}},
-			want:    "it is a name",
+			name:   "an entry is a name",
+			layout: map[string]interface{}{"hand": []interface{}{map[string]interface{}{"name": "datagram"}}},
+			want:   "it is a name",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := hexrust.HandFromSurface(tt.surface); err == nil || !strings.Contains(err.Error(), tt.want) {
+			if _, err := hexrust.HandFromLayout(tt.layout); err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("want an error containing %q, got %v", tt.want, err)
 			}
 		})
 	}
 }
 
-func TestASurfaceWithNoHandListMountsOnlyTheControllersTheSpecDeclares(t *testing.T) {
-	got, err := hexrust.HandFromSurface(map[string]interface{}{})
+func TestALayoutWithNoHandListMountsOnlyTheControllersTheSpecDeclares(t *testing.T) {
+	got, err := hexrust.HandFromLayout(map[string]interface{}{})
 	if err != nil {
-		t.Fatalf("reading the surface: %v", err)
+		t.Fatalf("reading the layout: %v", err)
 	}
 
 	if len(got) != 0 {
@@ -707,10 +707,10 @@ func TestASurfaceWithNoHandListMountsOnlyTheControllersTheSpecDeclares(t *testin
 	}
 }
 
-func TestASurfaceWithNoCellsMountsNothingExtra(t *testing.T) {
-	got, err := hexrust.CellsFromSurface(map[string]interface{}{})
+func TestALayoutWithNoCellsMountsNothingExtra(t *testing.T) {
+	got, err := hexrust.CellsFromLayout(map[string]interface{}{})
 	if err != nil {
-		t.Fatalf("reading the surface: %v", err)
+		t.Fatalf("reading the layout: %v", err)
 	}
 
 	if len(got) != 0 {

@@ -32,10 +32,10 @@ components:
         packageName:
           type: string
           description: Unused here.
-        surface:
+        layout:
           type: object
           additionalProperties: true
-          description: The kind's surface. coreDir and appDir may be given here instead of at the top level.
+          description: The kind's layout. coreDir and appDir may be given here instead of at the top level.
         runtime:
           type: object
           additionalProperties: true

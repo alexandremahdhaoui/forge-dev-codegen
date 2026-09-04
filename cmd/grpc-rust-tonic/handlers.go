@@ -36,8 +36,8 @@ func NewHandlers() Handlers {
 
 			files, err := grpcrust.Generate([]byte(input.ProtoSpec), grpcrust.Options{
 				Service: input.Name,
-				Cell:    surfaceString(input.Surface, "cell"),
-				Side:    surfaceString(input.Surface, "side"),
+				Cell:    layoutString(input.Layout, "cell"),
+				Side:    layoutString(input.Layout, "side"),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -58,8 +58,8 @@ func NewHandlers() Handlers {
 	}
 }
 
-func surfaceString(surface map[string]interface{}, key string) string {
-	v, _ := surface[key].(string)
+func layoutString(layout map[string]interface{}, key string) string {
+	v, _ := layout[key].(string)
 
 	return v
 }

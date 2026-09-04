@@ -41,8 +41,8 @@ func NewHandlers() Handlers {
 
 			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
 				Service: input.Name,
-				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
-				Cell:    surfaceString(input.Surface, "cell"),
+				AppDir:  firstOf(input.AppDir, layoutString(input.Layout, "appDir")),
+				Cell:    layoutString(input.Layout, "cell"),
 				Proto:   []byte(input.ProtoSpec),
 			})
 			if err != nil {
@@ -64,9 +64,9 @@ func readVectors(input GenerateInput) ([]byte, error) {
 		return []byte(input.Vectors), nil
 	}
 
-	rel := surfaceString(input.Surface, "vectors")
+	rel := layoutString(input.Layout, "vectors")
 	if rel == "" {
-		return nil, fmt.Errorf("emitting the vectors of %q: the model carries no vectors document and surface.vectors names no file", input.Name)
+		return nil, fmt.Errorf("emitting the vectors of %q: the model carries no vectors document and layout.vectors names no file", input.Name)
 	}
 
 	doc, err := os.ReadFile(filepath.Join(input.SrcDir, rel))
@@ -87,8 +87,8 @@ func firstOf(values ...string) string {
 	return ""
 }
 
-func surfaceString(surface map[string]interface{}, key string) string {
-	v, _ := surface[key].(string)
+func layoutString(layout map[string]interface{}, key string) string {
+	v, _ := layout[key].(string)
 
 	return v
 }

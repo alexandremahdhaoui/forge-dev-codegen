@@ -7,7 +7,7 @@ dispatcher. Same behavior contract as every cli cell:
 kind: cli
 language: typescript
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/cli-typescript-commander
-surface:
+layout:
   commands:
     - name: greet
       description: Print the greeting.

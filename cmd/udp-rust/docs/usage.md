@@ -26,7 +26,7 @@ language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/udp-rust
 proto:
   specPath: ../../.forge/spec-cache/udp/hello.v1.proto
-surface:
+layout:
   side: core
   cell: udp
 ```
@@ -39,8 +39,8 @@ the gRPC one when both are named `hello.v1.proto`.
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
 service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
-is the proto3 document. `surface.side` picks the half of the skeleton
-this cell holds, `core` or `app`. `surface.cell` names the module
+is the proto3 document. `layout.side` picks the half of the skeleton
+this cell holds, `core` or `app`. `layout.cell` names the module
 directory and defaults to `udp`.
 
 Every emitted path is relative to the cell directory. The engine never
@@ -119,7 +119,7 @@ own prost derives. `app` needs the core crate, `prost`, `thiserror` and
 `tokio` with `net` and `time`.
 
 The consumer's own `lib.rs` mounts the cell with one plain line, which
-hexagonal-rust writes from `surface.cells`:
+hexagonal-rust writes from `layout.cells`:
 
 ```rust
 pub mod udp;

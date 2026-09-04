@@ -6,7 +6,7 @@ dispatcher. It is a drop-in swap for the builtin cell:
 ```yaml
 kind: cli
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/cli-go-cobra
-surface:
+layout:
   commands:
     - name: greet
       description: Print the greeting.

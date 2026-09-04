@@ -23,14 +23,14 @@ language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/grpc-rust-tonic
 proto:
   specPath: ../../.forge/spec-cache/hello.v1.proto
-surface:
+layout:
   side: core
 ```
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
 service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
-is the proto3 document. `surface.side` picks the half of the skeleton
-this cell holds, `core` or `app`. `surface.cell` names the module
+is the proto3 document. `layout.side` picks the half of the skeleton
+this cell holds, `core` or `app`. `layout.cell` names the module
 directory and defaults to `grpc`.
 
 Every emitted path is relative to the cell directory. The engine never
@@ -100,7 +100,7 @@ adapter alongside its axum driver.
 build-dependencies need `protox` and `tonic-prost-build`.
 
 The consumer's own `lib.rs` mounts the cell with one plain line, which
-hexagonal-rust writes from `surface.cells`:
+hexagonal-rust writes from `layout.cells`:
 
 ```rust
 pub mod grpc;

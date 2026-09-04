@@ -34,21 +34,21 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: hexagonal-rust generates rust only", input.Language)
 			}
 
-			cells, err := hexrust.CellsFromSurface(input.Surface)
+			cells, err := hexrust.CellsFromLayout(input.Layout)
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
-			hand, err := hexrust.HandFromSurface(input.Surface)
+			hand, err := hexrust.HandFromLayout(input.Layout)
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
 			files, err := hexrust.Generate([]byte(input.OpenapiSpec), hexrust.Options{
 				Service: input.Name,
-				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
-				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
-				Side:    firstOf(input.Side, surfaceString(input.Surface, "side")),
+				CoreDir: firstOf(input.CoreDir, layoutString(input.Layout, "coreDir")),
+				AppDir:  firstOf(input.AppDir, layoutString(input.Layout, "appDir")),
+				Side:    firstOf(input.Side, layoutString(input.Layout, "side")),
 				Cells:   cells,
 				Hand:    hand,
 			})
@@ -81,8 +81,8 @@ func firstOf(values ...string) string {
 	return ""
 }
 
-func surfaceString(surface map[string]interface{}, key string) string {
-	v, _ := surface[key].(string)
+func layoutString(layout map[string]interface{}, key string) string {
+	v, _ := layout[key].(string)
 
 	return v
 }

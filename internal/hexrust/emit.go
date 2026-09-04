@@ -88,16 +88,16 @@ func checkHand(hand []string) error {
 	return nil
 }
 
-func CellsFromSurface(surface map[string]interface{}) ([]string, error) {
-	return namesFromSurface(surface, "cells", "module directory names under src")
+func CellsFromLayout(layout map[string]interface{}) ([]string, error) {
+	return namesFromLayout(layout, "cells", "module directory names under src")
 }
 
-func HandFromSurface(surface map[string]interface{}) ([]string, error) {
-	return namesFromSurface(surface, "hand", "module names under src/hand")
+func HandFromLayout(layout map[string]interface{}) ([]string, error) {
+	return namesFromLayout(layout, "hand", "module names under src/hand")
 }
 
-func namesFromSurface(surface map[string]interface{}, key, what string) ([]string, error) {
-	raw, ok := surface[key]
+func namesFromLayout(layout map[string]interface{}, key, what string) ([]string, error) {
+	raw, ok := layout[key]
 	if !ok {
 		return nil, nil
 	}

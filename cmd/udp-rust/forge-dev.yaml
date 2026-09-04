@@ -7,7 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
-surface:
+layout:
   tools:
     - name: generate
       description: Answer the core and app cells of one UDP datagram service from the normalized forge-dev model.

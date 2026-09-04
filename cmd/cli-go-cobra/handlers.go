@@ -24,7 +24,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/surface"
 )
 
-// NewHandlers wires the generate tool: the model's surface.commands decide
+// NewHandlers wires the generate tool: the model's layout.commands decide
 // the subcommands, cobra does the dispatch, and the answer is files only -
 // forge-dev core writes them. The emitted program keeps the builtin cli
 // cell's author and behavior contract, so swapping the generator never
@@ -40,9 +40,9 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: cli-go-cobra generates go only", input.Language)
 			}
 
-			commands, err := surface.Commands(input.Surface)
+			commands, err := surface.Commands(input.Layout)
 			if err != nil {
-				return nil, fmt.Errorf("reading surface.commands for %q: %w", input.Name, err)
+				return nil, fmt.Errorf("reading layout.commands for %q: %w", input.Name, err)
 			}
 
 			pkg := input.PackageName

@@ -43,9 +43,9 @@ func NewHandlers() Handlers {
 				lang = concerns.LangGo
 			}
 
-			repo, binaries, err := deliverySurface(input.Surface)
+			repo, binaries, err := deliveryLayout(input.Layout)
 			if err != nil {
-				return nil, fmt.Errorf("reading the surface for %q: %w", input.Name, err)
+				return nil, fmt.Errorf("reading the layout for %q: %w", input.Name, err)
 			}
 
 			files, err := concerns.EmitDelivery(lang, repo, binaries)
@@ -63,17 +63,17 @@ func NewHandlers() Handlers {
 	}
 }
 
-// deliverySurface reads the repo name and the binaries to ship out of the
-// opaque surface.
-func deliverySurface(surface map[string]interface{}) (string, []concerns.Binary, error) {
-	repo, _ := surface["repo"].(string)
+// deliveryLayout reads the repo name and the binaries to ship out of the
+// opaque layout.
+func deliveryLayout(layout map[string]interface{}) (string, []concerns.Binary, error) {
+	repo, _ := layout["repo"].(string)
 	if repo == "" {
-		return "", nil, fmt.Errorf("surface.repo is required; the build steps name the module by it")
+		return "", nil, fmt.Errorf("layout.repo is required; the build steps name the module by it")
 	}
 
-	raw, ok := surface["binaries"].([]interface{})
+	raw, ok := layout["binaries"].([]interface{})
 	if !ok || len(raw) == 0 {
-		return "", nil, fmt.Errorf("at least one surface.binaries entry is required")
+		return "", nil, fmt.Errorf("at least one layout.binaries entry is required")
 	}
 
 	binaries := make([]concerns.Binary, 0, len(raw))

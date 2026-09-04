@@ -15,7 +15,7 @@ language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/vectors-rust
 openapi:
   specPath: ./.forge/spec-cache/hello.v1.yaml
-surface:
+layout:
   appDir: .
   vectors: ./.forge/spec-cache/cases.json
 ```
@@ -26,7 +26,7 @@ tests import. `openapiSpec` is the OpenAPI document, the same one
 `hexagonal-rust` reads to emit the driver and the controller trait this
 engine tests against. `vectors` is a JSON document holding one `cases` array.
 `appDir` is the app crate root relative to the engine directory and defaults
-to `app`. It may sit at the top level of the model or under `surface`.
+to `app`. It may sit at the top level of the model or under `layout`.
 
 ## The vectors document
 
@@ -76,7 +76,7 @@ openapi:
   specPath: ./.forge/spec-cache/hello.v1.yaml
 proto:
   specPath: ./.forge/spec-cache/udp/hello.v1.proto
-surface:
+layout:
   appDir: .
   cell: udp
   vectors: ./.forge/spec-cache/cases.json

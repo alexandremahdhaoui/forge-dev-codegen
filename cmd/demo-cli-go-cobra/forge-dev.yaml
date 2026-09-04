@@ -8,7 +8,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
-surface:
+layout:
   commands:
     - name: greet
       description: Print the greeting and the args.

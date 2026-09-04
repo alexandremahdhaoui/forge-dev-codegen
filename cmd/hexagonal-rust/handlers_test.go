@@ -111,10 +111,10 @@ func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceMountsEveryExtraHandModule(t *testing.T) {
+func TestTheLayoutMountsEveryExtraHandModule(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"hand": []interface{}{"echo_controller", "datagram"}},
+		Layout: map[string]interface{}{"hand": []interface{}{"echo_controller", "datagram"}},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -137,20 +137,20 @@ func TestTheSurfaceMountsEveryExtraHandModule(t *testing.T) {
 	t.Fatal("no hand mount was answered")
 }
 
-func TestASurfaceThatMalformsTheHandListIsRefused(t *testing.T) {
+func TestALayoutThatMalformsTheHandListIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"hand": "datagram"},
+		Layout: map[string]interface{}{"hand": "datagram"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "it is a list of module names under src/hand") {
 		t.Fatalf("want a refused hand list, got %v", err)
 	}
 }
 
-func TestTheSurfaceMountsEverySecondEnginesCell(t *testing.T) {
+func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"cells": []interface{}{"grpc"}},
+		Layout: map[string]interface{}{"cells": []interface{}{"grpc"}},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -168,20 +168,20 @@ func TestTheSurfaceMountsEverySecondEnginesCell(t *testing.T) {
 	}
 }
 
-func TestASurfaceThatMalformsTheCellsListIsRefused(t *testing.T) {
+func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"cells": "grpc"},
+		Layout: map[string]interface{}{"cells": "grpc"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "it is a list of module directory names under src") {
 		t.Fatalf("want an error refusing the cells shape, got %v", err)
 	}
 }
 
-func TestTheOutputRootsComeFromTheTopLevelOrTheSurface(t *testing.T) {
+func TestTheOutputRootsComeFromTheTopLevelOrTheLayout(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"coreDir": "../svc-core", "appDir": "../svc-app"},
+		Layout: map[string]interface{}{"coreDir": "../svc-core", "appDir": "../svc-app"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -189,13 +189,13 @@ func TestTheOutputRootsComeFromTheTopLevelOrTheSurface(t *testing.T) {
 
 	for _, f := range out.Files {
 		if !strings.HasPrefix(f.Path, "../svc-core/") && !strings.HasPrefix(f.Path, "../svc-app/") {
-			t.Errorf("%s ignores the surface roots", f.Path)
+			t.Errorf("%s ignores the layout roots", f.Path)
 		}
 	}
 
 	out, err = NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec, CoreDir: "c", AppDir: "a",
-		Surface: map[string]interface{}{"coreDir": "../svc-core"},
+		Layout: map[string]interface{}{"coreDir": "../svc-core"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)

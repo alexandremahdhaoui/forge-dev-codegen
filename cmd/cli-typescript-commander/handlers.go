@@ -23,7 +23,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/surface"
 )
 
-// NewHandlers wires the generate tool: the model's surface.commands decide
+// NewHandlers wires the generate tool: the model's layout.commands decide
 // the subcommands, commander does the dispatch. The emitted module keeps
 // the cli cell's behavior contract - raw args to the handler, exit codes
 // pass through, an unknown command exits 2 naming itself.
@@ -38,9 +38,9 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: cli-typescript-commander generates typescript only", input.Language)
 			}
 
-			commands, err := surface.Commands(input.Surface)
+			commands, err := surface.Commands(input.Layout)
 			if err != nil {
-				return nil, fmt.Errorf("reading surface.commands for %q: %w", input.Name, err)
+				return nil, fmt.Errorf("reading layout.commands for %q: %w", input.Name, err)
 			}
 
 			var buf bytes.Buffer

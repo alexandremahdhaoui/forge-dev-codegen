@@ -15,7 +15,7 @@ language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/hexagonal-rust
 openapi:
   specPath: ./.forge/spec-cache/hello.v1.yaml
-surface:
+layout:
   side: core
   coreDir: .
   cells: [grpc]
@@ -27,11 +27,11 @@ The `generate` tool takes the normalized forge-dev model. `name` is the
 service. `openapiSpec` is the document. `coreDir` and `appDir` are the
 crate roots relative to the engine directory and default to `core` and
 `app`. `side` is `core`, `app` or absent for both. The three may sit at
-the top level of the model or under `surface`.
+the top level of the model or under `layout`.
 
 ## Cells
 
-`surface.cells` lists the module directories under `src` that another
+`layout.cells` lists the module directories under `src` that another
 generator fills. `lib.rs` gains one plain `pub mod <cell>;` line per
 name. No `#[path]` attribute. The cell owns its directory and writes its
 own `mod.rs`.
@@ -41,11 +41,11 @@ skeleton already owns, and a name listed twice.
 
 ## Extra hand modules
 
-`surface.hand` lists module names under `src/hand` that the author writes
+`layout.hand` lists module names under `src/hand` that the author writes
 and the spec does not declare.
 
 ```yaml
-surface:
+layout:
   side: core
   coreDir: .
   hand: [echo_controller, datagram]

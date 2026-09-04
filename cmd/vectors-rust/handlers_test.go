@@ -87,10 +87,10 @@ func TestTheEngineFillsTheVectorsCellOnly(t *testing.T) {
 	}
 }
 
-func TestTheAppDirComesFromTheTopLevelOrTheSurface(t *testing.T) {
+func TestTheAppDirComesFromTheTopLevelOrTheLayout(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,
-		Surface: map[string]interface{}{"appDir": "../svc-app"},
+		Layout: map[string]interface{}{"appDir": "../svc-app"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -102,7 +102,7 @@ func TestTheAppDirComesFromTheTopLevelOrTheSurface(t *testing.T) {
 
 	out, err = NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors, AppDir: "a",
-		Surface: map[string]interface{}{"appDir": "../svc-app"},
+		Layout: map[string]interface{}{"appDir": "../svc-app"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
