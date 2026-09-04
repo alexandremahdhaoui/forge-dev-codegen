@@ -113,6 +113,24 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-testenv-sqlite
+    src: ./cmd/testenv-sqlite
+    engine: forge://forge-dev
+
+  - name: testenv-sqlite
+    src: ./cmd/testenv-sqlite
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-testenv-stack
+    src: ./cmd/testenv-stack
+    engine: forge://forge-dev
+
+  - name: testenv-stack
+    src: ./cmd/testenv-stack
+    dest: ./build/bin
+    engine: forge://go-build
+
   # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.

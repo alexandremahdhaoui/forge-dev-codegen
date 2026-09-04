@@ -54,6 +54,8 @@ in any of the four languages, from one shared renderer
 | telemetry-gen | `kind: telemetry` | the metrics and tracing module |
 | resilience-gen | `kind: resilience` | the resilience module |
 | delivery-gen | `kind: delivery` | one Containerfile per surface binary |
+| testenv-sqlite | testenv subengine | one sqlite file per x-store schema, seeded from vectors, exports SONGE_STORE_<UPPER>_PATH |
+| testenv-stack | testenv subengine | starts service binaries on free ports, waits for LISTENING, exports one address env per service |
 
 A module directory in a consuming repo is the engine cell: it holds a
 forge-dev.yaml naming the concern engine and receives the emitted files
