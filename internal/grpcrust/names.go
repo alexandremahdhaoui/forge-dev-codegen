@@ -77,7 +77,11 @@ var rustKeywords = map[string]bool{
 	"unsafe": true, "use": true, "where": true, "while": true, "async": true, "await": true, "dyn": true,
 }
 
-func rustIdent(name string) string {
+func IsRustKeyword(name string) bool {
+	return rustKeywords[name]
+}
+
+func RustIdent(name string) string {
 	ident := Snake(name)
 	if rustKeywords[ident] {
 		return "r#" + ident

@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: udp-rust Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+          description: Unused. The engine has no configuration; the model it receives carries everything.
+    GenerateInput:
+      type: object
+      description: The normalized model forge-dev hands every generator.
+      properties:
+        name:
+          type: string
+          description: The service name. The crates are <name>-core and <name>-app.
+        version:
+          type: string
+          description: The service version.
+        description:
+          type: string
+          description: The service description.
+        kind:
+          type: string
+          description: What the program is. This engine fills the udp kind only.
+        language:
+          type: string
+          description: The cell's language. This engine emits rust only.
+        packageName:
+          type: string
+          description: Unused here.
+        surface:
+          type: object
+          additionalProperties: true
+          description: The kind's surface. side picks core or app. cell names the module directory and defaults to udp.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
+        protoSpec:
+          type: string
+          description: The raw proto3 document. Its messages and its service block decide everything emitted. One rpc is one datagram kind.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed.
+        srcDir:
+          type: string
+          description: The cell directory. Every emitted path is relative to it.
+        coreDir:
+          type: string
+          description: Unused. A cell lives in the crate that mounts it.
+        appDir:
+          type: string
+          description: Unused. A cell lives in the crate that mounts it.
+      required:
+        - name
+        - kind
+        - protoSpec
+    GeneratedFile:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The file path, relative to the engine source directory.
+        content:
+          type: string
+          description: The file content.
+      required:
+        - path
+        - content
+    GenerateOutput:
+      type: object
+      properties:
+        files:
+          type: array
+          description: The emitted files. forge-dev core writes them.
+          items:
+            $ref: "#/components/schemas/GeneratedFile"
+      required:
+        - files

@@ -1,0 +1,15 @@
+name: udp-rust
+kind: mcp-server
+version: 0.1.0
+description: Emits the rust skeleton of one UDP datagram service from its proto file - prost message types, a codec that frames the udplb layout, a controller trait, a listening driver and a client adapter.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer the core and app cells of one UDP datagram service from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

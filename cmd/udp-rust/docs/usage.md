@@ -1,0 +1,112 @@
+# udp-rust
+
+A forge-dev generator that turns one proto3 file into the rust skeleton
+of every UDP datagram service it declares. It fills one cell, a module
+directory under `src`. The cell of the core crate holds the prost
+message types, the codec, the client port trait and the controller. The
+cell of the app crate holds the listening driver and the client adapter.
+
+The proto service block is the handler mapping, the same shape gRPC
+uses. One rpc is one datagram kind. An rpc whose reply type is named
+`Nothing` gets no reply on the wire.
+
+The parser is the one grpc-rust-tonic uses. It reads `package`,
+`message` with scalar and message fields, and `service` with unary
+rpcs. It refuses imports, options, enums, extend, streaming, nested
+messages, oneofs, maps, repeated fields and qualified type references,
+with a clear error naming what broke.
+
+This file sits inside the cell, at `src/udp/forge-dev.yaml`. The build
+step that runs it points `src` at the cell.
+
+```yaml
+name: songe-hello
+kind: udp
+language: rust
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/udp-rust
+proto:
+  specPath: ../../.forge/spec-cache/hello.v1.proto
+surface:
+  side: core
+  cell: udp
+```
+
+The `generate` tool takes the normalized forge-dev model. `name` is the
+service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
+is the proto3 document. `surface.side` picks the half of the skeleton
+this cell holds, `core` or `app`. `surface.cell` names the module
+directory and defaults to `udp`.
+
+Every emitted path is relative to the cell directory. The engine never
+writes above it.
+
+## What the proto decides
+
+For every `service` in the file:
+
+| Emitted, under the cell | Holds |
+|---|---|
+| `types/zz_generated_<service>_messages.rs` | one prost message per message reachable from the service's rpcs, plus the envelope |
+| `types/zz_generated_context.rs` | `Context`, the session id and the peer address a handler receives |
+| `controller/zz_generated_<service>_codec.rs` | the frame, the tag and the prost encode and decode of every rpc |
+| `controller/zz_generated_<service>_controller.rs` | trait `<Service>Controller` and the impl that calls the hand body |
+| `port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one async method per rpc, and its error enum |
+| `hand/<service>_controller.rs` | the body, written once and never again |
+| `driver/zz_generated_<service>_udp_driver.rs` | `<Service>UdpDriver`, a socket loop forwarding each datagram to `Arc<dyn <Service>Controller>` |
+| `adapter/zz_generated_<service>_udp_client.rs` | `<Service>UdpClient`, one datagram out and one reply in, behind the port trait |
+
+Each layer directory carries a `mod.rs` that mounts its generated file
+and aliases it under the logical name. The cell's own `mod.rs` lists
+the layers.
+
+## The wire layout
+
+A datagram is the udplb frame.
+
+| Bytes | Field |
+|---|---|
+| 0-3 | magic `0x55554944` big endian |
+| 4-19 | session id, 16 bytes |
+| 20 | tag, the rpc this datagram carries |
+| 21-N | payload, one prost message |
+
+A datagram carries at most 508 bytes, the magic counted. A reply
+repeats the session id and the tag of the request it answers.
+
+The tag is one function pair, `encode_tag` and `decode_tag`. It is the
+only place that decides how a datagram says which rpc it carries, so
+another encoding drops in there and nowhere else. Today it is the one
+byte index of the rpc in declaration order.
+
+The emitted `<Service>Envelope` is a prost message with one oneof
+variant per rpc request, in declaration order. It is a type the cell
+offers. It is not the wire format.
+
+The codec refuses a datagram with no magic, one shorter than a header,
+one over 508 bytes, and one whose tag names no rpc.
+
+## The driver
+
+`serve` binds nothing. It takes a bound `tokio::net::UdpSocket` and an
+`Arc<dyn <Service>Controller>`. `announce` prints `LISTENING_UDP <port>`
+when a caller asks for it.
+
+A datagram whose session id is 16 zero bytes is the udplb health probe.
+The driver answers it verbatim before it decodes anything.
+
+A recv error pauses 50 milliseconds. A hundred in a row ends `serve`
+with the address and the count.
+
+## What the crates need
+
+`core` needs `prost` and `thiserror`, plus `mockall` under dev. It needs
+no build script and no `protoc`, because the message types carry their
+own prost derives. `app` needs the core crate, `prost`, `thiserror` and
+`tokio` with `net` and `time`.
+
+The consumer's own `lib.rs` mounts the cell with one plain line, which
+hexagonal-rust writes from `surface.cells`:
+
+```rust
+pub mod udp;
+```

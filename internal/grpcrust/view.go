@@ -63,7 +63,7 @@ type serviceView struct {
 	AllTypes        []string
 }
 
-func scalarRustType(kind string) string {
+func ScalarRustType(kind string) string {
 	switch kind {
 	case "double":
 		return "f64"
@@ -92,13 +92,13 @@ func buildMessageView(m Message) messageView {
 	mv := messageView{Name: Pascal(m.Name)}
 
 	for _, f := range m.Fields {
-		ident := rustIdent(f.Name)
+		ident := RustIdent(f.Name)
 
 		var core, pb string
 
 		switch f.Kind {
 		case FieldScalar:
-			t := scalarRustType(f.Scalar)
+			t := ScalarRustType(f.Scalar)
 			core, pb = t, t
 		case FieldMessage:
 			t := "Option<" + Pascal(f.Message) + ">"
@@ -126,7 +126,7 @@ func buildMessageView(m Message) messageView {
 	return mv
 }
 
-func closure(spec *Spec, roots []string) ([]Message, error) {
+func Closure(spec *Spec, roots []string) ([]Message, error) {
 	byName := map[string]Message{}
 	for _, m := range spec.Messages {
 		byName[m.Name] = m
@@ -183,7 +183,7 @@ func buildServiceView(spec *Spec, svc Service, opts Options) (serviceView, error
 
 	sort.Strings(roots)
 
-	messages, err := closure(spec, roots)
+	messages, err := Closure(spec, roots)
 	if err != nil {
 		return serviceView{}, fmt.Errorf("building service %q: %w", svc.Name, err)
 	}

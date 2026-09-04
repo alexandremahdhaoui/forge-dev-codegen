@@ -84,6 +84,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-udp-rust
+    src: ./cmd/udp-rust
+    engine: forge://forge-dev
+
+  - name: udp-rust
+    src: ./cmd/udp-rust
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-vectors-rust
     src: ./cmd/vectors-rust
     engine: forge://forge-dev
