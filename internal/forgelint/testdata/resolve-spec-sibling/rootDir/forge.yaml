@@ -1,0 +1,22 @@
+name: songe-hello-core
+
+artifactStorePath: .forge/artifact-store.yaml
+
+build:
+  - name: resolve-spec
+    src: .
+    engine: forge://generic-builder
+    spec:
+      command: sh
+      args:
+        - -c
+        - >-
+          sh ../songe-hello-spec/hack/resolve-spec.sh
+          github.com/alexandremahdhaoui/songe-hello-spec api/hello.v1.yaml .forge/spec-cache
+
+test:
+  - name: unit
+    runner: forge://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "songe-hello-core"]

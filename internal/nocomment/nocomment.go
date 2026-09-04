@@ -297,7 +297,7 @@ func extractComments(lang string, content string) []rawComment {
 			continue
 		}
 
-		if lang != "python" && (c == '"' || c == '\'' || (lang == "typescript" && c == '`')) {
+		if lang != "python" && (c == '"' || c == '\'' || ((lang == "typescript" || lang == "go") && c == '`')) {
 			inString = true
 			triple = false
 			quote = c

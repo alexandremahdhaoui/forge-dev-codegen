@@ -127,18 +127,27 @@ func checkHackScripts(rootDir string, entries []entry, section string) []Finding
 			if !ok {
 				continue
 			}
-			if !strings.Contains(arg, "hack/") {
-				continue
-			}
-			idx := strings.Index(arg, "hack/")
-			scriptPath := arg[idx:]
-			fullPath := filepath.Join(rootDir, scriptPath)
-			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-				findings = append(findings, Finding{
-					Rule:    "forge-lint-missing-hack-script",
-					Path:    fmt.Sprintf("%s[%s]", section, e.Name),
-					Message: fmt.Sprintf("references %q which does not exist", scriptPath),
-				})
+			for _, token := range strings.Fields(arg) {
+				if !strings.Contains(token, "hack/") {
+					continue
+				}
+
+				var scriptPath string
+				if strings.HasPrefix(token, "../") {
+					scriptPath = token
+				} else {
+					idx := strings.Index(token, "hack/")
+					scriptPath = token[idx:]
+				}
+
+				fullPath := filepath.Join(rootDir, scriptPath)
+				if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+					findings = append(findings, Finding{
+						Rule:    "forge-lint-missing-hack-script",
+						Path:    fmt.Sprintf("%s[%s]", section, e.Name),
+						Message: fmt.Sprintf("references %q which does not exist", scriptPath),
+					})
+				}
 			}
 		}
 	}

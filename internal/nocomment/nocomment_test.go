@@ -99,6 +99,22 @@ func TestScanIgnoresACommentMarkerInsideAStringLiteral(t *testing.T) {
 	}
 }
 
+func TestScanIgnoresCommentMarkersInsideAGoBacktickRawString(t *testing.T) {
+	findings, err := nocomment.Scan(nocomment.Options{
+		RootDir:   "testdata/go",
+		Languages: []string{"go"},
+	})
+	if err != nil {
+		t.Fatalf("scanning: %v", err)
+	}
+
+	for _, f := range findings {
+		if f.File == "backtick_string.go" {
+			t.Fatalf("expected the comment markers inside the backtick string to not be a finding, got %+v", f)
+		}
+	}
+}
+
 func TestScanFindsALineCommentInARustFile(t *testing.T) {
 	findings, err := nocomment.Scan(nocomment.Options{
 		RootDir:   "testdata/rust",

@@ -85,6 +85,16 @@ func TestCheckFlagsAnEngineURIWithoutForgeOrAliasScheme(t *testing.T) {
 	}
 }
 
+func TestCheckResolvesASingleHackTokenInsideAShDashCArgumentAgainstASiblingRepo(t *testing.T) {
+	findings, err := forgelint.Check(forgelint.Options{RootDir: "testdata/resolve-spec-sibling/rootDir"})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if hasRule(findings, "forge-lint-missing-hack-script") {
+		t.Fatalf("expected the sibling hack/resolve-spec.sh to resolve and pass, got %+v", findings)
+	}
+}
+
 func TestCheckReturnsAnErrorWhenForgeYAMLIsMissing(t *testing.T) {
 	_, err := forgelint.Check(forgelint.Options{RootDir: "testdata/does-not-exist"})
 	if err == nil {
