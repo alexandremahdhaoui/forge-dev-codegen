@@ -19,6 +19,11 @@ components:
           description: Names of the x-store schemas to create a database for. Each becomes <TmpDir>/<snake>.db.
           items:
             type: string
+        pathEnv:
+          type: object
+          description: The environment variable each store's file path is exported as, keyed by store name. A store this never names keeps the SONGE_STORE_<UPPER>_PATH default. The consumer owns the name because the binary that opens the file owns its config keys.
+          additionalProperties:
+            type: string
         seed:
           type: string
           description: Path to a vectors file. Every case whose operation starts with create and carries a controllerReply is inserted into the store the reply belongs to.

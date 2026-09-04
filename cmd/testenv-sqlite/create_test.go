@@ -111,6 +111,66 @@ func TestCreateWritesOneSeededDatabasePerStoreAndExportsItsPath(t *testing.T) {
 	}
 }
 
+func TestAStoreThatNamesItsPathEnvIsExportedUnderThatNameInsteadOfTheDefault(t *testing.T) {
+	writer, err := testenvsqlite.DetectWriter()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	root := writeProject(t)
+	tmpDir := t.TempDir()
+
+	input := engineframework.CreateInput{TestID: "t1", Stage: "integration", TmpDir: tmpDir, RootDir: root}
+	spec := &Spec{
+		SpecPath: "hello.yaml",
+		Stores:   []string{"Greeting"},
+		Seed:     "cases.json",
+		PathEnv:  map[string]string{"Greeting": "SONGE_HELLO_NODE_GREETING_STORE_SQLITE_PATH"},
+	}
+
+	artifact, err := createWith(context.Background(), input, spec, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(tmpDir, "greeting.db")
+
+	if artifact.Env["SONGE_HELLO_NODE_GREETING_STORE_SQLITE_PATH"] != path {
+		t.Errorf("env: %v", artifact.Env)
+	}
+
+	if _, taken := artifact.Env["SONGE_STORE_GREETING_PATH"]; taken {
+		t.Errorf("the default name is still exported alongside the named one: %v", artifact.Env)
+	}
+}
+
+func TestAStoreThatNamesNoPathEnvKeepsTheDefaultName(t *testing.T) {
+	writer, err := testenvsqlite.DetectWriter()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	root := writeProject(t)
+	tmpDir := t.TempDir()
+
+	input := engineframework.CreateInput{TestID: "t1", Stage: "integration", TmpDir: tmpDir, RootDir: root}
+	spec := &Spec{
+		SpecPath: "hello.yaml",
+		Stores:   []string{"Greeting"},
+		Seed:     "cases.json",
+		PathEnv:  map[string]string{"Other": "SOMETHING_ELSE"},
+	}
+
+	artifact, err := createWith(context.Background(), input, spec, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if artifact.Env["SONGE_STORE_GREETING_PATH"] != filepath.Join(tmpDir, "greeting.db") {
+		t.Errorf("env: %v", artifact.Env)
+	}
+}
+
 func TestCreateWithKeepLeavesTheDatabaseOutOfTheManagedResources(t *testing.T) {
 	writer, err := testenvsqlite.DetectWriter()
 	if err != nil {

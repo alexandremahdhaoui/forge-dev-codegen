@@ -12,6 +12,12 @@ Creates one sqlite file per x-store schema of an OpenAPI document, with the sche
 - **Required:** No
 - **Description:** Keep the database files after the test. They leave managedResources so the orchestrator never deletes them.
 
+### `pathEnv`
+
+- **Type:** `map[string]string`
+- **Required:** No
+- **Description:** The environment variable each store's file path is exported as, keyed by store name. A store this never names keeps the SONGE_STORE_<UPPER>_PATH default. The consumer owns the name because the binary that opens the file owns its config keys.
+
 ### `seed`
 
 - **Type:** `string`

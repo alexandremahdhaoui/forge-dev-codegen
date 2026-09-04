@@ -72,7 +72,7 @@ func createWith(ctx context.Context, input engineframework.CreateInput, spec *Sp
 		}
 
 		artifact.Files["sqlite."+database.Store.Snake] = fileName
-		artifact.Env["SONGE_STORE_"+database.Store.Upper+"_PATH"] = path
+		artifact.Env[pathEnv(spec, database.Store.Name, database.Store.Upper)] = path
 		artifact.Metadata["testenv-sqlite."+database.Store.Snake+".rows"] = strconv.Itoa(len(database.Rows))
 
 		if !spec.Keep {
@@ -81,6 +81,17 @@ func createWith(ctx context.Context, input engineframework.CreateInput, spec *Sp
 	}
 
 	return artifact, nil
+}
+
+// pathEnv answers the name a store's path is exported as. The consumer names
+// it, because the binary that opens the file is the one whose config key has
+// to match. The default keeps every stack that predates the field working.
+func pathEnv(spec *Spec, store, upper string) string {
+	if name, named := spec.PathEnv[store]; named && name != "" {
+		return name
+	}
+
+	return "SONGE_STORE_" + upper + "_PATH"
 }
 
 func Delete(_ context.Context, _ engineframework.DeleteInput, _ *Spec) error {
