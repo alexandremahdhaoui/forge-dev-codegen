@@ -137,6 +137,10 @@ func mergePorts(merged *Merged, m Manifest) error {
 				)
 			}
 
+			if existing.Cell == m.Cell {
+				return fmt.Errorf("port trait %q is %s", port.Trait, providedBy(existing.Cell, m.Cell))
+			}
+
 			continue
 		}
 

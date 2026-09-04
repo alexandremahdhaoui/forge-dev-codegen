@@ -211,6 +211,29 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 				"      module: grpc::adapter::hello_grpc_client\n      implements: hello-client\n",
 		},
 		{
+			name: "a driver type that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  drivers:\n    - name: grpc\n      type: hello-grpc-driver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n",
+		},
+		{
+			name: "an adapter type that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: hello-grpc-client\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n",
+		},
+		{
+			name: "a controller impl that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  controllers:\n    - trait: HelloController\n" +
+				"      impl: hello-controller-impl\n      module: grpc::controller::hello_controller\n",
+		},
+		{
+			name: "a port trait that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  ports:\n    - trait: greeting-store\n      module: rest::port::greeting_store\n",
+		},
+		{
 			name: "a controller trait that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  controllers:\n    - trait: hello-controller\n" +
@@ -385,6 +408,27 @@ func TestParseAndTheSchemaBothRefuseAnExplicitNull(t *testing.T) {
 			message: `key "provides.adapters[0].config" is null, write an empty map`,
 		},
 		{
+			name: "a driver config field required key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n" +
+				"      config:\n        addr:\n          type: string\n          required:\n",
+			message: `key "provides.drivers[0].config.addr.required" is null, write a value`,
+		},
+		{
+			name: "an adapter config field description key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n" +
+				"      config:\n        addr:\n          type: string\n          description:\n",
+			message: `key "provides.adapters[0].config.addr.description" is null, write a value`,
+		},
+		{
+			name:         "a cell key with no value is refused",
+			manifestYAML: "version: \"1\"\ncell:\ngenerator: grpc-rust-tonic\n",
+			message:      `key "cell" is null, write a value`,
+		},
+		{
 			name: "a controller ports key with no value is refused",
 			manifestYAML: nullCaseHeader +
 				"provides:\n  controllers:\n    - trait: HelloController\n" +
@@ -412,6 +456,23 @@ func TestParseAndTheSchemaBothRefuseAnExplicitNull(t *testing.T) {
 				t.Fatalf("validating %q against the schema returned no error", tc.manifestYAML)
 			}
 		})
+	}
+}
+
+func TestParseAndTheSchemaBothAcceptAConfigFieldDefaultWithNoValue(t *testing.T) {
+	t.Parallel()
+
+	manifestYAML := nullCaseHeader +
+		"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+		"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n" +
+		"      config:\n        addr:\n          type: string\n          default:\n"
+
+	if _, err := cellmanifest.Parse([]byte(manifestYAML)); err != nil {
+		t.Fatalf("parsing a config field with a null default returned %v", err)
+	}
+
+	if err := resolvedSchema(t).Validate(instanceOf(t, manifestYAML)); err != nil {
+		t.Fatalf("validating a config field with a null default returned %v", err)
 	}
 }
 

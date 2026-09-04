@@ -235,11 +235,23 @@ func TestMergeSaysTwiceWhenOneCellProvidesOneThingTwice(t *testing.T) {
 		}}),
 	}
 
+	twoIdenticalPorts := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{Ports: []cellmanifest.Port{
+			port("GreetingStore", "rest::port::greeting_store"),
+			port("GreetingStore", "rest::port::greeting_store"),
+		}}),
+	}
+
 	cases := []struct {
 		name      string
 		manifests []cellmanifest.Manifest
 		message   string
 	}{
+		{
+			name:      "one cell providing one port trait twice from one module names the cell once",
+			manifests: twoIdenticalPorts,
+			message:   `port trait "GreetingStore" is provided twice by cell "rest"`,
+		},
 		{
 			name:      "one cell providing one driver name twice names the cell once",
 			manifests: twoDrivers,

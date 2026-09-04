@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -127,135 +126,83 @@ func Parse(data []byte) (Manifest, error) {
 }
 
 func refuseNullKeys(data []byte) error {
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	var document map[string]any
+	if err := yaml.Unmarshal(data, &document); err != nil {
 		return nil
 	}
 
-	if err := nullObject(doc, "provides", refuseNullProvides); err != nil {
-		return err
-	}
-
-	return nullObject(doc, "requires", refuseNullRequires)
+	return refuseNullValue(document, "", "")
 }
 
-func nullListError(path string) error {
-	return fmt.Errorf("key %q is null, write an empty list", path)
-}
-
-func nullMapError(path string) error {
-	return fmt.Errorf("key %q is null, write an empty map", path)
-}
-
-func nullObject(parent map[string]any, path string, inner func(map[string]any, string) error) error {
-	value, present := parent[lastSegment(path)]
-	if !present {
-		return nil
-	}
-
+func refuseNullValue(value any, key, path string) error {
 	if value == nil {
-		return nullMapError(path)
+		return nullError(key, path)
 	}
 
-	child, isObject := value.(map[string]any)
-	if !isObject {
-		return nil
-	}
-
-	return inner(child, path)
-}
-
-func nullList(parent map[string]any, path string) ([]any, error) {
-	value, present := parent[lastSegment(path)]
-	if !present {
-		return nil, nil
-	}
-
-	if value == nil {
-		return nil, nullListError(path)
-	}
-
-	items, isList := value.([]any)
-	if !isList {
-		return nil, nil
-	}
-
-	return items, nil
-}
-
-func lastSegment(path string) string {
-	if cut := strings.LastIndex(path, "."); cut >= 0 {
-		return path[cut+1:]
-	}
-
-	return path
-}
-
-func refuseNullRequires(requires map[string]any, path string) error {
-	_, err := nullList(requires, path+".ports")
-
-	return err
-}
-
-func refuseNullProvides(provides map[string]any, path string) error {
-	for _, key := range []string{"drivers", "adapters", "controllers", "ports"} {
-		listPath := path + "." + key
-
-		items, err := nullList(provides, listPath)
-		if err != nil {
-			return err
-		}
-
-		for index, item := range items {
-			entry, isObject := item.(map[string]any)
-			if !isObject {
-				continue
-			}
-
-			if err := refuseNullProvided(entry, fmt.Sprintf("%s[%d]", listPath, index), key); err != nil {
-				return err
-			}
-		}
+	switch typed := value.(type) {
+	case map[string]any:
+		return refuseNullFields(typed, key, path)
+	case []any:
+		return refuseNullItems(typed, key, path)
 	}
 
 	return nil
 }
 
-func refuseNullProvided(entry map[string]any, path, key string) error {
-	if key == "drivers" {
-		if _, err := nullList(entry, path+".requires"); err != nil {
-			return err
-		}
-	}
-
-	if key == "controllers" {
-		if _, err := nullList(entry, path+".ports"); err != nil {
-			return err
-		}
-	}
-
-	if key != "drivers" && key != "adapters" {
-		return nil
-	}
-
-	return nullObject(entry, path+".config", refuseNullConfigFields)
-}
-
-func refuseNullConfigFields(config map[string]any, path string) error {
-	names := make([]string, 0, len(config))
-	for name := range config {
+func refuseNullFields(fields map[string]any, key, path string) error {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
 		names = append(names, name)
 	}
 
 	sort.Strings(names)
 
 	for _, name := range names {
-		if config[name] == nil {
-			return nullMapError(path + "." + name)
+		if err := refuseNullValue(fields[name], fieldKey(key, name), join(path, name)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func refuseNullItems(items []any, key, path string) error {
+	for index, item := range items {
+		if err := refuseNullValue(item, key+itemSuffix, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func fieldKey(key, name string) string {
+	named := join(key, name)
+	if _, known := schemaKeys[named]; known {
+		return named
+	}
+
+	return join(key, anyNameSegment)
+}
+
+func nullError(key, path string) error {
+	node, known := schemaKeys[key]
+	if !known || !node.refusesNull {
+		return nil
+	}
+
+	return fmt.Errorf("key %q is null, %s", path, nullAdvice(node.kind))
+}
+
+func nullAdvice(kind string) string {
+	switch kind {
+	case kindList:
+		return "write an empty list"
+	case kindMap:
+		return "write an empty map"
+	}
+
+	return "write a value"
 }
 
 func Read(path string) (Manifest, error) {
