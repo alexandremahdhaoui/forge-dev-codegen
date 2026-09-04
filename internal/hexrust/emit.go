@@ -87,19 +87,27 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	steps := []func() error{
 		func() error { return add("core", path.Join(core, "lib.rs"), "core_lib", v, false) },
 		func() error { return add("core", path.Join(core, "zz_generated_hand.rs"), "core_hand", v, false) },
-		func() error { return add("core", path.Join(core, "types", "zz_generated_mod.rs"), "types_mod", v, false) },
+		func() error {
+			return add("core", path.Join(core, "types", "zz_generated_mod.rs"), "types_mod", v, false)
+		},
 		func() error { return add("core", path.Join(core, "port", "zz_generated_mod.rs"), "port_mod", v, false) },
 		func() error {
 			return add("core", path.Join(core, "controller", "zz_generated_mod.rs"), "controller_mod", v, false)
 		},
 		func() error { return add("app", path.Join(app, "lib.rs"), "app_lib", v, false) },
-		func() error { return add("app", path.Join(app, "adapter", "zz_generated_mod.rs"), "adapter_mod", v, false) },
-		func() error { return add("app", path.Join(app, "driver", "zz_generated_mod.rs"), "driver_mod", v, false) },
+		func() error {
+			return add("app", path.Join(app, "adapter", "zz_generated_mod.rs"), "adapter_mod", v, false)
+		},
+		func() error {
+			return add("app", path.Join(app, "driver", "zz_generated_mod.rs"), "driver_mod", v, false)
+		},
 		func() error { return add("app", path.Join(app, "driver", "zz_generated_wire.rs"), "wire", v, false) },
 		func() error {
 			return add("app", path.Join(app, "driver", "zz_generated_http_driver.rs"), "http_driver", v, false)
 		},
-		func() error { return add("app", path.Join(app, "bin", v.Service+"-server.rs"), "server_main", v, false) },
+		func() error {
+			return add("app", path.Join(app, "bin", v.Service+"-server.rs"), "server_main", v, false)
+		},
 	}
 
 	for _, t := range v.Types {
