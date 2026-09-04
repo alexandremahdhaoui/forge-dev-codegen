@@ -56,7 +56,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		return nil, err
 	}
 
-	vectors, err := parseVectors(vectorsDoc)
+	vectors, err := parseVectors(vectorsDoc, declaredOperations(spec))
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +77,18 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 			Content: content,
 		},
 	}, nil
+}
+
+func declaredOperations(spec *hexrust.Spec) func(string) bool {
+	declared := map[string]bool{}
+
+	for _, c := range spec.Controllers {
+		for _, op := range c.Operations {
+			declared[op.ID] = true
+		}
+	}
+
+	return func(id string) bool { return declared[id] }
 }
 
 func render(name string, data any) (string, error) {

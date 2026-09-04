@@ -17,6 +17,7 @@ package vectorsrust
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 )
 
@@ -36,7 +37,7 @@ type VectorCase struct {
 
 var rustTestIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-func parseVectors(doc []byte) (*VectorsFile, error) {
+func parseVectors(doc []byte, declaresOperation func(string) bool) (*VectorsFile, error) {
 	var v VectorsFile
 	if err := json.Unmarshal(doc, &v); err != nil {
 		return nil, fmt.Errorf("parsing the vectors document: %w", err)
@@ -47,6 +48,7 @@ func parseVectors(doc []byte) (*VectorsFile, error) {
 	}
 
 	seen := map[string]bool{}
+	kept := make([]VectorCase, 0, len(v.Cases))
 
 	for i, c := range v.Cases {
 		if c.Case == "" {
@@ -67,6 +69,12 @@ func parseVectors(doc []byte) (*VectorsFile, error) {
 			return nil, fmt.Errorf("reading vector %q: operation is required, it names the operationId the vector exercises", c.Case)
 		}
 
+		if !declaresOperation(c.Operation) {
+			log.Printf("vectors-rust: skipping vector %q: operation %q is not an OpenAPI operation, it belongs to another transport", c.Case, c.Operation)
+
+			continue
+		}
+
 		if c.ExpectedStatus == 0 {
 			return nil, fmt.Errorf("reading vector %q: expectedStatus is required", c.Case)
 		}
@@ -74,7 +82,11 @@ func parseVectors(doc []byte) (*VectorsFile, error) {
 		if len(c.ControllerReply) == 0 && c.ExpectedErrorSubstring == "" {
 			return nil, fmt.Errorf("reading vector %q: an error case needs expectedErrorSubstring, and a success case needs controllerReply", c.Case)
 		}
+
+		kept = append(kept, c)
 	}
+
+	v.Cases = kept
 
 	return &v, nil
 }

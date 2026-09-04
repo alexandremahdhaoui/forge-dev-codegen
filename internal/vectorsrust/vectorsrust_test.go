@@ -300,12 +300,25 @@ func TestAnErrorCaseChoosesTheControllerErrorVariantThatMatchesTheDeclaredStatus
 	}
 }
 
-func TestAVectorNamingAnOperationTheSpecDoesNotDeclareIsRefused(t *testing.T) {
-	badCases := `{"cases": [{"case": "bogus", "operation": "deleteGreeting", "controllerReply": {"id": "g1"}, "expectedStatus": 200}]}`
+func TestAVectorWhoseOperationBelongsToAnotherTransportIsSkippedAndTheRestStillEmit(t *testing.T) {
+	mixedCases := `{"cases": [
+		{"case": "get_existing_id", "operation": "getGreeting", "input": {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, "controllerReply": {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "name": "Songe", "count": 0}, "expectedStatus": 200},
+		{"case": "udp_echo_returns_the_payload", "operation": "udp_echo", "input": {"payload": "songe"}, "expectedStatus": 200, "expectedBody": {"payload": "songe"}}
+	]}`
 
-	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), `names operation "deleteGreeting", which the spec does not declare`) {
-		t.Fatalf("want a refusal naming the undeclared operation, got %v", err)
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(mixedCases), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	if !strings.Contains(content, "async fn get_existing_id()") {
+		t.Fatalf("the OpenAPI vector lost its test\n%s", content)
+	}
+
+	if strings.Contains(content, "udp_echo_returns_the_payload") {
+		t.Fatalf("the vector of another transport reached the emitted file\n%s", content)
 	}
 }
 
