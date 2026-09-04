@@ -17,11 +17,9 @@ package udprust
 type Options struct {
 	Service string
 	Cell    string
-	Side    string
 }
 
 type File struct {
-	Path      string
-	Content   string
-	WriteOnce bool
+	Path    string
+	Content string
 }

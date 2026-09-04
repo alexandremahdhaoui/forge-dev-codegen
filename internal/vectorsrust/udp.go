@@ -74,7 +74,10 @@ type datagramTestView struct {
 	ExpectedLiteral string
 	SessionLiteral  string
 	ClientStruct    string
+	ClientConfig    string
 	DriverStruct    string
+	DriverConfig    string
+	TimeoutMs       int
 	ClientMethod    string
 	Cell            string
 }
@@ -216,7 +219,10 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 		ExpectedLiteral: expected,
 		SessionLiteral:  session,
 		ClientStruct:    svc.Pascal + "UdpClient",
+		ClientConfig:    svc.Pascal + "UdpClientConfig",
 		DriverStruct:    svc.Pascal + "UdpDriver",
+		DriverConfig:    svc.Pascal + "UdpDriverConfig",
+		TimeoutMs:       udprust.DefaultTimeoutMs,
 		ClientMethod:    rpc.Ident,
 		Cell:            svc.Cell,
 	}, nil
@@ -242,7 +248,7 @@ func sessionLiteral(c VectorCase) (string, error) {
 		return "", fmt.Errorf("reading vector %q: %s must be %d bytes, got %d", c.Case, sessionIDField, sessionIDLength, len(value))
 	}
 
-	return "*b" + strconv.Quote(value), nil
+	return strconv.Quote(value), nil
 }
 
 func messageLiteral(m grpcrust.Message, raw json.RawMessage) (string, error) {

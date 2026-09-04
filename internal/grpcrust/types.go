@@ -54,13 +54,11 @@ type Spec struct {
 type Options struct {
 	Service string
 	Cell    string
-	Side    string
 }
 
 type File struct {
-	Path      string
-	Content   string
-	WriteOnce bool
+	Path    string
+	Content string
 }
 
 func messageByName(messages []Message, name string) (Message, bool) {

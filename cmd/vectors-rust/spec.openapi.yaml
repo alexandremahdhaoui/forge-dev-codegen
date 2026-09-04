@@ -54,10 +54,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. appDir may be given here instead of at the top level, vectors names the vectors document relative to srcDir, and cell names the udp module directory, which defaults to udp.
-        appDir:
-          type: string
-          description: The root of the app crate, relative to the engine source directory. Absent means app.
+          description: The kind's layout. crateDir names the crate root relative to srcDir and defaults to srcDir itself, vectors names the vectors document relative to srcDir, and cell names the udp module directory, which defaults to udp.
       required:
         - name
         - kind

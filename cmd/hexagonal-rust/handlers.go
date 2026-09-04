@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 )
@@ -39,60 +37,27 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
-			hand, err := hexrust.HandFromLayout(input.Layout)
-			if err != nil {
-				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
-			}
-
 			files, err := hexrust.Generate([]byte(input.OpenapiSpec), hexrust.Options{
 				Service: input.Name,
-				CoreDir: firstOf(input.CoreDir, layoutString(input.Layout, "coreDir")),
-				AppDir:  firstOf(input.AppDir, layoutString(input.Layout, "appDir")),
-				Side:    firstOf(input.Side, layoutString(input.Layout, "side")),
+				Cell:    layoutString(input.Layout, "cell"),
 				Cells:   cells,
-				Hand:    hand,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
 			out := make([]GeneratedFile, 0, len(files))
-
 			for _, f := range files {
-				if f.WriteOnce && existsUnder(input.SrcDir, f.Path) {
-					continue
-				}
-
 				out = append(out, GeneratedFile{Path: f.Path, Content: f.Content})
 			}
 
-			return &GenerateOutput{Files: out}, nil
+			return &GenerateOutput{Files: out, Manifest: true}, nil
 		},
 	}
-}
-
-func firstOf(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-
-	return ""
 }
 
 func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
-}
-
-func existsUnder(root, rel string) bool {
-	if root == "" {
-		return false
-	}
-
-	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
-
-	return err == nil
 }

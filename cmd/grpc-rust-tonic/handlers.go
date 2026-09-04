@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 )
@@ -37,23 +35,17 @@ func NewHandlers() Handlers {
 			files, err := grpcrust.Generate([]byte(input.ProtoSpec), grpcrust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
-				Side:    layoutString(input.Layout, "side"),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
 			out := make([]GeneratedFile, 0, len(files))
-
 			for _, f := range files {
-				if f.WriteOnce && existsUnder(input.SrcDir, f.Path) {
-					continue
-				}
-
 				out = append(out, GeneratedFile{Path: f.Path, Content: f.Content})
 			}
 
-			return &GenerateOutput{Files: out}, nil
+			return &GenerateOutput{Files: out, Manifest: true}, nil
 		},
 	}
 }
@@ -62,14 +54,4 @@ func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
-}
-
-func existsUnder(root, rel string) bool {
-	if root == "" {
-		return false
-	}
-
-	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
-
-	return err == nil
 }

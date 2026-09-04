@@ -24,8 +24,13 @@ type view struct {
 	Header       string
 	Service      string
 	ServiceUpper string
-	CoreCrate    string
-	AppCrate     string
+	Crate            string
+	Cell             string
+	CratePath        string
+	ModulePrefix     string
+	DriverName       string
+	DefaultAddress   string
+	DefaultStorePath string
 	Types        []typeView
 	Stores       []storeView
 	UsedStores   []storeView
@@ -54,12 +59,16 @@ type typeView struct {
 }
 
 type storeView struct {
-	Name      string
-	Snake     string
-	Upper     string
-	Port      string
-	PortSnake string
-	Generic   string
+	Name         string
+	Snake        string
+	Upper        string
+	Port         string
+	PortSnake    string
+	Struct       string
+	ConfigStruct string
+	AdapterName  string
+	Module       string
+	DefaultPath  string
 }
 
 type paramView struct {
@@ -86,10 +95,6 @@ type opView struct {
 	Ports             []storeView
 	TraitArgs         string
 	ReturnType        string
-	HandGenerics      string
-	HandParams        string
-	HandCall          string
-	Unused            string
 	Extractors        string
 	ControllerCall    string
 	StatusExpr        string
@@ -104,8 +109,6 @@ type controllerView struct {
 	Pascal      string
 	Ports       []storeView
 	Ops         []opView
-	Generics    string
-	GenericArgs string
 	TypeImports []importView
 }
 
@@ -114,8 +117,13 @@ func buildView(spec *Spec, opts Options) view {
 		Header:       header,
 		Service:      opts.Service,
 		ServiceUpper: Upper(opts.Service),
-		CoreCrate:    Snake(opts.Service) + "_core",
-		AppCrate:     Snake(opts.Service) + "_app",
+		Crate:            Snake(opts.Service),
+		Cell:             opts.Cell,
+		CratePath:        "crate::",
+		ModulePrefix:     opts.ModulePrefix(),
+		DriverName:       opts.Cell,
+		DefaultAddress:   DefaultAddress,
+		DefaultStorePath: DefaultStorePath,
 	}
 
 	for _, t := range spec.Types {
@@ -125,13 +133,22 @@ func buildView(spec *Spec, opts Options) view {
 	storesByPort := map[string]storeView{}
 
 	for _, s := range spec.Stores {
+		adapterName := "sqlite"
+		if len(spec.Stores) > 1 {
+			adapterName = s.Snake + "_sqlite"
+		}
+
 		sv := storeView{
-			Name:      s.Name,
-			Snake:     s.Snake,
-			Upper:     Upper(s.Name),
-			Port:      s.Name + "Store",
-			PortSnake: s.Snake + "_store",
-			Generic:   s.Name + "StorePort",
+			Name:         s.Name,
+			Snake:        s.Snake,
+			Upper:        Upper(s.Name),
+			Port:         s.Name + "Store",
+			PortSnake:    s.Snake + "_store",
+			Struct:       s.Name + "SqliteStore",
+			ConfigStruct: s.Name + "SqliteStoreConfig",
+			AdapterName:  adapterName,
+			Module:       s.Snake + "_sqlite",
+			DefaultPath:  DefaultStorePath,
 		}
 		v.Stores = append(v.Stores, sv)
 		storesByPort[sv.Port] = sv
@@ -286,9 +303,6 @@ func buildControllerView(c Controller, storesByPort map[string]storeView) contro
 		cv.Ports = append(cv.Ports, storesByPort[p])
 	}
 
-	cv.Generics = genericBounds(cv.Ports)
-	cv.GenericArgs = genericArgs(cv.Ports)
-
 	imports := map[string]bool{}
 
 	for _, op := range c.Operations {
@@ -308,32 +322,6 @@ func buildControllerView(c Controller, storesByPort map[string]storeView) contro
 	}
 
 	return cv
-}
-
-func genericBounds(ports []storeView) string {
-	if len(ports) == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, len(ports))
-	for _, p := range ports {
-		parts = append(parts, p.Generic+": "+p.Port)
-	}
-
-	return "<" + strings.Join(parts, ", ") + ">"
-}
-
-func genericArgs(ports []storeView) string {
-	if len(ports) == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, len(ports))
-	for _, p := range ports {
-		parts = append(parts, p.Generic)
-	}
-
-	return "<" + strings.Join(parts, ", ") + ">"
 }
 
 func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) opView {
@@ -360,17 +348,8 @@ func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) 
 	}
 
 	traitArgs := []string{}
-	handParams := []string{}
-	handCall := []string{}
-	unused := []string{}
-	extractors := []string{"State(driver): State<HttpDriver>"}
+	extractors := []string{"State(state): State<HttpState>"}
 	controllerCall := []string{}
-
-	for _, p := range ov.Ports {
-		handParams = append(handParams, p.PortSnake+": &"+p.Generic)
-		handCall = append(handCall, "&self."+p.PortSnake)
-		unused = append(unused, p.PortSnake)
-	}
 
 	pathIdents := []string{}
 	pathTypes := []string{}
@@ -386,9 +365,6 @@ func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) 
 
 		ov.Params = append(ov.Params, pv)
 		traitArgs = append(traitArgs, pv.Ident+": "+pv.ArgType)
-		handParams = append(handParams, pv.Ident+": "+pv.ArgType)
-		handCall = append(handCall, pv.Ident)
-		unused = append(unused, pv.Ident)
 		controllerCall = append(controllerCall, call)
 		pathIdents = append(pathIdents, pv.Ident)
 		pathTypes = append(pathTypes, pv.CoreType)
@@ -404,18 +380,11 @@ func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) 
 
 	if op.Body != "" {
 		traitArgs = append(traitArgs, "body: "+op.Body)
-		handParams = append(handParams, "body: "+op.Body)
-		handCall = append(handCall, "body")
-		unused = append(unused, "body")
 		extractors = append(extractors, "Json(body): Json<"+op.Body+"Wire>")
 		controllerCall = append(controllerCall, "body.into()")
 	}
 
 	ov.TraitArgs = strings.Join(traitArgs, ", ")
-	ov.HandGenerics = genericBounds(ov.Ports)
-	ov.HandParams = strings.Join(handParams, ", ")
-	ov.HandCall = strings.Join(handCall, ", ")
-	ov.Unused = unusedExpr(unused)
 	ov.Extractors = strings.Join(extractors, ", ")
 	ov.ControllerCall = strings.Join(controllerCall, ", ")
 
@@ -428,17 +397,6 @@ func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) 
 	}
 
 	return ov
-}
-
-func unusedExpr(names []string) string {
-	switch len(names) {
-	case 0:
-		return ""
-	case 1:
-		return names[0]
-	default:
-		return "(" + strings.Join(names, ", ") + ")"
-	}
 }
 
 func statusExpr(status int) string {

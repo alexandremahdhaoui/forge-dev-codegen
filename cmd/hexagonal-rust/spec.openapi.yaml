@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. coreDir and appDir may be given here instead of at the top level.
+          description: The kind's layout. cells lists the module directories under src. cell names the manifest cell and defaults to rest.
         runtime:
           type: object
           additionalProperties: true
@@ -48,16 +48,7 @@ components:
           description: The source checksum forge-dev computed.
         srcDir:
           type: string
-          description: The engine source directory. A hand file that already exists under it is not answered again.
-        coreDir:
-          type: string
-          description: The root of the core crate, relative to the engine source directory. Absent means core.
-        appDir:
-          type: string
-          description: The root of the app crate, relative to the engine source directory. Absent means app.
-        side:
-          type: string
-          description: Which crate to answer. core, app, or absent for both. A cell inside one crate names its own side.
+          description: The crate root. Every emitted path is relative to it.
       required:
         - name
         - kind
@@ -82,5 +73,8 @@ components:
           description: The emitted files. forge-dev core writes them.
           items:
             $ref: "#/components/schemas/GeneratedFile"
+        manifest:
+          type: boolean
+          description: True when the answer carries the cell manifest zz_generated_cell.yaml.
       required:
         - files

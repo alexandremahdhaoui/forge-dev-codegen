@@ -21,6 +21,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
 const helloProto = `syntax = "proto3";
@@ -74,14 +75,13 @@ func TestGeneratingTheUdpProtoEmitsTheWholeFileSet(t *testing.T) {
 		"controller/zz_generated_hello_datagram_controller.rs",
 		"driver/mod.rs",
 		"driver/zz_generated_hello_datagram_udp_driver.rs",
-		"hand/hello_datagram_controller.rs",
-		"hand/mod.rs",
 		"mod.rs",
 		"port/mod.rs",
 		"port/zz_generated_hello_datagram_client.rs",
 		"types/mod.rs",
 		"types/zz_generated_context.rs",
 		"types/zz_generated_hello_datagram_messages.rs",
+		"zz_generated_cell.yaml",
 	}
 
 	gotPaths := []string{}
@@ -94,68 +94,85 @@ func TestGeneratingTheUdpProtoEmitsTheWholeFileSet(t *testing.T) {
 	}
 }
 
-func TestTheCoreSideHoldsNoAdapterAndNoDriver(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+func TestTheCellHoldsNoHandDirectoryAndNoHandCall(t *testing.T) {
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
-	for path := range files {
-		if strings.HasPrefix(path, "adapter/") || strings.HasPrefix(path, "driver/") {
-			t.Fatalf("the core side emitted %q", path)
+	for path, file := range files {
+		if strings.Contains(path, "hand") {
+			t.Fatalf("the cell emitted %q", path)
 		}
-	}
 
-	for _, want := range []string{
-		"types/zz_generated_context.rs",
-		"controller/zz_generated_hello_datagram_codec.rs",
-		"port/zz_generated_hello_datagram_client.rs",
-		"hand/hello_datagram_controller.rs",
-	} {
-		if _, ok := files[want]; !ok {
-			t.Fatalf("the core side never emitted %q", want)
+		if strings.Contains(file.Content, "::hand::") {
+			t.Fatalf("%s still reaches for a hand module:\n%s", path, file.Content)
 		}
 	}
 }
 
-func TestTheAppSideHoldsOnlyTheDriverTheClientAndTheirMountPoints(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})
+func TestTheCellManifestNamesTheDriverTheAdapterTheControllerAndThePort(t *testing.T) {
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
-	wantPaths := []string{
-		"adapter/mod.rs",
-		"adapter/zz_generated_hello_datagram_udp_client.rs",
-		"driver/mod.rs",
-		"driver/zz_generated_hello_datagram_udp_driver.rs",
-		"mod.rs",
+	body := files[cellmanifest.FileName].Content
+	if body == "" {
+		t.Fatal("no cell manifest was emitted")
 	}
 
-	gotPaths := []string{}
-	for path := range files {
-		gotPaths = append(gotPaths, path)
+	m, err := cellmanifest.Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v\n%s", err, body)
 	}
 
-	if len(gotPaths) != len(wantPaths) {
-		t.Fatalf("the app side emitted %q, want %q", gotPaths, wantPaths)
+	if m.Cell != "udp" {
+		t.Errorf("cell = %q, want udp", m.Cell)
 	}
 
-	for _, want := range wantPaths {
-		if _, ok := files[want]; !ok {
-			t.Fatalf("the app side never emitted %q", want)
-		}
+	if len(m.Provides.Drivers) != 1 {
+		t.Fatalf("drivers = %+v", m.Provides.Drivers)
+	}
+
+	driver := m.Provides.Drivers[0]
+	if driver.Name != "udp" || driver.Type != "HelloDatagramUdpDriver" || driver.Module != "udp::driver::hello_datagram_udp_driver" {
+		t.Errorf("driver = %+v", driver)
+	}
+
+	if !reflect.DeepEqual(driver.Requires, []string{"HelloDatagramController"}) {
+		t.Errorf("driver requires = %+v", driver.Requires)
+	}
+
+	if len(m.Provides.Adapters) != 1 {
+		t.Fatalf("adapters = %+v", m.Provides.Adapters)
+	}
+
+	adapter := m.Provides.Adapters[0]
+	if adapter.Name != "udp_client" || adapter.Implements != "HelloDatagramClient" {
+		t.Errorf("adapter = %+v", adapter)
+	}
+
+	if adapter.Config["timeout_ms"].Type != cellmanifest.FieldTypeDuration {
+		t.Errorf("adapter config = %+v", adapter.Config)
+	}
+
+	if len(m.Provides.Controllers) != 1 {
+		t.Fatalf("controllers = %+v", m.Provides.Controllers)
+	}
+
+	controller := m.Provides.Controllers[0]
+	if controller.Trait != "HelloDatagramController" || controller.Impl != "HelloDatagramControllerImpl" || controller.Module != "udp::controller" {
+		t.Errorf("controller = %+v", controller)
 	}
 }
 
 func TestNoOneofEnvelopeIsEmittedAnywhere(t *testing.T) {
-	for _, side := range []string{"core", "app"} {
-		files := generate(t, udprust.Options{Service: "songe-hello", Side: side})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
-		for path, file := range files {
-			if strings.Contains(file.Content, "Envelope") || strings.Contains(file.Content, "oneof") {
-				t.Fatalf("the %s side reached for an envelope in %s:\n%s", side, path, file.Content)
-			}
+	for path, file := range files {
+		if strings.Contains(file.Content, "Envelope") || strings.Contains(file.Content, "oneof") {
+			t.Fatalf("the cell reached for an envelope in %s:\n%s", path, file.Content)
 		}
 	}
 }
 
 func TestTheSchemaVersionIsTheNumberInThePackageVersionSuffix(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
@@ -197,7 +214,7 @@ func TestTheFunctionHashIsFnv1aOverTheFullMethodNameFoldedToEightBits(t *testing
 		t.Fatalf("the note method folds to %d, want 128", got)
 	}
 
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
@@ -258,7 +275,7 @@ func TestTwoServicesInOneProtoFileWhoseRpcsFoldToTheSameFunctionHashAreRefusedBy
 }
 
 func TestTheCodecRefusesAMissingMagicAShortDatagramAnOversizeOneAWrongVersionAndAnUnknownMethod(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
@@ -278,7 +295,7 @@ func TestTheCodecRefusesAMissingMagicAShortDatagramAnOversizeOneAWrongVersionAnd
 }
 
 func TestAControllerMethodTakesTheRequestAndTheSessionContext(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	controller := files["controller/zz_generated_hello_datagram_controller.rs"].Content
 	context := files["types/zz_generated_context.rs"].Content
@@ -287,6 +304,7 @@ func TestAControllerMethodTakesTheRequestAndTheSessionContext(t *testing.T) {
 		"pub trait HelloDatagramController: Send + Sync {",
 		"request: Echo,\n        context: &Context,\n    ) -> Result<Echo, HelloDatagramControllerError>;",
 		"request: Note,\n        context: &Context,\n    ) -> Result<Nothing, HelloDatagramControllerError>;",
+		"pub struct HelloDatagramControllerImpl;",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Fatalf("the controller never carried %q:\n%s", want, controller)
@@ -304,7 +322,7 @@ func TestAControllerMethodTakesTheRequestAndTheSessionContext(t *testing.T) {
 }
 
 func TestAnRpcReplyingNothingIsNeverAnsweredOnTheWire(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	driver := files["driver/zz_generated_hello_datagram_udp_driver.rs"].Content
 	adapter := files["adapter/zz_generated_hello_datagram_udp_client.rs"].Content
@@ -322,11 +340,18 @@ func TestAnRpcReplyingNothingIsNeverAnsweredOnTheWire(t *testing.T) {
 	}
 }
 
-func TestTheGeneratedClientConnectsItsSocketAndRefusesAnAnswerCarryingAnotherSessionId(t *testing.T) {
-	adapter := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})["adapter/zz_generated_hello_datagram_udp_client.rs"].Content
-	codec := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})["controller/zz_generated_hello_datagram_codec.rs"].Content
+func TestTheGeneratedClientTakesItsConfigConnectsItsSocketAndRefusesAnotherSessionId(t *testing.T) {
+	files := generate(t, udprust.Options{Service: "songe-hello"})
+
+	adapter := files["adapter/zz_generated_hello_datagram_udp_client.rs"].Content
+	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
 	for _, want := range []string{
+		"pub struct HelloDatagramUdpClientConfig {",
+		"    pub address: String,",
+		"    pub session_id: String,",
+		"    pub timeout_ms: i64,",
+		"    pub fn new(config: HelloDatagramUdpClientConfig) -> Self {",
 		".connect(&self.address)",
 		"socket.send(&datagram).await.map_err(failing_echo)?;",
 		"codec::decode_echo_reply(&self.session_id, &buffer[..read])",
@@ -340,6 +365,7 @@ func TestTheGeneratedClientConnectsItsSocketAndRefusesAnAnswerCarryingAnotherSes
 		"UnknownSession {",
 		"if framed.session_id != *session_id {",
 		"if payload.len() > MAX_PAYLOAD_LEN {",
+		"pub fn session_id_from(text: &str) -> [u8; SESSION_ID_LEN] {",
 	} {
 		if !strings.Contains(codec, want) {
 			t.Fatalf("the codec never carried %q:\n%s", want, codec)
@@ -348,7 +374,7 @@ func TestTheGeneratedClientConnectsItsSocketAndRefusesAnAnswerCarryingAnotherSes
 }
 
 func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	driver := files["driver/zz_generated_hello_datagram_udp_driver.rs"].Content
 
@@ -363,8 +389,10 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 		"const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);",
 		"const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;",
 		"const MAX_PEERS_TOLD_ABOUT_THE_VERSION: usize = 256;",
-		"pub struct HelloDatagramUdpDriver<C: HelloDatagramController> {",
-		"    controller: C,",
+		"pub struct HelloDatagramUdpDriverConfig {",
+		"pub struct HelloDatagramUdpDriver {",
+		"    controller: Arc<dyn HelloDatagramController + Send + Sync>,",
+		"    pub async fn bind(&mut self) -> Result<(), HelloDatagramUdpDriverError> {",
 		"if peers_told_about_the_version.len() >= MAX_PEERS_TOLD_ABOUT_THE_VERSION {",
 		"println!(\"LISTENING_UDP {}\", self.local_port()?);",
 		"if peers_told_about_the_version.insert(peer) {",
@@ -372,23 +400,6 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 	} {
 		if !strings.Contains(driver, want) {
 			t.Fatalf("the driver never carried %q:\n%s", want, driver)
-		}
-	}
-}
-
-func TestTheHandBodyIsWrittenOnceAndNeverAgain(t *testing.T) {
-	files, err := udprust.Generate([]byte(helloProto), udprust.Options{Service: "songe-hello", Side: "core"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if f.Path == "hand/hello_datagram_controller.rs" && !f.WriteOnce {
-			t.Fatal("the hand body is overwritten on every build")
-		}
-
-		if strings.HasPrefix(f.Path, "controller/zz_generated") && f.WriteOnce {
-			t.Fatalf("%s is written once and then never regenerated", f.Path)
 		}
 	}
 }
@@ -422,7 +433,7 @@ message Echo {
 	}
 }
 
-func TestGeneratingRefusesAnInputThatNamesNoServiceNoCellAndNoSide(t *testing.T) {
+func TestGeneratingRefusesAnInputThatNamesNoServiceAndNoCell(t *testing.T) {
 	cases := []struct {
 		name string
 		doc  string
@@ -448,12 +459,6 @@ func TestGeneratingRefusesAnInputThatNamesNoServiceNoCellAndNoSide(t *testing.T)
 			want: "is not a name Rust can spell as a module",
 		},
 		{
-			name: "a side that is neither core nor app",
-			doc:  helloProto,
-			opts: udprust.Options{Service: "songe-hello", Side: "both"},
-			want: "side must be core, app or empty",
-		},
-		{
 			name: "a proto with no service block",
 			doc:  "syntax = \"proto3\";\n\npackage songe.hello.udp.v1;\n\nmessage Echo {\n  string payload = 1;\n}\n",
 			opts: udprust.Options{Service: "songe-hello"},
@@ -476,33 +481,43 @@ func TestGeneratingRefusesAnInputThatNamesNoServiceNoCellAndNoSide(t *testing.T)
 }
 
 func TestTheCellDefaultsToUdpAndTheMountPointsFollowIt(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
-	if !strings.Contains(files["controller/zz_generated_hello_datagram_controller.rs"].Content, "crate::udp::hand::hello_datagram_controller::") {
-		t.Fatal("the controller never reached the hand body through the default cell")
+	if !strings.Contains(files["controller/zz_generated_hello_datagram_controller.rs"].Content, "use crate::udp::types::context::Context;") {
+		t.Fatal("the controller never reached the context through the default cell")
 	}
 
-	named := generate(t, udprust.Options{Service: "songe-hello", Side: "core", Cell: "datagram"})
+	named, err := udprust.Generate([]byte(helloProto), udprust.Options{Service: "songe-hello", Cell: "datagram"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
 
-	if !strings.Contains(named["controller/zz_generated_hello_datagram_controller.rs"].Content, "crate::datagram::hand::hello_datagram_controller::") {
+	byPath := map[string]udprust.File{}
+	for _, f := range named {
+		byPath[f.Path] = f
+	}
+
+	if !strings.Contains(byPath["controller/zz_generated_hello_datagram_controller.rs"].Content, "use crate::datagram::types::context::Context;") {
 		t.Fatal("the controller ignored the named cell")
 	}
 }
 
 func TestEveryLayerAndTheCellCarryAGeneratedModFile(t *testing.T) {
-	core := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+	files := generate(t, udprust.Options{Service: "songe-hello"})
 
-	if !strings.Contains(core["mod.rs"].Content, "pub mod controller;\npub mod hand;\npub mod port;\npub mod types;") {
-		t.Fatalf("the core cell mod file lists the wrong layers:\n%s", core["mod.rs"].Content)
+	if !strings.Contains(files["mod.rs"].Content, "pub mod adapter;\npub mod controller;\npub mod driver;\npub mod port;\npub mod types;") {
+		t.Fatalf("the cell mod file lists the wrong layers:\n%s", files["mod.rs"].Content)
 	}
 
-	if !strings.Contains(core["controller/mod.rs"].Content, "pub use zz_generated_hello_datagram_codec as hello_datagram_codec;") {
-		t.Fatalf("the controller mod file never aliased the codec:\n%s", core["controller/mod.rs"].Content)
+	if !strings.Contains(files["controller/mod.rs"].Content, "pub use zz_generated_hello_datagram_codec as hello_datagram_codec;") {
+		t.Fatalf("the controller mod file never aliased the codec:\n%s", files["controller/mod.rs"].Content)
 	}
 
-	app := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})
+	if !strings.Contains(files["controller/mod.rs"].Content, "mod hello_datagram_controller;") {
+		t.Fatalf("the controller mod file never mounts the user impl file:\n%s", files["controller/mod.rs"].Content)
+	}
 
-	if !strings.Contains(app["mod.rs"].Content, "pub mod adapter;\npub mod driver;") {
-		t.Fatalf("the app cell mod file lists the wrong layers:\n%s", app["mod.rs"].Content)
+	if !strings.Contains(files["driver/mod.rs"].Content, "#![allow(clippy::disallowed_methods, clippy::disallowed_types)]") {
+		t.Fatalf("the driver mod file never allows the io lint table:\n%s", files["driver/mod.rs"].Content)
 	}
 }

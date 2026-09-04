@@ -27,8 +27,7 @@ import (
 
 type view struct {
 	Header           string
-	CoreCrate        string
-	AppCrate         string
+	Crate            string
 	Controllers      []controllerView
 	TypeImports      []importView
 	Tests            []testView
@@ -128,9 +127,8 @@ func paramArgType(kind string) string {
 
 func buildView(spec *hexrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
 	v := view{
-		Header:    header,
-		CoreCrate: hexrust.Snake(opts.Service) + "_core",
-		AppCrate:  hexrust.Snake(opts.Service) + "_app",
+		Header: header,
+		Crate:  hexrust.Snake(opts.Service),
 	}
 
 	opsByID := map[string]hexrust.Operation{}

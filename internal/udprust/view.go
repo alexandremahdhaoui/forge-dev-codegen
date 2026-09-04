@@ -84,26 +84,36 @@ type rpcView struct {
 }
 
 type serviceView struct {
-	Header          string
-	Package         string
-	Cell            string
-	CoreCrate       string
-	SchemaVersion   int
-	ServicePascal   string
-	ServiceSnake    string
-	ClientTrait     string
-	ClientError     string
-	ClientStruct    string
-	DriverStruct    string
-	DriverError     string
-	CodecError      string
-	RequestEnum     string
-	ControllerSnake string
-	ControllerTrait string
-	ControllerError string
-	Messages        []messageView
-	Rpcs            []rpcView
-	TraitTypes      []string
+	Header             string
+	Package            string
+	Cell               string
+	CratePath          string
+	ModulePrefix       string
+	SchemaVersion      int
+	ServicePascal      string
+	ServiceSnake       string
+	ClientTrait        string
+	ClientError        string
+	ClientStruct       string
+	ClientConfig       string
+	ClientModule       string
+	ClientName         string
+	DriverStruct       string
+	DriverConfig       string
+	DriverError        string
+	DriverModule       string
+	DriverName         string
+	DefaultAddress     string
+	DefaultEndpoint    string
+	DefaultTimeoutMs   int
+	CodecError         string
+	RequestEnum        string
+	ControllerSnake    string
+	ControllerTrait    string
+	ControllerError    string
+	Messages           []messageView
+	Rpcs               []rpcView
+	TraitTypes         []string
 }
 
 func prostAttribute(f grpcrust.Field) string {
@@ -139,7 +149,7 @@ func buildMessageView(m grpcrust.Message) messageView {
 	return mv
 }
 
-func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options) (serviceView, error) {
+func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, only bool) (serviceView, error) {
 	version, err := SchemaVersion(spec.Package)
 	if err != nil {
 		return serviceView{}, err
@@ -157,24 +167,42 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options) (
 		return serviceView{}, fmt.Errorf("building service %q: %w", svc.Name, err)
 	}
 
+	driverName := opts.Cell
+	clientName := opts.Cell + "_client"
+
+	if !only {
+		driverName = opts.Cell + "_" + grpcrust.Snake(svc.Name)
+		clientName = opts.Cell + "_" + grpcrust.Snake(svc.Name) + "_client"
+	}
+
 	sv := serviceView{
-		Header:          header,
-		Package:         spec.Package,
-		Cell:            opts.Cell,
-		CoreCrate:       grpcrust.Snake(opts.Service) + "_core",
-		SchemaVersion:   version,
-		ServicePascal:   grpcrust.Pascal(svc.Name),
-		ServiceSnake:    grpcrust.Snake(svc.Name),
-		ClientTrait:     grpcrust.Pascal(svc.Name) + "Client",
-		ClientError:     grpcrust.Pascal(svc.Name) + "ClientError",
-		ClientStruct:    grpcrust.Pascal(svc.Name) + "UdpClient",
-		DriverStruct:    grpcrust.Pascal(svc.Name) + "UdpDriver",
-		DriverError:     grpcrust.Pascal(svc.Name) + "UdpDriverError",
-		CodecError:      grpcrust.Pascal(svc.Name) + "CodecError",
-		RequestEnum:     grpcrust.Pascal(svc.Name) + "Request",
-		ControllerSnake: grpcrust.Snake(svc.Name),
-		ControllerTrait: grpcrust.Pascal(svc.Name) + "Controller",
-		ControllerError: grpcrust.Pascal(svc.Name) + "ControllerError",
+		Header:           header,
+		Package:          spec.Package,
+		Cell:             opts.Cell,
+		CratePath:        "crate::" + opts.Cell + "::",
+		ModulePrefix:     opts.Cell + "::",
+		SchemaVersion:    version,
+		ServicePascal:    grpcrust.Pascal(svc.Name),
+		ServiceSnake:     grpcrust.Snake(svc.Name),
+		ClientTrait:      grpcrust.Pascal(svc.Name) + "Client",
+		ClientError:      grpcrust.Pascal(svc.Name) + "ClientError",
+		ClientStruct:     grpcrust.Pascal(svc.Name) + "UdpClient",
+		ClientConfig:     grpcrust.Pascal(svc.Name) + "UdpClientConfig",
+		ClientModule:     grpcrust.Snake(svc.Name) + "_udp_client",
+		ClientName:       clientName,
+		DriverStruct:     grpcrust.Pascal(svc.Name) + "UdpDriver",
+		DriverConfig:     grpcrust.Pascal(svc.Name) + "UdpDriverConfig",
+		DriverError:      grpcrust.Pascal(svc.Name) + "UdpDriverError",
+		DriverModule:     grpcrust.Snake(svc.Name) + "_udp_driver",
+		DriverName:       driverName,
+		DefaultAddress:   DefaultAddress,
+		DefaultEndpoint:  DefaultEndpoint,
+		DefaultTimeoutMs: DefaultTimeoutMs,
+		CodecError:       grpcrust.Pascal(svc.Name) + "CodecError",
+		RequestEnum:      grpcrust.Pascal(svc.Name) + "Request",
+		ControllerSnake:  grpcrust.Snake(svc.Name),
+		ControllerTrait:  grpcrust.Pascal(svc.Name) + "Controller",
+		ControllerError:  grpcrust.Pascal(svc.Name) + "ControllerError",
 	}
 
 	for _, m := range messages {

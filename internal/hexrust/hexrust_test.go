@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
 const oneStoreOneOperation = `
@@ -154,30 +155,27 @@ components:
             $ref: "#/components/schemas/Tag"
 `
 
-func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
+func TestOneStoreAndOneOperationEmitOneCrateWorthOfLayers(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
 	wantPaths := []string{
-		"app/src/adapter/mod.rs",
-		"app/src/adapter/zz_generated_greeting_sqlite.rs",
-		"app/src/bin/songe-hello-server.rs",
-		"app/src/driver/mod.rs",
-		"app/src/driver/zz_generated_http_driver.rs",
-		"app/src/driver/zz_generated_wire.rs",
-		"app/src/hand/mod.rs",
-		"app/src/lib.rs",
-		"core/src/controller/mod.rs",
-		"core/src/controller/zz_generated_greeting_controller.rs",
-		"core/src/hand/greeting_controller.rs",
-		"core/src/hand/mod.rs",
-		"core/src/lib.rs",
-		"core/src/port/mod.rs",
-		"core/src/port/zz_generated_greeting_store.rs",
-		"core/src/types/mod.rs",
-		"core/src/types/zz_generated_greeting.rs",
+		"src/adapter/mod.rs",
+		"src/adapter/zz_generated_greeting_sqlite.rs",
+		"src/bin/zz_generated_songe_hello_server.rs",
+		"src/controller/mod.rs",
+		"src/controller/zz_generated_greeting_controller.rs",
+		"src/driver/mod.rs",
+		"src/driver/zz_generated_http_driver.rs",
+		"src/driver/zz_generated_wire.rs",
+		"src/lib.rs",
+		"src/port/mod.rs",
+		"src/port/zz_generated_greeting_store.rs",
+		"src/types/mod.rs",
+		"src/types/zz_generated_greeting.rs",
+		"zz_generated_cell.yaml",
 	}
 
 	gotPaths := []string{}
@@ -199,7 +197,7 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 	}{
 		{
 			name: "the type is a plain serde struct",
-			path: "core/src/types/zz_generated_greeting.rs",
+			path: "src/types/zz_generated_greeting.rs",
 			want: []string{
 				"#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]",
 				"pub struct Greeting {",
@@ -208,7 +206,7 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 		},
 		{
 			name: "the port is a mockable trait with put and get",
-			path: "core/src/port/zz_generated_greeting_store.rs",
+			path: "src/port/zz_generated_greeting_store.rs",
 			want: []string{
 				"#[cfg_attr(test, mockall::automock)]",
 				"pub trait GreetingStore: Send + Sync {",
@@ -217,78 +215,78 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 			},
 		},
 		{
-			name: "the controller wraps the store error with source and delegates to hand",
-			path: "core/src/controller/zz_generated_greeting_controller.rs",
+			name: "the controller emits the trait, the struct holding boxed ports and new",
+			path: "src/controller/zz_generated_greeting_controller.rs",
 			want: []string{
 				"pub enum GreetingControllerError {",
 				"        #[source]",
 				"        source: GreetingStoreError,",
 				"pub trait GreetingController: Send + Sync {",
 				"    fn create_greeting(&self, body: Greeting) -> Result<Greeting, GreetingControllerError>;",
-				"pub struct GreetingControllerImpl<GreetingStorePort: GreetingStore> {",
-				"    pub fn new(greeting_store: GreetingStorePort) -> Self {",
-				"        crate::hand::greeting_controller::create_greeting(&self.greeting_store, body)",
+				"pub struct GreetingControllerImpl {",
+				"    pub(crate) greeting_store: Arc<dyn GreetingStore + Send + Sync>,",
+				"    pub fn new(greeting_store: Arc<dyn GreetingStore + Send + Sync>) -> Self {",
 			},
 		},
 		{
-			name: "the hand body takes the ports and the body",
-			path: "core/src/hand/greeting_controller.rs",
+			name: "the controller layer mounts the user impl file and re exports the trait and the struct",
+			path: "src/controller/mod.rs",
 			want: []string{
-				"pub fn create_greeting<GreetingStorePort: GreetingStore>(greeting_store: &GreetingStorePort, body: Greeting) -> Result<Greeting, GreetingControllerError> {",
+				"pub mod zz_generated_greeting_controller;",
+				"mod greeting_controller;",
+				"pub use zz_generated_greeting_controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};",
 			},
 		},
 		{
-			name: "the sqlite adapter owns the table and the audit table",
-			path: "app/src/adapter/zz_generated_greeting_sqlite.rs",
+			name: "the sqlite adapter takes a config and owns the table and the audit table",
+			path: "src/adapter/zz_generated_greeting_sqlite.rs",
 			want: []string{
+				"pub struct GreetingSqliteStoreConfig {",
+				"    pub path: String,",
 				"pub struct GreetingSqliteStore {",
+				"    pub fn new(config: GreetingSqliteStoreConfig) -> Result<Self, GreetingSqliteError> {",
 				"CREATE TABLE IF NOT EXISTS greeting (id TEXT PRIMARY KEY, body TEXT NOT NULL);",
 				"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);",
 				"impl GreetingStore for GreetingSqliteStore {",
 			},
 		},
 		{
-			name: "the driver routes the path to the controller through wire types",
-			path: "app/src/driver/zz_generated_http_driver.rs",
+			name: "the driver takes a config, binds, announces and serves",
+			path: "src/driver/zz_generated_http_driver.rs",
 			want: []string{
-				"    greeting_controller: Arc<dyn GreetingController>,",
+				"    pub(crate) greeting_controller: Arc<dyn GreetingController + Send + Sync>,",
 				`            .route("/greetings", routing::post(create_greeting))`,
 				"        .create_greeting(body.into())",
 				"    Ok((StatusCode::CREATED, Json(out.into())))",
+				"    pub async fn bind(&mut self) -> Result<(), HttpDriverError> {",
+				`        println!("LISTENING {}", self.local_port()?);`,
+				"    pub async fn serve(self) -> Result<(), HttpDriverError> {",
 			},
 		},
 		{
-			name: "main reads the store path and the address and prints LISTENING",
-			path: "app/src/bin/songe-hello-server.rs",
+			name: "the adapter and the driver layers allow the io lint table",
+			path: "src/adapter/mod.rs",
 			want: []string{
-				`std::env::var("SONGE_STORE_GREETING_PATH")`,
-				`std::env::var("SONGE_HELLO_ADDR").unwrap_or_else(|_| "127.0.0.1:0".to_string())`,
-				`println!("LISTENING {port}");`,
+				"#![allow(clippy::disallowed_methods, clippy::disallowed_types)]",
 			},
 		},
 		{
 			name: "lib mounts every layer as a plain module directory",
-			path: "core/src/lib.rs",
+			path: "src/lib.rs",
 			want: []string{
+				"pub mod adapter;",
 				"pub mod controller;",
-				"pub mod hand;",
+				"pub mod driver;",
 				"pub mod port;",
 				"pub mod types;",
 			},
 		},
 		{
 			name: "a layer mod file names the generated file and aliases it to the layer name",
-			path: "core/src/types/mod.rs",
+			path: "src/types/mod.rs",
 			want: []string{
 				"pub mod zz_generated_greeting;",
 				"pub use zz_generated_greeting as greeting;",
-			},
-		},
-		{
-			name: "the hand mod file lists every hand file without an alias",
-			path: "core/src/hand/mod.rs",
-			want: []string{
-				"pub mod greeting_controller;",
 			},
 		},
 	}
@@ -304,6 +302,126 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTheCellManifestNamesEveryDriverAdapterControllerAndPort(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var body string
+
+	for _, f := range files {
+		if f.Path == cellmanifest.FileName {
+			body = f.Content
+		}
+	}
+
+	if body == "" {
+		t.Fatal("no cell manifest was emitted")
+	}
+
+	m, err := cellmanifest.Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v\n%s", err, body)
+	}
+
+	if m.Cell != "rest" {
+		t.Errorf("cell = %q, want rest", m.Cell)
+	}
+
+	if len(m.Provides.Drivers) != 1 || m.Provides.Drivers[0].Name != "rest" {
+		t.Fatalf("drivers = %+v", m.Provides.Drivers)
+	}
+
+	driver := m.Provides.Drivers[0]
+	if driver.Type != "HttpDriver" || driver.Module != "driver::http_driver" {
+		t.Errorf("driver = %+v", driver)
+	}
+
+	if !reflect.DeepEqual(driver.Requires, []string{"GreetingController"}) {
+		t.Errorf("driver requires = %+v", driver.Requires)
+	}
+
+	if driver.Config["addr"].Type != cellmanifest.FieldTypeString {
+		t.Errorf("driver config = %+v", driver.Config)
+	}
+
+	if len(m.Provides.Adapters) != 1 || m.Provides.Adapters[0].Name != "sqlite" {
+		t.Fatalf("adapters = %+v", m.Provides.Adapters)
+	}
+
+	adapter := m.Provides.Adapters[0]
+	if adapter.Implements != "GreetingStore" || adapter.Type != "GreetingSqliteStore" {
+		t.Errorf("adapter = %+v", adapter)
+	}
+
+	if adapter.Config["path"].Default != ":memory:" {
+		t.Errorf("adapter config = %+v", adapter.Config)
+	}
+
+	if len(m.Provides.Controllers) != 1 {
+		t.Fatalf("controllers = %+v", m.Provides.Controllers)
+	}
+
+	controller := m.Provides.Controllers[0]
+	if controller.Trait != "GreetingController" || controller.Impl != "GreetingControllerImpl" || controller.Module != "controller" {
+		t.Errorf("controller = %+v", controller)
+	}
+
+	if !reflect.DeepEqual(controller.Ports, []string{"GreetingStore"}) {
+		t.Errorf("controller ports = %+v", controller.Ports)
+	}
+
+	if len(m.Provides.Ports) != 1 || m.Provides.Ports[0].Trait != "GreetingStore" {
+		t.Errorf("ports = %+v", m.Provides.Ports)
+	}
+}
+
+func TestTwoStoresNameTheirOwnSqliteAdapterSoOneMergeNeverCollides(t *testing.T) {
+	doc := strings.Replace(twoOperationsAndAPathParam, `    Tag:
+      type: object
+      required: [label]`, `    Tag:
+      type: object
+      x-store: true
+      required: [id, label]`, 1)
+	doc = strings.Replace(doc, `      properties:
+        label:
+          type: string`, `      properties:
+        id:
+          type: string
+        label:
+          type: string`, 1)
+
+	files, err := hexrust.Generate([]byte(doc), hexrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if f.Path != cellmanifest.FileName {
+			continue
+		}
+
+		m, err := cellmanifest.Parse([]byte(f.Content))
+		if err != nil {
+			t.Fatalf("parsing the manifest: %v\n%s", err, f.Content)
+		}
+
+		names := []string{}
+		for _, a := range m.Provides.Adapters {
+			names = append(names, a.Name)
+		}
+
+		if !reflect.DeepEqual(names, []string{"greeting_sqlite", "tag_sqlite"}) {
+			t.Fatalf("adapter names = %+v", names)
+		}
+
+		return
+	}
+
+	t.Fatal("no cell manifest was emitted")
 }
 
 func TestTheSpecSchemaBelongsToForgeDevAndNeverBecomesAType(t *testing.T) {
@@ -326,7 +444,7 @@ func TestTheSpecSchemaBelongsToForgeDevAndNeverBecomesAType(t *testing.T) {
 	}
 }
 
-func TestEveryGeneratedFileCarriesTheHeaderAndOnlyHandFilesAreWriteOnce(t *testing.T) {
+func TestEveryEmittedRustFileCarriesTheGeneratedHeader(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -335,50 +453,26 @@ func TestEveryGeneratedFileCarriesTheHeaderAndOnlyHandFilesAreWriteOnce(t *testi
 	const header = "// Code generated by hexagonal-rust (forge-dev-codegen). DO NOT EDIT.\n"
 
 	for _, f := range files {
-		hand := strings.Contains(f.Path, "/src/hand/") && !strings.HasSuffix(f.Path, "/mod.rs")
-
-		if hand != f.WriteOnce {
-			t.Errorf("%s: write once must hold for hand files only", f.Path)
+		if !strings.HasSuffix(f.Path, ".rs") {
+			continue
 		}
 
-		if hand == strings.HasPrefix(f.Content, header) {
-			t.Errorf("%s: the header belongs on every file but a hand file", f.Path)
+		if !strings.HasPrefix(f.Content, header) {
+			t.Errorf("%s does not open with the generated header", f.Path)
 		}
 	}
 }
 
-func TestASideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
-	tests := []struct {
-		side   string
-		opts   hexrust.Options
-		want   string
-		reject string
-	}{
-		{side: "core", opts: hexrust.Options{Service: "svc", Side: "core", CoreDir: "."}, want: "src/", reject: "app/"},
-		{side: "app", opts: hexrust.Options{Service: "svc", Side: "app", AppDir: "."}, want: "src/", reject: "core/"},
+func TestNoEmittedFileIsAHandFileOrAWriteOnceFile(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.side+" side stays inside its crate", func(t *testing.T) {
-			files, err := hexrust.Generate([]byte(oneStoreOneOperation), tt.opts)
-			if err != nil {
-				t.Fatalf("generating: %v", err)
-			}
-
-			if len(files) == 0 {
-				t.Fatal("no files")
-			}
-
-			for _, f := range files {
-				if !strings.HasPrefix(f.Path, tt.want) || strings.HasPrefix(f.Path, tt.reject) {
-					t.Errorf("%s leaks out of the %s side", f.Path, tt.side)
-				}
-			}
-		})
-	}
-
-	if _, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "svc", Side: "both"}); err == nil {
-		t.Error("an unknown side must be refused")
+	for _, f := range files {
+		if strings.Contains(f.Path, "hand") {
+			t.Errorf("%s belongs to a hand directory, which is gone", f.Path)
+		}
 	}
 }
 
@@ -391,49 +485,25 @@ func TestLibRsMountsEveryCellAsAPlainModuleDirectoryUnderSrc(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
-	byPath := map[string]hexrust.File{}
-	for _, f := range files {
-		byPath[f.Path] = f
-	}
-
-	for _, path := range []string{"core/src/lib.rs", "app/src/lib.rs"} {
-		f, ok := byPath[path]
-		if !ok {
-			t.Fatalf("no file at %s", path)
-		}
-
-		for _, want := range []string{"pub mod grpc;", "pub mod udp;"} {
-			if !strings.Contains(f.Content, want) {
-				t.Errorf("%s lacks %q\n%s", path, want, f.Content)
-			}
-		}
-
-		if strings.Contains(f.Content, `#[path = "grpc`) {
-			t.Errorf("%s mounts a cell with a path attribute\n%s", path, f.Content)
-		}
-	}
-}
-
-func TestACellIsMountedOnBothSidesBecauseEachCrateHoldsItsOwnHalf(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
-		Service: "songe-hello",
-		Side:    "core",
-		CoreDir: ".",
-		Cells:   []string{"grpc"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
 	for _, f := range files {
 		if f.Path != "src/lib.rs" {
 			continue
 		}
 
-		if !strings.Contains(f.Content, "pub mod grpc;") {
-			t.Fatalf("the core lib does not mount the cell\n%s", f.Content)
+		for _, want := range []string{"pub mod grpc;", "pub mod udp;"} {
+			if !strings.Contains(f.Content, want) {
+				t.Errorf("src/lib.rs lacks %q\n%s", want, f.Content)
+			}
 		}
+
+		if strings.Contains(f.Content, `#[path = "grpc`) {
+			t.Errorf("src/lib.rs mounts a cell with a path attribute\n%s", f.Content)
+		}
+
+		return
 	}
+
+	t.Fatal("no src/lib.rs was emitted")
 }
 
 func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
@@ -458,9 +528,14 @@ func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
 			want:  "is not a name Rust can spell as a module",
 		},
 		{
-			name:  "a layer the skeleton already owns cannot be a cell",
+			name:  "a layer the crate root already owns cannot be a cell",
 			cells: []string{"driver"},
-			want:  "the skeleton already owns that module",
+			want:  "the crate root already owns that module",
+		},
+		{
+			name:  "the config module cannot be a cell",
+			cells: []string{"config"},
+			want:  "the crate root already owns that module",
 		},
 		{
 			name:  "the same cell twice is a mistake",
@@ -527,7 +602,6 @@ func TestNoGeneratedFileCarriesAPathAttribute(t *testing.T) {
 	files, err := hexrust.Generate([]byte(twoOperationsAndAPathParam), hexrust.Options{
 		Service: "songe-hello",
 		Cells:   []string{"grpc"},
-		Hand:    []string{"echo_controller", "datagram"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -540,173 +614,6 @@ func TestNoGeneratedFileCarriesAPathAttribute(t *testing.T) {
 	}
 }
 
-func TestTheRootCellMountsEveryExtraHandModuleTheLayoutLists(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
-		Service: "songe-hello",
-		Hand:    []string{"echo_controller", "datagram"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if f.Path != "core/src/hand/mod.rs" {
-			continue
-		}
-
-		for _, want := range []string{
-			"pub mod datagram;",
-			"pub mod echo_controller;",
-			"pub mod greeting_controller;",
-		} {
-			if !strings.Contains(f.Content, want) {
-				t.Errorf("the hand mod lacks %q\n%s", want, f.Content)
-			}
-		}
-
-		return
-	}
-
-	t.Fatal("no core/src/hand/mod.rs was emitted")
-}
-
-func TestTheAppSideMountsItsOwnHandModulesAndNoController(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
-		Service: "songe-hello",
-		Side:    "app",
-		AppDir:  ".",
-		Hand:    []string{"udp_driver"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	byPath := map[string]string{}
-	for _, f := range files {
-		byPath[f.Path] = f.Content
-	}
-
-	if !strings.Contains(byPath["src/lib.rs"], "pub mod hand;") {
-		t.Errorf("the app lib does not mount the hand module\n%s", byPath["src/lib.rs"])
-	}
-
-	mod, ok := byPath["src/hand/mod.rs"]
-	if !ok {
-		t.Fatal("no src/hand/mod.rs was emitted for the app side")
-	}
-
-	if !strings.Contains(mod, "pub mod udp_driver;") {
-		t.Errorf("the app hand mount lacks the driver\n%s", mod)
-	}
-
-	if strings.Contains(mod, "greeting_controller") {
-		t.Errorf("a controller belongs to the core hand mount\n%s", mod)
-	}
-}
-
-func TestAnExtraHandModuleRustCannotSpellIsRefused(t *testing.T) {
-	tests := []struct {
-		name string
-		hand []string
-		want string
-	}{
-		{
-			name: "a capital letter is not a module name",
-			hand: []string{"EchoController"},
-			want: "is not a name Rust can spell as a module",
-		},
-		{
-			name: "a dash is not a module name",
-			hand: []string{"echo-controller"},
-			want: "is not a name Rust can spell as a module",
-		},
-		{
-			name: "a keyword is not a module name",
-			hand: []string{"loop"},
-			want: "is not a name Rust can spell as a module",
-		},
-		{
-			name: "the hand mount itself cannot be listed",
-			hand: []string{"mod"},
-			want: "the hand mount already owns that file",
-		},
-		{
-			name: "the same module twice is a mistake",
-			hand: []string{"datagram", "datagram"},
-			want: "it is listed twice",
-		},
-		{
-			name: "a controller the spec declares is already mounted",
-			hand: []string{"greeting_controller"},
-			want: "the spec already declares that controller",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
-				Service: "songe-hello",
-				Hand:    tt.hand,
-			})
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("want an error containing %q, got %v", tt.want, err)
-			}
-		})
-	}
-}
-
-func TestTheLayoutCarriesTheHandList(t *testing.T) {
-	got, err := hexrust.HandFromLayout(map[string]interface{}{
-		"hand": []interface{}{"echo_controller", "datagram"},
-	})
-	if err != nil {
-		t.Fatalf("reading the layout: %v", err)
-	}
-
-	want := []string{"echo_controller", "datagram"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("hand\n got %+v\nwant %+v", got, want)
-	}
-}
-
-func TestALayoutThatMalformsTheHandListIsRefused(t *testing.T) {
-	tests := []struct {
-		name   string
-		layout map[string]interface{}
-		want   string
-	}{
-		{
-			name:   "a list is required",
-			layout: map[string]interface{}{"hand": "datagram"},
-			want:   "it is a list of module names under src/hand",
-		},
-		{
-			name:   "an entry is a name",
-			layout: map[string]interface{}{"hand": []interface{}{map[string]interface{}{"name": "datagram"}}},
-			want:   "it is a name",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := hexrust.HandFromLayout(tt.layout); err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("want an error containing %q, got %v", tt.want, err)
-			}
-		})
-	}
-}
-
-func TestALayoutWithNoHandListMountsOnlyTheControllersTheSpecDeclares(t *testing.T) {
-	got, err := hexrust.HandFromLayout(map[string]interface{}{})
-	if err != nil {
-		t.Fatalf("reading the layout: %v", err)
-	}
-
-	if len(got) != 0 {
-		t.Fatalf("want no extra hand modules, got %+v", got)
-	}
-}
-
 func TestALayoutWithNoCellsMountsNothingExtra(t *testing.T) {
 	got, err := hexrust.CellsFromLayout(map[string]interface{}{})
 	if err != nil {
@@ -715,23 +622,6 @@ func TestALayoutWithNoCellsMountsNothingExtra(t *testing.T) {
 
 	if len(got) != 0 {
 		t.Fatalf("want no cells, got %+v", got)
-	}
-}
-
-func TestTheOutputRootsPrefixEveryPath(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
-		Service: "songe-hello",
-		CoreDir: "../songe-hello-core",
-		AppDir:  "../songe-hello-app",
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if !strings.HasPrefix(f.Path, "../songe-hello-core/src/") && !strings.HasPrefix(f.Path, "../songe-hello-app/src/") {
-			t.Errorf("%s is outside both roots", f.Path)
-		}
 	}
 }
 
@@ -934,7 +824,7 @@ func TestTheDriverAnswersTheStatusTheSpecDeclaresForAnInvalidRequest(t *testing.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files, err := hexrust.Generate([]byte(tt.doc), hexrust.Options{Service: "svc", Side: "app"})
+			files, err := hexrust.Generate([]byte(tt.doc), hexrust.Options{Service: "svc"})
 			if err != nil {
 				t.Fatalf("generating: %v", err)
 			}
@@ -979,32 +869,12 @@ func TestNamesFollowRustCasing(t *testing.T) {
 	}
 }
 
-const workspaceManifest = `[workspace]
-resolver = "2"
-members = ["core", "app"]
-`
-
-const coreManifest = `[package]
-name = "songe-hello-core"
+const crateManifest = `[package]
+name = "songe-hello"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-
-[dev-dependencies]
-mockall = "0.15"
-`
-
-const appManifest = `[package]
-name = "songe-hello-app"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-songe-hello-core = { path = "../core" }
 anyhow = "1"
 axum = "0.8"
 rusqlite = { version = "0.40", features = ["bundled"] }
@@ -1012,25 +882,61 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+mockall = "0.15"
 `
 
-func TestTheGeneratedSkeletonPassesCargoCheck(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+const greetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
+use crate::port::greeting_store::GreetingStore;
+use crate::types::create_greeting_request::CreateGreetingRequest;
+use crate::types::greeting::Greeting;
 
-	files, err := hexrust.Generate([]byte(twoOperationsAndAPathParam), hexrust.Options{
-		Service: "songe-hello",
-		Hand:    []string{"echo_controller", "datagram"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
+impl GreetingController for GreetingControllerImpl {
+    fn create_greeting(
+        &self,
+        body: CreateGreetingRequest,
+    ) -> Result<Greeting, GreetingControllerError> {
+        let greeting = Greeting {
+            count: 0,
+            id: body.name.clone(),
+            name: body.name,
+            tags: body.tags,
+            r#type: None,
+        };
 
-	root := t.TempDir()
+        self.greeting_store
+            .put(greeting.clone())
+            .map_err(|source| GreetingControllerError::GreetingStore {
+                id: greeting.id.clone(),
+                source,
+            })?;
 
-	write := func(rel, content string) {
+        Ok(greeting)
+    }
+
+    fn delete_greeting(&self, id: &str) -> Result<(), GreetingControllerError> {
+        let _ = id;
+
+        Ok(())
+    }
+
+    fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError> {
+        self.greeting_store
+            .get(id)
+            .map_err(|source| GreetingControllerError::GreetingStore {
+                id: id.to_string(),
+                source,
+            })?
+            .ok_or(GreetingControllerError::NotFound { id: id.to_string() })
+    }
+}
+`
+
+func writeUnder(t *testing.T, root string) func(rel, content string) {
+	t.Helper()
+
+	return func(rel, content string) {
 		t.Helper()
 
 		p := filepath.Join(root, rel)
@@ -1042,22 +948,48 @@ func TestTheGeneratedSkeletonPassesCargoCheck(t *testing.T) {
 			t.Fatalf("writing %s: %v", p, err)
 		}
 	}
+}
 
-	write("Cargo.toml", workspaceManifest)
-	write("core/Cargo.toml", coreManifest)
-	write("app/Cargo.toml", appManifest)
-
-	for _, f := range files {
-		write(f.Path, f.Content)
+func TestTheGeneratedCrateCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
 	}
 
-	write("core/src/hand/datagram.rs", "pub struct Datagram {\n    pub payload: String,\n}\n")
-	write("core/src/hand/echo_controller.rs", "use crate::hand::datagram::Datagram;\n\npub fn echo(v: Datagram) -> String {\n    v.payload\n}\n")
+	files, err := hexrust.Generate([]byte(twoOperationsAndAPathParam), hexrust.Options{
+		Service: "songe-hello",
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	root := t.TempDir()
+	write := writeUnder(t, root)
+
+	write("Cargo.toml", crateManifest)
+
+	for _, f := range files {
+		if strings.HasSuffix(f.Path, ".rs") {
+			write(f.Path, f.Content)
+		}
+	}
+
+	write("src/controller/greeting_controller.rs", greetingControllerImpl)
 
 	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
 	cmd.Dir = root
 
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo check: %v\n%s", err, out)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return
 	}
+
+	lower := strings.ToLower(string(out))
+	if strings.Contains(lower, "could not resolve host") ||
+		strings.Contains(lower, "failed to get") ||
+		strings.Contains(lower, "spurious network error") {
+		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+	}
+
+	t.Fatalf("cargo check: %v\n%s", err, out)
 }

@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. side picks core or app. cell names the module directory and defaults to grpc.
+          description: The kind's layout. cell names the module directory and defaults to grpc.
         runtime:
           type: object
           additionalProperties: true
@@ -49,12 +49,6 @@ components:
         srcDir:
           type: string
           description: The cell directory. Every emitted path is relative to it.
-        coreDir:
-          type: string
-          description: Unused. A cell lives in the crate that mounts it.
-        appDir:
-          type: string
-          description: Unused. A cell lives in the crate that mounts it.
       required:
         - name
         - kind
@@ -79,5 +73,8 @@ components:
           description: The emitted files. forge-dev core writes them.
           items:
             $ref: "#/components/schemas/GeneratedFile"
+        manifest:
+          type: boolean
+          description: True when the answer carries the cell manifest zz_generated_cell.yaml.
       required:
         - files

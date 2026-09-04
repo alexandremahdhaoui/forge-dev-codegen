@@ -40,10 +40,10 @@ func NewHandlers() Handlers {
 			}
 
 			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
-				Service: input.Name,
-				AppDir:  firstOf(input.AppDir, layoutString(input.Layout, "appDir")),
-				Cell:    layoutString(input.Layout, "cell"),
-				Proto:   []byte(input.ProtoSpec),
+				Service:  input.Name,
+				CrateDir: layoutString(input.Layout, "crateDir"),
+				Cell:     layoutString(input.Layout, "cell"),
+				Proto:    []byte(input.ProtoSpec),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
@@ -75,16 +75,6 @@ func readVectors(input GenerateInput) ([]byte, error) {
 	}
 
 	return doc, nil
-}
-
-func firstOf(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-
-	return ""
 }
 
 func layoutString(layout map[string]interface{}, key string) string {

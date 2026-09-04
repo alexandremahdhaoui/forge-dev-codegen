@@ -42,25 +42,37 @@ type rpcView struct {
 }
 
 type serviceView struct {
-	Header          string
-	Package         string
-	Cell            string
-	CoreCrate       string
-	ServicePascal   string
-	ServiceSnake    string
-	ClientTrait     string
-	ClientError     string
-	ClientStruct    string
-	DriverStruct    string
-	ControllerSnake string
-	ControllerTrait string
-	ControllerError string
-	PbClientMod     string
-	PbServerMod     string
-	Messages        []messageView
-	Rpcs            []rpcView
-	TraitTypes      []string
-	AllTypes        []string
+	Header           string
+	Package          string
+	Cell             string
+	CratePath        string
+	ModulePrefix     string
+	ServicePascal    string
+	ServiceSnake     string
+	ClientTrait      string
+	ClientError      string
+	ClientStruct     string
+	ClientConfig     string
+	ClientSetupError string
+	ClientModule     string
+	ClientName       string
+	DriverStruct     string
+	DriverConfig     string
+	DriverError      string
+	DriverService    string
+	DriverModule     string
+	DriverName       string
+	DefaultAddress   string
+	DefaultEndpoint  string
+	ControllerSnake  string
+	ControllerTrait  string
+	ControllerError  string
+	PbClientMod      string
+	PbServerMod      string
+	Messages         []messageView
+	Rpcs             []rpcView
+	TraitTypes       []string
+	AllTypes         []string
 }
 
 func ScalarRustType(kind string) string {
@@ -175,7 +187,7 @@ func Closure(spec *Spec, roots []string) ([]Message, error) {
 	return messages, nil
 }
 
-func buildServiceView(spec *Spec, svc Service, opts Options) (serviceView, error) {
+func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (serviceView, error) {
 	roots := []string{}
 	for _, r := range svc.Rpcs {
 		roots = append(roots, r.Request, r.Response)
@@ -188,22 +200,42 @@ func buildServiceView(spec *Spec, svc Service, opts Options) (serviceView, error
 		return serviceView{}, fmt.Errorf("building service %q: %w", svc.Name, err)
 	}
 
+	driverName := opts.Cell
+	clientName := opts.Cell + "_client"
+
+	if !only {
+		driverName = opts.Cell + "_" + Snake(svc.Name)
+		clientName = opts.Cell + "_" + Snake(svc.Name) + "_client"
+	}
+
 	sv := serviceView{
-		Header:          header,
-		Package:         spec.Package,
-		Cell:            opts.Cell,
-		CoreCrate:       Snake(opts.Service) + "_core",
-		ServicePascal:   Pascal(svc.Name),
-		ServiceSnake:    Snake(svc.Name),
-		ClientTrait:     Pascal(svc.Name) + "Client",
-		ClientError:     Pascal(svc.Name) + "ClientError",
-		ClientStruct:    Pascal(svc.Name) + "GrpcClient",
-		DriverStruct:    Pascal(svc.Name) + "GrpcDriver",
-		ControllerSnake: Snake(svc.Name),
-		ControllerTrait: Pascal(svc.Name) + "Controller",
-		ControllerError: Pascal(svc.Name) + "ControllerError",
-		PbClientMod:     Snake(svc.Name) + "_client",
-		PbServerMod:     Snake(svc.Name) + "_server",
+		Header:           header,
+		Package:          spec.Package,
+		Cell:             opts.Cell,
+		CratePath:        "crate::" + opts.Cell + "::",
+		ModulePrefix:     opts.Cell + "::",
+		ServicePascal:    Pascal(svc.Name),
+		ServiceSnake:     Snake(svc.Name),
+		ClientTrait:      Pascal(svc.Name) + "Client",
+		ClientError:      Pascal(svc.Name) + "ClientError",
+		ClientStruct:     Pascal(svc.Name) + "GrpcClient",
+		ClientConfig:     Pascal(svc.Name) + "GrpcClientConfig",
+		ClientSetupError: Pascal(svc.Name) + "GrpcClientError",
+		ClientModule:     Snake(svc.Name) + "_grpc_client",
+		ClientName:       clientName,
+		DriverStruct:     Pascal(svc.Name) + "GrpcDriver",
+		DriverConfig:     Pascal(svc.Name) + "GrpcDriverConfig",
+		DriverError:      Pascal(svc.Name) + "GrpcDriverError",
+		DriverService:    Pascal(svc.Name) + "GrpcService",
+		DriverModule:     Snake(svc.Name) + "_grpc_driver",
+		DriverName:       driverName,
+		DefaultAddress:   DefaultAddress,
+		DefaultEndpoint:  DefaultEndpoint,
+		ControllerSnake:  Snake(svc.Name),
+		ControllerTrait:  Pascal(svc.Name) + "Controller",
+		ControllerError:  Pascal(svc.Name) + "ControllerError",
+		PbClientMod:      Snake(svc.Name) + "_client",
+		PbServerMod:      Snake(svc.Name) + "_server",
 	}
 
 	for _, m := range messages {

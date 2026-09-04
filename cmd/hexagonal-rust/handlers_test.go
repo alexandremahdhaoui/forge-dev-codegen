@@ -16,8 +16,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,78 +71,25 @@ func TestTheEngineFillsTheHexagonalRustCellOnly(t *testing.T) {
 	}
 }
 
-func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
-	srcDir := t.TempDir()
-	hand := filepath.Join(srcDir, "core", "src", "hand", "greeting_controller.rs")
-
-	if err := os.MkdirAll(filepath.Dir(hand), 0o755); err != nil {
-		t.Fatalf("making the hand dir: %v", err)
-	}
-
-	if err := os.WriteFile(hand, []byte("the author's body"), 0o644); err != nil {
-		t.Fatalf("writing the hand file: %v", err)
-	}
-
+func TestTheAnswerDeclaresThatItCarriesACellManifest(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec, SrcDir: srcDir,
+		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
-	mounted := false
-
-	for _, f := range out.Files {
-		if strings.HasSuffix(f.Path, "/hand/mod.rs") {
-			mounted = true
-
-			continue
-		}
-
-		if strings.Contains(f.Path, "/hand/") {
-			t.Errorf("%s was answered although it exists", f.Path)
-		}
-	}
-
-	if !mounted {
-		t.Error("the hand mount belongs to the generator and is always answered")
-	}
-}
-
-func TestTheLayoutMountsEveryExtraHandModule(t *testing.T) {
-	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"hand": []interface{}{"echo_controller", "datagram"}},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
+	if !out.Manifest {
+		t.Error("the answer does not declare a manifest")
 	}
 
 	for _, f := range out.Files {
-		if f.Path != "core/src/hand/mod.rs" {
-			continue
+		if f.Path == "zz_generated_cell.yaml" {
+			return
 		}
-
-		for _, want := range []string{"pub mod datagram;", "pub mod echo_controller;"} {
-			if !strings.Contains(f.Content, want) {
-				t.Errorf("the hand mount lacks %q\n%s", want, f.Content)
-			}
-		}
-
-		return
 	}
 
-	t.Fatal("no hand mount was answered")
-}
-
-func TestALayoutThatMalformsTheHandListIsRefused(t *testing.T) {
-	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"hand": "datagram"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "it is a list of module names under src/hand") {
-		t.Fatalf("want a refused hand list, got %v", err)
-	}
+	t.Fatal("no cell manifest was answered")
 }
 
 func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
@@ -156,16 +101,19 @@ func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
-	byPath := map[string]string{}
 	for _, f := range out.Files {
-		byPath[f.Path] = f.Content
+		if f.Path != "src/lib.rs" {
+			continue
+		}
+
+		if !strings.Contains(f.Content, "pub mod grpc;") {
+			t.Errorf("src/lib.rs does not mount the cell\n%s", f.Content)
+		}
+
+		return
 	}
 
-	for _, path := range []string{"core/src/lib.rs", "app/src/lib.rs"} {
-		if !strings.Contains(byPath[path], "pub mod grpc;") {
-			t.Errorf("%s does not mount the cell", path)
-		}
-	}
+	t.Fatal("no crate root was answered")
 }
 
 func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
@@ -178,32 +126,26 @@ func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	}
 }
 
-func TestTheOutputRootsComeFromTheTopLevelOrTheLayout(t *testing.T) {
+func TestTheLayoutNamesTheCellTheManifestDeclares(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"coreDir": "../svc-core", "appDir": "../svc-app"},
+		Layout: map[string]interface{}{"cell": "http"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
 	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, "../svc-core/") && !strings.HasPrefix(f.Path, "../svc-app/") {
-			t.Errorf("%s ignores the layout roots", f.Path)
+		if f.Path != "zz_generated_cell.yaml" {
+			continue
 		}
+
+		if !strings.Contains(f.Content, "cell: http") {
+			t.Errorf("the manifest does not name the cell\n%s", f.Content)
+		}
+
+		return
 	}
 
-	out, err = NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec, CoreDir: "c", AppDir: "a",
-		Layout: map[string]interface{}{"coreDir": "../svc-core"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, "c/") && !strings.HasPrefix(f.Path, "a/") {
-			t.Errorf("%s ignores the top level roots", f.Path)
-		}
-	}
+	t.Fatal("no cell manifest was answered")
 }

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
 func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
@@ -35,8 +36,6 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 		"controller/zz_generated_hello_controller.rs",
 		"driver/mod.rs",
 		"driver/zz_generated_hello_grpc_driver.rs",
-		"hand/hello_controller.rs",
-		"hand/mod.rs",
 		"mod.rs",
 		"port/mod.rs",
 		"port/zz_generated_hello_client.rs",
@@ -44,6 +43,7 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 		"types/mod.rs",
 		"types/zz_generated_hello_messages.rs",
 		"zz_generated_build.rs",
+		"zz_generated_cell.yaml",
 	}
 
 	gotPaths := []string{}
@@ -70,17 +70,24 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 				"pub mod adapter;",
 				"pub mod controller;",
 				"pub mod driver;",
-				"pub mod hand;",
 				"pub mod port;",
 				"pub mod types;",
 			},
 		},
 		{
-			name: "a layer mod file mounts the generated module and aliases it without a path attribute",
+			name: "the controller layer mounts the user impl file and re exports the trait and the struct",
 			path: "controller/mod.rs",
 			want: []string{
 				"pub mod zz_generated_hello_controller;",
-				"pub use zz_generated_hello_controller as hello_controller;",
+				"mod hello_controller;",
+				"pub use zz_generated_hello_controller::{HelloController, HelloControllerError, HelloControllerImpl};",
+			},
+		},
+		{
+			name: "the adapter and the driver layers allow the io lint table",
+			path: "driver/mod.rs",
+			want: []string{
+				"#![allow(clippy::disallowed_methods, clippy::disallowed_types)]",
 			},
 		},
 		{
@@ -116,14 +123,17 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 			},
 		},
 		{
-			name: "the adapter wraps a tonic channel behind the port trait",
+			name: "the adapter builds its channel from its own config struct",
 			path: "adapter/zz_generated_hello_grpc_client.rs",
 			want: []string{
-				"use songe_hello_core::grpc::port::hello_client::{HelloClient, HelloClientError};",
+				"use crate::grpc::port::hello_client::{HelloClient, HelloClientError};",
 				"mod pb {",
 				`    tonic::include_proto!("songe.hello.v1");`,
+				"pub struct HelloGrpcClientConfig {",
+				"    pub endpoint: String,",
 				"pub struct HelloGrpcClient {",
 				"    channel: tonic::transport::Channel,",
+				"    pub fn new(config: HelloGrpcClientConfig) -> Result<Self, HelloGrpcClientError> {",
 				"impl HelloClient for HelloGrpcClient {",
 				"    fn ping(&self, request: PingRequest) -> Result<PingReply, HelloClientError> {",
 				"let mut client = pb::hello_client::HelloClient::new(channel);",
@@ -132,22 +142,27 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 			},
 		},
 		{
-			name: "the driver forwards each rpc to the core controller",
+			name: "the driver takes a config and a boxed controller, binds, announces and serves",
 			path: "driver/zz_generated_hello_grpc_driver.rs",
 			want: []string{
-				"use songe_hello_core::grpc::controller::hello_controller::HelloController;",
-				"pub struct HelloGrpcDriver {",
-				"    controller: Arc<dyn HelloController>,",
-				"pub fn into_server(self) -> pb::hello_server::HelloServer<Self> {",
+				"use crate::grpc::controller::HelloController;",
+				"pub struct HelloGrpcDriverConfig {",
+				"    pub addr: String,",
+				"pub struct HelloGrpcService {",
+				"    controller: Arc<dyn HelloController + Send + Sync>,",
+				"    pub fn new(config: HelloGrpcDriverConfig, controller: Arc<dyn HelloController + Send + Sync>) -> Self {",
+				"    pub async fn bind(&mut self) -> Result<(), HelloGrpcDriverError> {",
+				`        println!("LISTENING_GRPC {}", self.local_port()?);`,
+				"            .serve_with_incoming(incoming)",
 				"#[tonic::async_trait]",
-				"impl pb::hello_server::Hello for HelloGrpcDriver {",
+				"impl pb::hello_server::Hello for HelloGrpcService {",
 				"    async fn ping(&self, request: tonic::Request<pb::PingRequest>) -> Result<tonic::Response<pb::PingReply>, tonic::Status> {",
 				".controller",
 				".ping(core_request)",
 			},
 		},
 		{
-			name: "the controller trait carries one method per rpc over the proto derived types",
+			name: "the controller trait carries one method per rpc and the struct the user implements",
 			path: "controller/zz_generated_hello_controller.rs",
 			want: []string{
 				"use crate::grpc::types::hello_messages::{PingRequest, PingReply};",
@@ -157,20 +172,7 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 				"pub enum HelloControllerError {",
 				`    #[error("running {operation:?}: not implemented")]`,
 				"pub struct HelloControllerImpl;",
-				"impl HelloController for HelloControllerImpl {",
-				"crate::grpc::hand::hello_controller::ping(request)",
-			},
-		},
-		{
-			name: "the hand controller skeleton answers not implemented for every rpc",
-			path: "hand/hello_controller.rs",
-			want: []string{
-				"use crate::grpc::controller::hello_controller::HelloControllerError;",
-				"use crate::grpc::types::hello_messages::{PingRequest, PingReply};",
-				"pub fn ping(request: PingRequest) -> Result<PingReply, HelloControllerError> {",
-				"    let _ = request;",
-				"    Err(HelloControllerError::NotImplemented {",
-				`        operation: "ping".to_string(),`,
+				"    pub fn new() -> Self {",
 			},
 		},
 		{
@@ -201,7 +203,91 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 	}
 }
 
-func TestEveryGeneratedFileStartsWithTheHeaderLine(t *testing.T) {
+func TestTheGeneratedControllerNeverCallsAHandFunction(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if strings.Contains(f.Path, "hand") || strings.Contains(f.Content, "::hand::") {
+			t.Errorf("%s still reaches for a hand module", f.Path)
+		}
+	}
+}
+
+func TestTheCellManifestNamesTheDriverTheAdapterTheControllerAndThePort(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var body string
+
+	for _, f := range files {
+		if f.Path == cellmanifest.FileName {
+			body = f.Content
+		}
+	}
+
+	if body == "" {
+		t.Fatal("no cell manifest was emitted")
+	}
+
+	m, err := cellmanifest.Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v\n%s", err, body)
+	}
+
+	if m.Cell != "grpc" {
+		t.Errorf("cell = %q, want grpc", m.Cell)
+	}
+
+	if len(m.Provides.Drivers) != 1 {
+		t.Fatalf("drivers = %+v", m.Provides.Drivers)
+	}
+
+	driver := m.Provides.Drivers[0]
+	if driver.Name != "grpc" || driver.Type != "HelloGrpcDriver" || driver.Module != "grpc::driver::hello_grpc_driver" {
+		t.Errorf("driver = %+v", driver)
+	}
+
+	if !reflect.DeepEqual(driver.Requires, []string{"HelloController"}) {
+		t.Errorf("driver requires = %+v", driver.Requires)
+	}
+
+	if driver.Config["addr"].Default != "127.0.0.1:0" {
+		t.Errorf("driver config = %+v", driver.Config)
+	}
+
+	if len(m.Provides.Adapters) != 1 {
+		t.Fatalf("adapters = %+v", m.Provides.Adapters)
+	}
+
+	adapter := m.Provides.Adapters[0]
+	if adapter.Name != "grpc_client" || adapter.Implements != "HelloClient" || adapter.Type != "HelloGrpcClient" {
+		t.Errorf("adapter = %+v", adapter)
+	}
+
+	if len(m.Provides.Controllers) != 1 {
+		t.Fatalf("controllers = %+v", m.Provides.Controllers)
+	}
+
+	controller := m.Provides.Controllers[0]
+	if controller.Trait != "HelloController" || controller.Impl != "HelloControllerImpl" || controller.Module != "grpc::controller" {
+		t.Errorf("controller = %+v", controller)
+	}
+
+	if len(controller.Ports) != 0 {
+		t.Errorf("a grpc controller consumes no port, got %+v", controller.Ports)
+	}
+
+	if len(m.Provides.Ports) != 1 || m.Provides.Ports[0].Trait != "HelloClient" {
+		t.Errorf("ports = %+v", m.Provides.Ports)
+	}
+}
+
+func TestEveryGeneratedRustFileStartsWithTheHeaderLine(t *testing.T) {
 	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -210,8 +296,12 @@ func TestEveryGeneratedFileStartsWithTheHeaderLine(t *testing.T) {
 	const header = "// Code generated by grpc-rust-tonic (forge-dev-codegen). DO NOT EDIT.\n"
 
 	for _, f := range files {
-		if f.WriteOnce == strings.HasPrefix(f.Content, header) {
-			t.Errorf("%s: the header belongs on every file but a hand file", f.Path)
+		if !strings.HasSuffix(f.Path, ".rs") {
+			continue
+		}
+
+		if !strings.HasPrefix(f.Content, header) {
+			t.Errorf("%s does not open with the generated header", f.Path)
 		}
 	}
 }
@@ -233,88 +323,6 @@ message Empty {}
 	_, err := grpcrust.Generate([]byte(doc), grpcrust.Options{Service: "svc"})
 	if err == nil || !strings.Contains(err.Error(), "declares no service") {
 		t.Fatalf("want an error requiring a service, got %v", err)
-	}
-}
-
-func TestASideAnswersOnlyItsOwnLayersInsideTheCell(t *testing.T) {
-	tests := []struct {
-		side string
-		opts grpcrust.Options
-		want []string
-	}{
-		{
-			side: "core",
-			opts: grpcrust.Options{Service: "songe-hello", Side: "core"},
-			want: []string{
-				"controller/mod.rs",
-				"controller/zz_generated_hello_controller.rs",
-				"hand/hello_controller.rs",
-				"hand/mod.rs",
-				"mod.rs",
-				"port/mod.rs",
-				"port/zz_generated_hello_client.rs",
-				"types/mod.rs",
-				"types/zz_generated_hello_messages.rs",
-			},
-		},
-		{
-			side: "app",
-			opts: grpcrust.Options{Service: "songe-hello", Side: "app"},
-			want: []string{
-				"adapter/mod.rs",
-				"adapter/zz_generated_hello_grpc_client.rs",
-				"driver/mod.rs",
-				"driver/zz_generated_hello_grpc_driver.rs",
-				"mod.rs",
-				"proto/zz_generated_hello.proto",
-				"zz_generated_build.rs",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run("the "+tt.side+" side answers only its own files", func(t *testing.T) {
-			files, err := grpcrust.Generate([]byte(helloProto), tt.opts)
-			if err != nil {
-				t.Fatalf("generating: %v", err)
-			}
-
-			got := []string{}
-			for _, f := range files {
-				got = append(got, f.Path)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("emitted paths\n got %q\nwant %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGeneratingRefusesASideThatNamesNeitherCrate(t *testing.T) {
-	_, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello", Side: "both"})
-	if err == nil || !strings.Contains(err.Error(), "side must be core, app or empty") {
-		t.Fatalf("want an error refusing the side, got %v", err)
-	}
-}
-
-func TestTheHandControllerSkeletonIsTheOnlyWriteOnceFile(t *testing.T) {
-	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	writeOnce := []string{}
-
-	for _, f := range files {
-		if f.WriteOnce {
-			writeOnce = append(writeOnce, f.Path)
-		}
-	}
-
-	want := []string{"hand/hello_controller.rs"}
-	if !reflect.DeepEqual(writeOnce, want) {
-		t.Fatalf("write once files\n got %q\nwant %q", writeOnce, want)
 	}
 }
 

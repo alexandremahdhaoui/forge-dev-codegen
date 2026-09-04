@@ -167,7 +167,7 @@ async fn create_valid_name() {
         .times(1)
         .returning(|_body| Ok(serde_json::from_str::<Greeting>("{\"id\":\"6ba7b810-9dad-11d1-80b4-00c04fd430c8\",\"name\":\"Songe\",\"count\":0}").expect("decoding controllerReply")));
 
-    let driver = HttpDriver::new(std::sync::Arc::new(greeting_controller));
+    let driver = HttpDriver::new(HttpDriverConfig::default(), std::sync::Arc::new(greeting_controller));
 
     let request = Request::builder()
         .method("POST")
@@ -197,22 +197,22 @@ func TestTheEmittedFileHasOneEntryUnderAppTests(t *testing.T) {
 		got = append(got, f.Path)
 	}
 
-	want := []string{"app/tests/zz_generated_vectors.rs"}
+	want := []string{"tests/zz_generated_vectors.rs"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("emitted paths\n got %q\nwant %q", got, want)
 	}
 }
 
-func TestARelativeAppDirPrefixesTheEmittedPath(t *testing.T) {
+func TestARelativeCrateDirPrefixesTheEmittedPath(t *testing.T) {
 	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{
-		Service: "songe-hello",
-		AppDir:  "../songe-hello-app",
+		Service:  "songe-hello",
+		CrateDir: "../songe-hello",
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if files[0].Path != "../songe-hello-app/tests/zz_generated_vectors.rs" {
+	if files[0].Path != "../songe-hello/tests/zz_generated_vectors.rs" {
 		t.Fatalf("got path %q", files[0].Path)
 	}
 }
@@ -250,10 +250,10 @@ func TestTheGeneratedFileMocksTheControllerTraitByFullPathToAvoidNameCollision(t
 	content := files[0].Content
 
 	want := []string{
-		"use songe_hello_core::controller::greeting_controller::GreetingControllerError;",
+		"use songe_hello::controller::GreetingControllerError;",
 		"mockall::mock! {",
 		"    pub GreetingController {}",
-		"    impl songe_hello_core::controller::greeting_controller::GreetingController for GreetingController {",
+		"    impl songe_hello::controller::GreetingController for GreetingController {",
 		"        fn create_greeting(&self, body: CreateGreetingRequest) -> Result<Greeting, GreetingControllerError>;",
 		"        fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError>;",
 	}
@@ -264,7 +264,7 @@ func TestTheGeneratedFileMocksTheControllerTraitByFullPathToAvoidNameCollision(t
 		}
 	}
 
-	if strings.Contains(content, "use songe_hello_core::controller::greeting_controller::GreetingController;") {
+	if strings.Contains(content, "use songe_hello::controller::GreetingController;") {
 		t.Error("importing the trait under its own name collides with the mock struct sharing that name")
 	}
 }
@@ -552,10 +552,12 @@ func TestADatagramVectorDrivesTheGeneratedUdpDriverOverAMockedController(t *test
 		"let expected_request = Echo { payload: \"songe\".to_string(), count: 7 };",
 		"let controller_reply = Echo { payload: \"songe\".to_string(), count: 8 };",
 		"let mut hello_datagram_controller = MockHelloDatagramController::new();",
-		"tokio::net::UdpSocket::bind(\"127.0.0.1:0\")",
-		"HelloDatagramUdpDriver::new(socket, hello_datagram_controller)",
+		"let mut driver = HelloDatagramUdpDriver::new(",
+		"        std::sync::Arc::new(hello_datagram_controller),",
+		"driver.bind().await.expect(\"a bound udp socket\");",
 		"eprintln!(\"serving HelloDatagramUdpDriver: {}\", error_chain(&error));",
-		"HelloDatagramUdpClient::new(format!(\"127.0.0.1:{port}\"), *b\"0123456789abcdef\")",
+		"let client = HelloDatagramUdpClient::new(HelloDatagramUdpClientConfig {",
+		"        session_id: \"0123456789abcdef\".to_string(),",
 		"assert_eq!(reply, Echo { payload: \"songe\".to_string(), count: 8 });",
 	} {
 		if !strings.Contains(content, want) {
@@ -568,10 +570,10 @@ func TestADatagramVectorMocksTheDatagramControllerTraitByFullPath(t *testing.T) 
 	content := generateWithDatagrams(t, datagramCases)
 
 	for _, want := range []string{
-		"impl songe_hello_core::udp::controller::hello_datagram_controller::HelloDatagramController for HelloDatagramController {",
+		"impl songe_hello::udp::controller::HelloDatagramController for HelloDatagramController {",
 		"fn echo(&self, request: Echo, context: &Context) -> Result<Echo, HelloDatagramControllerError>;",
-		"use songe_hello_core::udp::types::context::Context;",
-		"use songe_hello_core::udp::types::hello_datagram_messages::{Echo};",
+		"use songe_hello::udp::types::context::Context;",
+		"use songe_hello::udp::types::hello_datagram_messages::{Echo};",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("the emitted file never carried %q:\n%s", want, content)

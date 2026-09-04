@@ -82,33 +82,21 @@ func TestTheEngineFillsTheVectorsCellOnly(t *testing.T) {
 		t.Fatalf("want one file, got %d", len(out.Files))
 	}
 
-	if out.Files[0].Path != "app/tests/zz_generated_vectors.rs" {
+	if out.Files[0].Path != "tests/zz_generated_vectors.rs" {
 		t.Fatalf("got path %q", out.Files[0].Path)
 	}
 }
 
-func TestTheAppDirComesFromTheTopLevelOrTheLayout(t *testing.T) {
+func TestTheCrateDirComesFromTheLayout(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,
-		Layout: map[string]interface{}{"appDir": "../svc-app"},
+		Layout: map[string]interface{}{"crateDir": "../svc"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if out.Files[0].Path != "../svc-app/tests/zz_generated_vectors.rs" {
-		t.Fatalf("got path %q", out.Files[0].Path)
-	}
-
-	out, err = NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors, AppDir: "a",
-		Layout: map[string]interface{}{"appDir": "../svc-app"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	if out.Files[0].Path != "a/tests/zz_generated_vectors.rs" {
+	if out.Files[0].Path != "../svc/tests/zz_generated_vectors.rs" {
 		t.Fatalf("got path %q", out.Files[0].Path)
 	}
 }

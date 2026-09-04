@@ -16,8 +16,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -96,86 +94,49 @@ func TestEveryAnsweredPathStaysInsideTheCellDirectory(t *testing.T) {
 	}
 }
 
-func TestTheLayoutSideAnswersOnlyItsOwnLayers(t *testing.T) {
-	tests := []struct {
-		side   string
-		want   []string
-		reject []string
-	}{
-		{
-			side:   "core",
-			want:   []string{"controller/zz_generated_hello_controller.rs", "hand/hello_controller.rs"},
-			reject: []string{"adapter/zz_generated_hello_grpc_client.rs", "zz_generated_build.rs"},
-		},
-		{
-			side:   "app",
-			want:   []string{"driver/zz_generated_hello_grpc_driver.rs", "zz_generated_build.rs"},
-			reject: []string{"port/zz_generated_hello_client.rs", "hand/hello_controller.rs"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run("the "+tt.side+" side answers only its own files", func(t *testing.T) {
-			out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-				Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-				Layout: map[string]interface{}{"side": tt.side},
-			})
-			if err != nil {
-				t.Fatalf("generating: %v", err)
-			}
-
-			got := map[string]bool{}
-			for _, f := range out.Files {
-				got[f.Path] = true
-			}
-
-			for _, path := range tt.want {
-				if !got[path] {
-					t.Errorf("the %s side did not answer %s", tt.side, path)
-				}
-			}
-
-			for _, path := range tt.reject {
-				if got[path] {
-					t.Errorf("the %s side answered %s, which belongs to the other crate", tt.side, path)
-				}
-			}
-		})
-	}
-}
-
-func TestALayoutSideThatNamesNeitherCrateIsRefused(t *testing.T) {
-	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-		Layout: map[string]interface{}{"side": "both"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "side must be core, app or empty") {
-		t.Fatalf("want an error refusing the side, got %v", err)
-	}
-}
-
-func TestAHandControllerThatExistsIsNeverAnsweredAgain(t *testing.T) {
-	srcDir := t.TempDir()
-	hand := filepath.Join(srcDir, "hand", "hello_controller.rs")
-
-	if err := os.MkdirAll(filepath.Dir(hand), 0o755); err != nil {
-		t.Fatalf("making the hand dir: %v", err)
-	}
-
-	if err := os.WriteFile(hand, []byte("the author's body"), 0o644); err != nil {
-		t.Fatalf("writing the hand file: %v", err)
-	}
-
+func TestTheCellHoldsOneCrateWorthOfLayersAndNoHandDirectory(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "grpc", ProtoSpec: smallProto, SrcDir: srcDir,
+		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
+	got := map[string]bool{}
 	for _, f := range out.Files {
-		if strings.Contains(f.Path, "/hand/") {
-			t.Errorf("%s was answered although it exists", f.Path)
+		got[f.Path] = true
+	}
+
+	for _, path := range []string{
+		"adapter/zz_generated_hello_grpc_client.rs",
+		"controller/zz_generated_hello_controller.rs",
+		"driver/zz_generated_hello_grpc_driver.rs",
+		"port/zz_generated_hello_client.rs",
+		"types/zz_generated_hello_messages.rs",
+		"zz_generated_build.rs",
+		"zz_generated_cell.yaml",
+	} {
+		if !got[path] {
+			t.Errorf("the cell did not answer %s", path)
 		}
+	}
+
+	for _, f := range out.Files {
+		if strings.Contains(f.Path, "hand") {
+			t.Errorf("%s belongs to a hand directory, which is gone", f.Path)
+		}
+	}
+}
+
+func TestTheAnswerDeclaresThatItCarriesACellManifest(t *testing.T) {
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if !out.Manifest {
+		t.Error("the answer does not declare a manifest")
 	}
 }

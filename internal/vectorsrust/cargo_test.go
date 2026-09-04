@@ -42,33 +42,12 @@ message Echo {
 message Nothing {}
 `
 
-const cargoWorkspaceManifest = `[workspace]
-resolver = "2"
-members = ["core", "app"]
-`
-
-const cargoCoreManifest = `[package]
-name = "songe-hello-core"
+const cargoCrateManifest = `[package]
+name = "songe-hello"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prost = "0.14"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-
-[dev-dependencies]
-mockall = "0.15"
-`
-
-const cargoAppManifest = `[package]
-name = "songe-hello-app"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-songe-hello-core = { path = "../core" }
 anyhow = "1"
 axum = "0.8"
 prost = "0.14"
@@ -82,6 +61,62 @@ tokio = { version = "1", features = ["full"] }
 mockall = "0.15"
 tower = "0.5"
 http-body-util = "0.1"
+`
+
+const cargoGreetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
+use crate::port::greeting_store::GreetingStore;
+use crate::types::create_greeting_request::CreateGreetingRequest;
+use crate::types::greeting::Greeting;
+
+impl GreetingController for GreetingControllerImpl {
+    fn create_greeting(
+        &self,
+        body: CreateGreetingRequest,
+    ) -> Result<Greeting, GreetingControllerError> {
+        let greeting = Greeting {
+            count: 0,
+            id: body.name.clone(),
+            name: body.name,
+        };
+
+        self.greeting_store
+            .put(greeting.clone())
+            .map_err(|source| GreetingControllerError::GreetingStore {
+                id: greeting.id.clone(),
+                source,
+            })?;
+
+        Ok(greeting)
+    }
+
+    fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError> {
+        self.greeting_store
+            .get(id)
+            .map_err(|source| GreetingControllerError::GreetingStore {
+                id: id.to_string(),
+                source,
+            })?
+            .ok_or(GreetingControllerError::NotFound { id: id.to_string() })
+    }
+}
+`
+
+const cargoDatagramControllerImpl = `use crate::udp::controller::{
+    HelloDatagramController, HelloDatagramControllerError, HelloDatagramControllerImpl,
+};
+use crate::udp::types::context::Context;
+use crate::udp::types::hello_datagram_messages::Echo;
+
+impl HelloDatagramController for HelloDatagramControllerImpl {
+    fn echo(&self, request: Echo, context: &Context) -> Result<Echo, HelloDatagramControllerError> {
+        let _ = context;
+
+        Ok(Echo {
+            payload: request.payload,
+            count: request.count + 1,
+        })
+    }
+}
 `
 
 const cargoSpec = `
@@ -203,14 +238,9 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		t.Fatalf("generating the hexagonal skeleton: %v", err)
 	}
 
-	udpCoreFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello", Side: "core"})
+	udpFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello"})
 	if err != nil {
-		t.Fatalf("generating the udp core cell: %v", err)
-	}
-
-	udpAppFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello", Side: "app"})
-	if err != nil {
-		t.Fatalf("generating the udp app cell: %v", err)
+		t.Fatalf("generating the udp cell: %v", err)
 	}
 
 	vectorFiles, err := vectorsrust.Generate([]byte(cargoSpec), []byte(cargoVectors), vectorsrust.Options{
@@ -236,30 +266,35 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		}
 	}
 
-	write("Cargo.toml", cargoWorkspaceManifest)
-	write("core/Cargo.toml", cargoCoreManifest)
-	write("app/Cargo.toml", cargoAppManifest)
+	write("Cargo.toml", cargoCrateManifest)
 
 	for _, f := range hexFiles {
+		if strings.HasSuffix(f.Path, ".yaml") {
+			continue
+		}
+
 		content := f.Content
-		if f.Path == "app/src/driver/zz_generated_wire.rs" && mangleWire != nil {
+		if f.Path == "src/driver/zz_generated_wire.rs" && mangleWire != nil {
 			content = mangleWire(content)
 		}
 
 		write(f.Path, content)
 	}
 
-	for _, f := range udpCoreFiles {
-		write(filepath.Join("core", "src", "udp", f.Path), f.Content)
-	}
+	for _, f := range udpFiles {
+		if strings.HasSuffix(f.Path, ".yaml") {
+			continue
+		}
 
-	for _, f := range udpAppFiles {
-		write(filepath.Join("app", "src", "udp", f.Path), f.Content)
+		write(filepath.Join("src", "udp", f.Path), f.Content)
 	}
 
 	for _, f := range vectorFiles {
 		write(f.Path, f.Content)
 	}
+
+	write("src/controller/greeting_controller.rs", cargoGreetingControllerImpl)
+	write("src/udp/controller/hello_datagram_controller.rs", cargoDatagramControllerImpl)
 
 	return root, cargo
 }
