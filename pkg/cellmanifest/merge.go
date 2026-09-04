@@ -89,10 +89,7 @@ func Merge(manifests []Manifest) (Merged, error) {
 func mergeDrivers(merged *Merged, m Manifest) error {
 	for _, driver := range m.Provides.Drivers {
 		if existing, taken := merged.Drivers[driver.Name]; taken {
-			return fmt.Errorf(
-				"driver %q is provided by cell %q and by cell %q",
-				driver.Name, existing.Cell, m.Cell,
-			)
+			return fmt.Errorf("driver %q is %s", driver.Name, providedBy(existing.Cell, m.Cell))
 		}
 
 		merged.Drivers[driver.Name] = DriverEntry{Cell: m.Cell, Driver: driver}
@@ -105,8 +102,8 @@ func mergeControllers(merged *Merged, m Manifest) error {
 	for _, controller := range m.Provides.Controllers {
 		if existing, taken := merged.Controllers[controller.Trait]; taken {
 			return fmt.Errorf(
-				"controller trait %q is provided by cell %q and by cell %q",
-				controller.Trait, existing.Cell, m.Cell,
+				"controller trait %q is %s",
+				controller.Trait, providedBy(existing.Cell, m.Cell),
 			)
 		}
 
@@ -119,10 +116,7 @@ func mergeControllers(merged *Merged, m Manifest) error {
 func mergeAdapters(merged *Merged, cellOfAdapter map[string]string, m Manifest) error {
 	for _, adapter := range m.Provides.Adapters {
 		if cell, taken := cellOfAdapter[adapter.Name]; taken {
-			return fmt.Errorf(
-				"adapter %q is provided by cell %q and by cell %q",
-				adapter.Name, cell, m.Cell,
-			)
+			return fmt.Errorf("adapter %q is %s", adapter.Name, providedBy(cell, m.Cell))
 		}
 
 		cellOfAdapter[adapter.Name] = m.Cell
@@ -138,8 +132,8 @@ func mergePorts(merged *Merged, m Manifest) error {
 		if taken {
 			if existing.Port != port {
 				return fmt.Errorf(
-					"port trait %q is provided by cell %q and by cell %q with a different module",
-					port.Trait, existing.Cell, m.Cell,
+					"port trait %q is %s with a different module",
+					port.Trait, providedBy(existing.Cell, m.Cell),
 				)
 			}
 
@@ -150,6 +144,14 @@ func mergePorts(merged *Merged, m Manifest) error {
 	}
 
 	return nil
+}
+
+func providedBy(first, second string) string {
+	if first == second {
+		return fmt.Sprintf("provided twice by cell %q", first)
+	}
+
+	return fmt.Sprintf("provided by cell %q and by cell %q", first, second)
 }
 
 func sortedKeys(set map[string]bool) []string {

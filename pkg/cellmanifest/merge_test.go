@@ -142,11 +142,6 @@ func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 		cell("rest", cellmanifest.Provides{}),
 	}
 
-	invalidCell := []cellmanifest.Manifest{
-		cell("rest", cellmanifest.Provides{}),
-		{Version: cellmanifest.Version, Cell: "", Generator: "grpc-rust-tonic"},
-	}
-
 	cases := []struct {
 		name      string
 		manifests []cellmanifest.Manifest
@@ -172,10 +167,99 @@ func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 			manifests: sameCellName,
 			message:   `cell "rest" is named by two manifests`,
 		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := cellmanifest.Merge(tc.manifests)
+			if err == nil {
+				t.Fatal("merging returned no error")
+			}
+
+			if err.Error() != tc.message {
+				t.Fatalf("got %q, want %q", err.Error(), tc.message)
+			}
+		})
+	}
+}
+
+func TestMergeRefusesACellThatDoesNotValidateBeforeItIsMerged(t *testing.T) {
+	t.Parallel()
+
+	manifests := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{}),
+		{Version: cellmanifest.Version, Cell: "", Generator: "grpc-rust-tonic"},
+	}
+
+	_, err := cellmanifest.Merge(manifests)
+	if err == nil {
+		t.Fatal("merging a cell with no name returned no error")
+	}
+
+	want := "merging cell manifests: cell name is empty"
+	if err.Error() != want {
+		t.Fatalf("got %q, want %q", err.Error(), want)
+	}
+}
+
+func TestMergeSaysTwiceWhenOneCellProvidesOneThingTwice(t *testing.T) {
+	t.Parallel()
+
+	twoDrivers := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{Drivers: []cellmanifest.Driver{
+			driver("hello", "HelloController"),
+			driver("hello", "HelloController"),
+		}}),
+	}
+
+	twoControllers := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{Controllers: []cellmanifest.Controller{
+			controller("HelloController", "A"),
+			controller("HelloController", "B"),
+		}}),
+	}
+
+	twoAdapters := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{Adapters: []cellmanifest.Adapter{
+			adapter("greeting_store", "GreetingStore"),
+			adapter("greeting_store", "HelloClient"),
+		}}),
+	}
+
+	twoPorts := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{Ports: []cellmanifest.Port{
+			port("GreetingStore", "rest::port::greeting_store"),
+			port("GreetingStore", "grpc::port::greeting_store"),
+		}}),
+	}
+
+	cases := []struct {
+		name      string
+		manifests []cellmanifest.Manifest
+		message   string
+	}{
 		{
-			name:      "a cell that does not validate is refused before it is merged",
-			manifests: invalidCell,
-			message:   "merging cell manifests: cell name is empty",
+			name:      "one cell providing one driver name twice names the cell once",
+			manifests: twoDrivers,
+			message:   `driver "hello" is provided twice by cell "rest"`,
+		},
+		{
+			name:      "one cell providing one controller trait twice names the cell once",
+			manifests: twoControllers,
+			message:   `controller trait "HelloController" is provided twice by cell "rest"`,
+		},
+		{
+			name:      "one cell providing one adapter name twice names the cell once",
+			manifests: twoAdapters,
+			message:   `adapter "greeting_store" is provided twice by cell "rest"`,
+		},
+		{
+			name:      "one cell providing one port trait twice from two modules names the cell once",
+			manifests: twoPorts,
+			message: `port trait "GreetingStore" is provided twice by cell "rest" ` +
+				`with a different module`,
 		},
 	}
 

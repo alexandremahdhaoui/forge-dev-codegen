@@ -2,6 +2,8 @@ package cellmanifest_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -184,6 +186,55 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 			name:         "an unknown top level key fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nprovide: {}\n",
 		},
+		{
+			name: "a driver name that is not snake case fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  drivers:\n    - name: GrpcDriver\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n",
+		},
+		{
+			name: "a controller trait a driver requires that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [hello-controller]\n",
+		},
+		{
+			name: "an adapter name that is not snake case fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: HelloGrpcClient\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n",
+		},
+		{
+			name: "a port an adapter implements that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: hello-client\n",
+		},
+		{
+			name: "a controller trait that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  controllers:\n    - trait: hello-controller\n" +
+				"      impl: HelloControllerImpl\n      module: grpc::controller::hello_controller\n",
+		},
+		{
+			name: "a port a controller consumes that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  controllers:\n    - trait: HelloController\n" +
+				"      impl: HelloControllerImpl\n      module: grpc::controller::hello_controller\n" +
+				"      ports: [greeting-store]\n",
+		},
+		{
+			name: "a port a cell requires that is not a Rust ident fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"requires:\n  ports: [greeting-store]\n",
+		},
+		{
+			name: "a config field name that is not snake case fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n" +
+				"      config:\n        Addr: { type: string }\n",
+		},
 	}
 
 	for _, tc := range cases {
@@ -197,15 +248,29 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 	}
 }
 
+func writtenManifest(t *testing.T, m cellmanifest.Manifest) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), cellmanifest.FileName)
+
+	if err := cellmanifest.Write(path, m); err != nil {
+		t.Fatalf("writing the manifest returned %v", err)
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the written manifest returned %v", err)
+	}
+
+	return string(written)
+}
+
 func TestWhatWriteProducesStillValidatesAgainstTheSchema(t *testing.T) {
 	t.Parallel()
 
-	written, err := cellmanifest.Marshal(exampleManifest())
-	if err != nil {
-		t.Fatalf("marshalling the example returned %v", err)
-	}
+	written := writtenManifest(t, exampleManifest())
 
-	body := strings.SplitN(string(written), "\n", 2)[1]
+	body := strings.SplitN(written, "\n", 2)[1]
 
 	if err := resolvedSchema(t).Validate(instanceOf(t, body)); err != nil {
 		t.Fatalf("validating the written manifest returned %v", err)
@@ -219,16 +284,13 @@ func TestAManifestWithNilSlicesStillValidatesAgainstTheSchema(t *testing.T) {
 	m.Requires.Ports = nil
 	m.Provides.Controllers[0].Ports = nil
 
-	written, err := cellmanifest.Marshal(m)
-	if err != nil {
-		t.Fatalf("marshalling a manifest with nil slices returned %v", err)
+	written := writtenManifest(t, m)
+
+	if strings.Contains(written, "null") {
+		t.Fatalf("got %q, want no null in the written manifest", written)
 	}
 
-	if strings.Contains(string(written), "null") {
-		t.Fatalf("got %q, want no null in the written manifest", string(written))
-	}
-
-	body := strings.SplitN(string(written), "\n", 2)[1]
+	body := strings.SplitN(written, "\n", 2)[1]
 
 	if err := resolvedSchema(t).Validate(instanceOf(t, body)); err != nil {
 		t.Fatalf("validating a manifest written from nil slices returned %v", err)
@@ -241,6 +303,115 @@ func TestAManifestWithNilSlicesStillValidatesAgainstTheSchema(t *testing.T) {
 
 	if len(back.Requires.Ports) != 0 || len(back.Provides.Controllers[0].Ports) != 0 {
 		t.Fatalf("got %+v, want empty port lists", back)
+	}
+}
+
+const nullCaseHeader = "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n"
+
+func TestParseAndTheSchemaBothRefuseAnExplicitNull(t *testing.T) {
+	t.Parallel()
+
+	resolved := resolvedSchema(t)
+
+	cases := []struct {
+		name         string
+		manifestYAML string
+		message      string
+	}{
+		{
+			name:         "a requires key with no value is refused",
+			manifestYAML: nullCaseHeader + "requires:\n",
+			message:      `key "requires" is null, write an empty map`,
+		},
+		{
+			name:         "a provides key with no value is refused",
+			manifestYAML: nullCaseHeader + "provides:\n",
+			message:      `key "provides" is null, write an empty map`,
+		},
+		{
+			name:         "a required ports key with no value is refused",
+			manifestYAML: nullCaseHeader + "requires:\n  ports:\n",
+			message:      `key "requires.ports" is null, write an empty list`,
+		},
+		{
+			name:         "a provided drivers key with no value is refused",
+			manifestYAML: nullCaseHeader + "provides:\n  drivers:\n",
+			message:      `key "provides.drivers" is null, write an empty list`,
+		},
+		{
+			name:         "a provided adapters key with no value is refused",
+			manifestYAML: nullCaseHeader + "provides:\n  adapters:\n",
+			message:      `key "provides.adapters" is null, write an empty list`,
+		},
+		{
+			name:         "a provided controllers key with no value is refused",
+			manifestYAML: nullCaseHeader + "provides:\n  controllers:\n",
+			message:      `key "provides.controllers" is null, write an empty list`,
+		},
+		{
+			name:         "a provided ports key with no value is refused",
+			manifestYAML: nullCaseHeader + "provides:\n  ports:\n",
+			message:      `key "provides.ports" is null, write an empty list`,
+		},
+		{
+			name: "a driver requires key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires:\n",
+			message: `key "provides.drivers[0].requires" is null, write an empty list`,
+		},
+		{
+			name: "a driver config key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n" +
+				"      config:\n",
+			message: `key "provides.drivers[0].config" is null, write an empty map`,
+		},
+		{
+			name: "a driver config field with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n" +
+				"      config:\n        addr:\n",
+			message: `key "provides.drivers[0].config.addr" is null, write an empty map`,
+		},
+		{
+			name: "an adapter config key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n" +
+				"      config:\n",
+			message: `key "provides.adapters[0].config" is null, write an empty map`,
+		},
+		{
+			name: "a controller ports key with no value is refused",
+			manifestYAML: nullCaseHeader +
+				"provides:\n  controllers:\n    - trait: HelloController\n" +
+				"      impl: HelloControllerImpl\n      module: grpc::controller::hello_controller\n" +
+				"      ports:\n",
+			message: `key "provides.controllers[0].ports" is null, write an empty list`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := cellmanifest.Parse([]byte(tc.manifestYAML))
+			if err == nil {
+				t.Fatalf("parsing %q returned no error", tc.manifestYAML)
+			}
+
+			want := "parsing cell manifest: " + tc.message
+			if err.Error() != want {
+				t.Fatalf("got %q, want %q", err.Error(), want)
+			}
+
+			if err := resolved.Validate(instanceOf(t, tc.manifestYAML)); err == nil {
+				t.Fatalf("validating %q against the schema returned no error", tc.manifestYAML)
+			}
+		})
 	}
 }
 
