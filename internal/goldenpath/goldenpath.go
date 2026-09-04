@@ -20,9 +20,11 @@ type Options struct {
 }
 
 const (
-	LayoutGo          = "go"
-	LayoutRustCoreApp = "rust-core-app"
+	LayoutGo   = "go"
+	LayoutRust = "rust"
 )
+
+const LayoutRustCoreApp = "rust-core-app"
 
 func Check(opts Options) ([]Finding, error) {
 	rootDir := opts.RootDir
@@ -33,10 +35,10 @@ func Check(opts Options) ([]Finding, error) {
 	switch opts.Layout {
 	case LayoutGo:
 		return checkGo(rootDir)
-	case LayoutRustCoreApp:
-		return checkRustCoreApp(rootDir)
+	case LayoutRust, LayoutRustCoreApp:
+		return checkRust(rootDir)
 	default:
-		return nil, fmt.Errorf("unknown layout %q: must be %q or %q", opts.Layout, LayoutGo, LayoutRustCoreApp)
+		return nil, fmt.Errorf("unknown layout %q: must be %q or %q", opts.Layout, LayoutGo, LayoutRust)
 	}
 }
 
@@ -130,34 +132,25 @@ func adapterImportsAnotherAdapter(adapterDir string) ([]Finding, error) {
 	return findings, nil
 }
 
-func checkRustCoreApp(rootDir string) ([]Finding, error) {
+const cellMarker = "forge-dev.yaml"
+
+const cellManifestFileName = "zz_generated_cell.yaml"
+
+var rootLayers = []string{"adapter", "bin", "config", "controller", "driver", "port", "types"}
+
+var cellLayers = []string{"adapter", "controller", "driver", "port", "types"}
+
+var pureLayers = []string{"controller", "port", "types"}
+
+func checkRust(rootDir string) ([]Finding, error) {
 	var findings []Finding
 
 	if !fileExists(filepath.Join(rootDir, "Cargo.toml")) {
-		findings = append(findings, Finding{Rule: "rust-cargo-toml", Path: "Cargo.toml", Message: "missing Cargo.toml"})
-		return findings, nil
+		return append(findings, Finding{Rule: "rust-cargo-toml", Path: "Cargo.toml", Message: "missing Cargo.toml"}), nil
 	}
 
 	if !fileExists(filepath.Join(rootDir, "src/lib.rs")) {
 		findings = append(findings, Finding{Rule: "rust-lib-rs", Path: "src/lib.rs", Message: "missing src/lib.rs"})
-	}
-
-	crateName, err := cargoCrateName(filepath.Join(rootDir, "Cargo.toml"))
-	if err != nil {
-		return nil, err
-	}
-
-	switch {
-	case strings.HasSuffix(crateName, "-core"):
-		findings = append(findings, checkRustCore(rootDir)...)
-	case strings.HasSuffix(crateName, "-app"):
-		findings = append(findings, checkRustApp(rootDir)...)
-	default:
-		findings = append(findings, Finding{
-			Rule:    "rust-crate-name",
-			Path:    "Cargo.toml",
-			Message: fmt.Sprintf("crate name %q must end in -core or -app", crateName),
-		})
 	}
 
 	if !fileExists(filepath.Join(rootDir, "forge.yaml")) {
@@ -168,10 +161,10 @@ func checkRustCoreApp(rootDir string) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	if hasGenerated && !fileExists(filepath.Join(rootDir, "forge-dev.yaml")) {
+	if hasGenerated && !fileExists(filepath.Join(rootDir, cellMarker)) {
 		findings = append(findings, Finding{
 			Rule:    "rust-forge-dev-yaml",
-			Path:    "forge-dev.yaml",
+			Path:    cellMarker,
 			Message: "missing forge-dev.yaml although zz_generated files exist under src",
 		})
 	}
@@ -181,25 +174,387 @@ func checkRustCoreApp(rootDir string) ([]Finding, error) {
 		return nil, err
 	}
 
-	cellFindings, err := checkCells(rootDir, cells, crateName)
-	if err != nil {
-		return nil, err
+	for _, check := range []func(string, []string) ([]Finding, error){
+		checkRootLayout,
+		checkCellLayout,
+		checkCellManifests,
+		checkPureLayers,
+		checkEveryFileIsMounted,
+	} {
+		checkFindings, err := check(rootDir, cells)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, checkFindings...)
 	}
-	findings = append(findings, cellFindings...)
-
-	handFindings, err := checkHandWrittenFiles(rootDir, cells)
-	if err != nil {
-		return nil, err
-	}
-	findings = append(findings, handFindings...)
 
 	pathFindings, err := checkPathAttribute(rootDir)
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, pathFindings...)
+
+	return append(findings, pathFindings...), nil
+}
+
+func cellNames(rootDir string) ([]string, error) {
+	srcDir := filepath.Join(rootDir, "src")
+	if !dirExists(srcDir) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", srcDir, err)
+	}
+
+	var cells []string
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(srcDir, e.Name(), cellMarker)) {
+			cells = append(cells, e.Name())
+		}
+	}
+
+	return cells, nil
+}
+
+func checkRootLayout(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	srcDir := filepath.Join(rootDir, "src")
+	if !dirExists(srcDir) {
+		return findings, nil
+	}
+
+	allowed := namesToSet(rootLayers)
+	for _, cell := range cells {
+		allowed[cell] = true
+	}
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", srcDir, err)
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || allowed[e.Name()] {
+			continue
+		}
+
+		holdsRust, err := treeHasRust(filepath.Join(srcDir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if !holdsRust {
+			continue
+		}
+
+		findings = append(findings, Finding{
+			Rule:    "rust-src-layout",
+			Path:    filepath.ToSlash(filepath.Join("src", e.Name())),
+			Message: fmt.Sprintf("a directory under src holds rust only as one of the layers %s or as a cell holding a forge-dev.yaml", strings.Join(rootLayers, ", ")),
+		})
+	}
 
 	return findings, nil
+}
+
+func checkCellLayout(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	allowed := namesToSet(cellLayers)
+
+	for _, cell := range cells {
+		cellDir := filepath.Join(rootDir, "src", cell)
+
+		entries, err := os.ReadDir(cellDir)
+		if err != nil {
+			return nil, fmt.Errorf("reading %q: %w", cellDir, err)
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() || allowed[e.Name()] {
+				continue
+			}
+
+			holdsRust, err := treeHasRust(filepath.Join(cellDir, e.Name()))
+			if err != nil {
+				return nil, err
+			}
+			if !holdsRust {
+				continue
+			}
+
+			findings = append(findings, Finding{
+				Rule:    "rust-cell-layout",
+				Path:    filepath.ToSlash(filepath.Join("src", cell, e.Name())),
+				Message: fmt.Sprintf("a cell holds rust only under the layers %s", strings.Join(cellLayers, ", ")),
+			})
+		}
+	}
+
+	return findings, nil
+}
+
+func checkCellManifests(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	for _, cell := range cells {
+		cellDir := filepath.Join(rootDir, "src", cell)
+
+		hasGenerated, err := treeHasZzGenerated(cellDir)
+		if err != nil {
+			return nil, err
+		}
+		if !hasGenerated || fileExists(filepath.Join(cellDir, cellManifestFileName)) {
+			continue
+		}
+
+		findings = append(findings, Finding{
+			Rule:    "rust-cell-manifest",
+			Path:    filepath.ToSlash(filepath.Join("src", cell, cellManifestFileName)),
+			Message: "missing zz_generated_cell.yaml although the cell holds zz_generated files",
+		})
+	}
+
+	return findings, nil
+}
+
+var bannedCrates = []string{"axum", "hyper", "reqwest", "rusqlite", "tokio", "tonic", "tower"}
+
+var bannedPaths = []string{"std::fs", "std::net", "std::process", "std::time::Instant"}
+
+var bannedCratePatterns = compileCratePatterns(bannedCrates)
+
+func compileCratePatterns(crates []string) map[string]*regexp.Regexp {
+	patterns := make(map[string]*regexp.Regexp, len(crates))
+	for _, crate := range crates {
+		patterns[crate] = regexp.MustCompile(`(^|[^A-Za-z0-9_:])` + crate + `(::|[;,}\s]|$)`)
+	}
+
+	return patterns
+}
+
+func checkPureLayers(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	for _, dir := range pureLayerDirs(cells) {
+		dirFindings, err := bannedUseFindings(rootDir, dir)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, dirFindings...)
+	}
+
+	return findings, nil
+}
+
+func pureLayerDirs(cells []string) []string {
+	var dirs []string
+
+	for _, layer := range pureLayers {
+		dirs = append(dirs, filepath.Join("src", layer))
+	}
+
+	for _, cell := range cells {
+		for _, layer := range pureLayers {
+			dirs = append(dirs, filepath.Join("src", cell, layer))
+		}
+	}
+
+	return dirs
+}
+
+func bannedUseFindings(rootDir, dir string) ([]Finding, error) {
+	var findings []Finding
+
+	fullDir := filepath.Join(rootDir, dir)
+	if !dirExists(fullDir) {
+		return findings, nil
+	}
+
+	err := filepath.Walk(fullDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".rs") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %q: %w", path, err)
+		}
+
+		rel, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+
+		for _, hit := range bannedUseHits(string(content)) {
+			findings = append(findings, Finding{
+				Rule:    "rust-io-use",
+				Path:    filepath.ToSlash(rel),
+				Message: fmt.Sprintf("line %d uses %q which no controller, port or types file may name", hit.line, hit.name),
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking %q: %w", fullDir, err)
+	}
+
+	return findings, nil
+}
+
+type useHit struct {
+	line int
+	name string
+}
+
+func bannedUseHits(content string) []useHit {
+	var hits []useHit
+
+	for index, line := range strings.Split(content, "\n") {
+		if !isUseLine(line) {
+			continue
+		}
+
+		for _, name := range bannedCrates {
+			if bannedCratePatterns[name].MatchString(line) {
+				hits = append(hits, useHit{line: index + 1, name: name})
+			}
+		}
+
+		for _, name := range bannedPaths {
+			if strings.Contains(line, name) {
+				hits = append(hits, useHit{line: index + 1, name: name})
+			}
+		}
+	}
+
+	return hits
+}
+
+func isUseLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, "pub ")
+	trimmed = strings.TrimPrefix(trimmed, "pub(crate) ")
+
+	return strings.HasPrefix(trimmed, "use ")
+}
+
+func checkEveryFileIsMounted(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	for _, dir := range layerDirs(cells) {
+		dirFindings, err := unmountedFindings(rootDir, dir)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, dirFindings...)
+	}
+
+	return findings, nil
+}
+
+func layerDirs(cells []string) []string {
+	var dirs []string
+
+	for _, layer := range rootLayers {
+		dirs = append(dirs, filepath.Join("src", layer))
+	}
+
+	for _, cell := range cells {
+		for _, layer := range cellLayers {
+			dirs = append(dirs, filepath.Join("src", cell, layer))
+		}
+	}
+
+	return dirs
+}
+
+var modLineRe = regexp.MustCompile(`(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z0-9_]+)\s*;`)
+
+func unmountedFindings(rootDir, dir string) ([]Finding, error) {
+	var findings []Finding
+
+	fullDir := filepath.Join(rootDir, dir)
+	if !dirExists(fullDir) {
+		return findings, nil
+	}
+
+	entries, err := os.ReadDir(fullDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", fullDir, err)
+	}
+
+	mounted := map[string]bool{}
+	modFileRel := filepath.ToSlash(filepath.Join(dir, "mod.rs"))
+
+	for _, e := range entries {
+		if e.IsDir() || e.Name() != "mod.rs" {
+			continue
+		}
+
+		modPath := filepath.Join(fullDir, e.Name())
+
+		generated, err := isGenerated(modPath)
+		if err != nil {
+			return nil, err
+		}
+		if !generated {
+			continue
+		}
+
+		content, err := os.ReadFile(modPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading %q: %w", modPath, err)
+		}
+
+		for _, m := range modLineRe.FindAllStringSubmatch(string(content), -1) {
+			mounted[m[1]] = true
+		}
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".rs") || e.Name() == "mod.rs" {
+			continue
+		}
+
+		generated, err := isGenerated(filepath.Join(fullDir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if generated || mounted[strings.TrimSuffix(e.Name(), ".rs")] {
+			continue
+		}
+
+		findings = append(findings, Finding{
+			Rule:    "rust-file-not-mounted",
+			Path:    filepath.ToSlash(filepath.Join(dir, e.Name())),
+			Message: fmt.Sprintf("no mod line in %s reaches this file", modFileRel),
+		})
+	}
+
+	return findings, nil
+}
+
+const generatedMarker = "Code generated by"
+
+func isGenerated(path string) (bool, error) {
+	if strings.HasPrefix(filepath.Base(path), "zz_generated") {
+		return true, nil
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("reading %q: %w", path, err)
+	}
+
+	firstLine, _, _ := strings.Cut(string(content), "\n")
+
+	return strings.Contains(firstLine, generatedMarker), nil
 }
 
 func checkPathAttribute(rootDir string) ([]Finding, error) {
@@ -247,82 +602,6 @@ func checkPathAttribute(rootDir string) ([]Finding, error) {
 	return findings, nil
 }
 
-const cellMarker = "forge-dev.yaml"
-
-var coreCellLayers = []string{"port", "controller", "types", "hand"}
-
-var appCellLayers = []string{"adapter", "driver", "hand"}
-
-func cellNames(rootDir string) ([]string, error) {
-	srcDir := filepath.Join(rootDir, "src")
-	if !dirExists(srcDir) {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading %q: %w", srcDir, err)
-	}
-
-	var cells []string
-	for _, e := range entries {
-		if e.IsDir() && fileExists(filepath.Join(srcDir, e.Name(), cellMarker)) {
-			cells = append(cells, e.Name())
-		}
-	}
-
-	return cells, nil
-}
-
-func cellLayersFor(crateName string) []string {
-	if strings.HasSuffix(crateName, "-app") {
-		return appCellLayers
-	}
-
-	return coreCellLayers
-}
-
-func checkCells(rootDir string, cells []string, crateName string) ([]Finding, error) {
-	var findings []Finding
-
-	allowed := map[string]bool{}
-	for _, layer := range cellLayersFor(crateName) {
-		allowed[layer] = true
-	}
-
-	for _, cell := range cells {
-		cellDir := filepath.Join(rootDir, "src", cell)
-
-		entries, err := os.ReadDir(cellDir)
-		if err != nil {
-			return nil, fmt.Errorf("reading %q: %w", cellDir, err)
-		}
-
-		for _, e := range entries {
-			if !e.IsDir() || allowed[e.Name()] {
-				continue
-			}
-
-			holdsRust, err := treeHasRust(filepath.Join(cellDir, e.Name()))
-			if err != nil {
-				return nil, err
-			}
-
-			if !holdsRust {
-				continue
-			}
-
-			findings = append(findings, Finding{
-				Rule:    "rust-cell-layout",
-				Path:    filepath.Join("src", cell, e.Name()),
-				Message: fmt.Sprintf("a cell holds rust only under %s", strings.Join(cellLayersFor(crateName), ", ")),
-			})
-		}
-	}
-
-	return findings, nil
-}
-
 func treeHasRust(dir string) (bool, error) {
 	found := false
 
@@ -342,154 +621,26 @@ func treeHasRust(dir string) (bool, error) {
 	return found, nil
 }
 
-func rootCellOwnsTheModFile(rel string) bool {
-	if filepath.Base(rel) != "mod.rs" {
-		return false
+func treeHasZzGenerated(dir string) (bool, error) {
+	found := false
+	if !dirExists(dir) {
+		return false, nil
 	}
 
-	for _, layer := range append(append([]string{}, coreCellLayers...), appCellLayers...) {
-		if rel == layer+"/mod.rs" {
-			return true
-		}
-	}
-
-	return false
-}
-
-func cellAllowsHandWritten(rel string, cells []string) bool {
-	if filepath.Base(rel) == "mod.rs" {
-		for _, cell := range cells {
-			if strings.HasPrefix(rel, cell+"/") {
-				return true
-			}
-		}
-	}
-
-	for _, cell := range cells {
-		if strings.HasPrefix(rel, cell+"/hand/") {
-			return true
-		}
-	}
-
-	return false
-}
-
-func checkRustCore(rootDir string) []Finding {
-	var findings []Finding
-
-	for _, dir := range []string{"src/port", "src/controller", "src/types"} {
-		if !dirExists(filepath.Join(rootDir, dir)) {
-			findings = append(findings, Finding{
-				Rule:    "rust-core-layout",
-				Path:    dir,
-				Message: fmt.Sprintf("missing required directory %q", dir),
-			})
-		}
-	}
-
-	forbidden, err := filesUsing(filepath.Join(rootDir, "src"), []string{"std::fs", "std::net", "std::process", "tokio"})
-	if err != nil {
-		return append(findings, Finding{Rule: "rust-core-scan", Path: "src", Message: err.Error()})
-	}
-	findings = append(findings, forbidden...)
-
-	return findings
-}
-
-func checkRustApp(rootDir string) []Finding {
-	var findings []Finding
-
-	for _, dir := range []string{"src/adapter", "src/driver", "src/bin"} {
-		if !dirExists(filepath.Join(rootDir, dir)) {
-			findings = append(findings, Finding{
-				Rule:    "rust-app-layout",
-				Path:    dir,
-				Message: fmt.Sprintf("missing required directory %q", dir),
-			})
-		}
-	}
-
-	driverDir := filepath.Join(rootDir, "src/driver")
-	if dirExists(driverDir) {
-		adapterUseRe := regexp.MustCompile(`use\s+crate::adapter|_app::adapter`)
-		err := filepath.Walk(driverDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || !strings.HasSuffix(path, ".rs") {
-				return nil
-			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return fmt.Errorf("reading %q: %w", path, err)
-			}
-			if adapterUseRe.MatchString(string(content)) {
-				findings = append(findings, Finding{
-					Rule:    "rust-driver-imports-adapter",
-					Path:    path,
-					Message: "a driver file imports the adapter module",
-				})
-			}
-			return nil
-		})
-		if err != nil {
-			findings = append(findings, Finding{Rule: "rust-app-scan", Path: driverDir, Message: err.Error()})
-		}
-	}
-
-	return findings
-}
-
-func checkHandWrittenFiles(rootDir string, cells []string) ([]Finding, error) {
-	var findings []Finding
-
-	srcDir := filepath.Join(rootDir, "src")
-	if !dirExists(srcDir) {
-		return findings, nil
-	}
-
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".rs") {
-			return nil
+		if !info.IsDir() && strings.HasPrefix(filepath.Base(path), "zz_generated") {
+			found = true
 		}
-
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-
-		if rel == "lib.rs" {
-			return nil
-		}
-		if strings.HasPrefix(rel, "bin/") {
-			return nil
-		}
-		if strings.HasPrefix(rel, "hand/") {
-			return nil
-		}
-		if strings.HasPrefix(filepath.Base(path), "zz_generated") {
-			return nil
-		}
-		if rootCellOwnsTheModFile(rel) || cellAllowsHandWritten(rel, cells) {
-			return nil
-		}
-
-		findings = append(findings, Finding{
-			Rule:    "rust-hand-written-outside-hand",
-			Path:    filepath.Join("src", rel),
-			Message: "hand written Rust file must live under src/hand, be src/lib.rs, be under src/bin, or be a layer or cell mod.rs or hand file",
-		})
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("walking %q: %w", srcDir, err)
+		return false, fmt.Errorf("walking %q: %w", dir, err)
 	}
 
-	return findings, nil
+	return found, nil
 }
 
 func filesImporting(dir string, forbiddenSubstrings []string) ([]string, error) {
@@ -524,114 +675,13 @@ func filesImporting(dir string, forbiddenSubstrings []string) ([]string, error) 
 	return matches, nil
 }
 
-var plainAddressTypes = map[string][]string{
-	"std::net": {
-		"::SocketAddrV4",
-		"::SocketAddrV6",
-		"::SocketAddr",
-		"::Ipv4Addr",
-		"::Ipv6Addr",
-		"::IpAddr",
-	},
-}
-
-func usesForbidden(content, forbiddenPath string) bool {
-	allowed := plainAddressTypes[forbiddenPath]
-
-	for offset := 0; ; {
-		index := strings.Index(content[offset:], forbiddenPath)
-		if index < 0 {
-			return false
-		}
-
-		rest := content[offset+index+len(forbiddenPath):]
-		offset += index + len(forbiddenPath)
-
-		if !startsWithAnyOf(rest, allowed) {
-			return true
-		}
-	}
-}
-
-func startsWithAnyOf(text string, prefixes []string) bool {
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
+func namesToSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
 	}
 
-	return false
-}
-
-func filesUsing(dir string, forbidden []string) ([]Finding, error) {
-	var findings []Finding
-	if !dirExists(dir) {
-		return findings, nil
-	}
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() || !strings.HasSuffix(path, ".rs") {
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("reading %q: %w", path, err)
-		}
-		for _, s := range forbidden {
-			if usesForbidden(string(content), s) {
-				findings = append(findings, Finding{
-					Rule:    "rust-core-forbidden-usage",
-					Path:    path,
-					Message: fmt.Sprintf("uses forbidden %q inside a core crate", s),
-				})
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walking %q: %w", dir, err)
-	}
-
-	return findings, nil
-}
-
-func treeHasZzGenerated(dir string) (bool, error) {
-	found := false
-	if !dirExists(dir) {
-		return false, nil
-	}
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && strings.HasPrefix(filepath.Base(path), "zz_generated") {
-			found = true
-		}
-		return nil
-	})
-	if err != nil {
-		return false, fmt.Errorf("walking %q: %w", dir, err)
-	}
-
-	return found, nil
-}
-
-func cargoCrateName(cargoTomlPath string) (string, error) {
-	content, err := os.ReadFile(cargoTomlPath)
-	if err != nil {
-		return "", fmt.Errorf("reading %q: %w", cargoTomlPath, err)
-	}
-
-	nameRe := regexp.MustCompile(`(?m)^name\s*=\s*"([^"]+)"`)
-	m := nameRe.FindSubmatch(content)
-	if m == nil {
-		return "", fmt.Errorf("no name field found in %q", cargoTomlPath)
-	}
-	return string(m[1]), nil
+	return set
 }
 
 func dirExists(path string) bool {

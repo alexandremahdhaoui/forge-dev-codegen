@@ -1,0 +1,14 @@
+name: hello
+artifactStorePath: .forge/artifact-store.yaml
+build:
+  - name: hello
+    src: ./src
+    engine: forge://generic-builder
+test:
+  - name: unit
+    runner: forge://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "hello"]
+factory:
+  crate: hello

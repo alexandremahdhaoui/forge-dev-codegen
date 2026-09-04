@@ -12,4 +12,4 @@ components:
       properties:
         rootDir:
           type: string
-          description: Root directory holding the forge.yaml to check (default is current directory)
+          description: Root directory holding the forge.yaml and the src tree to check (default is current directory)

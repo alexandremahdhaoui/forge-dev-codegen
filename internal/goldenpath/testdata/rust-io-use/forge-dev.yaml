@@ -1,0 +1,5 @@
+name: hello
+kind: hexagonal
+language: rust
+layout:
+  cells: [grpc]

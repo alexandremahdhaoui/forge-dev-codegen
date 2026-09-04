@@ -15,246 +15,229 @@ func hasRule(findings []goldenpath.Finding, rule string) bool {
 	return false
 }
 
-func TestCheckReturnsZeroFindingsOnACleanGoLayout(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutGo,
-		RootDir: "testdata/go-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
+func findingFor(findings []goldenpath.Finding, rule, path string) (goldenpath.Finding, bool) {
+	for _, f := range findings {
+		if f.Rule == rule && f.Path == path {
+			return f, true
+		}
 	}
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
+	return goldenpath.Finding{}, false
 }
 
-func TestCheckFlagsMissingGoLayoutDirectories(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutGo,
-		RootDir: "testdata/go-missing-dirs",
-	})
+func check(t *testing.T, layout, rootDir string) []goldenpath.Finding {
+	t.Helper()
+
+	findings, err := goldenpath.Check(goldenpath.Options{Layout: layout, RootDir: rootDir})
 	if err != nil {
-		t.Fatalf("checking: %v", err)
+		t.Fatalf("checking %s: %v", rootDir, err)
 	}
-	if !hasRule(findings, "go-layout") {
-		t.Fatalf("expected a go-layout finding, got %+v", findings)
-	}
+
+	return findings
 }
 
-func TestCheckFlagsADriverFileThatImportsAnAdapter(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutGo,
-		RootDir: "testdata/go-driver-imports-adapter",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "go-driver-imports-adapter") {
-		t.Fatalf("expected a go-driver-imports-adapter finding, got %+v", findings)
-	}
-}
-
-func TestCheckFlagsAnAdapterFileThatImportsAnotherAdapter(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutGo,
-		RootDir: "testdata/go-adapter-imports-adapter",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "go-adapter-imports-adapter") {
-		t.Fatalf("expected a go-adapter-imports-adapter finding, got %+v", findings)
-	}
-}
-
-func TestCheckReturnsZeroFindingsOnACleanRustCoreCrate(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
-}
-
-func TestCheckFlagsAForbiddenImportInARustCoreCrate(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-forbidden",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "rust-core-forbidden-usage") {
-		t.Fatalf("expected a rust-core-forbidden-usage finding, got %+v", findings)
-	}
-}
-
-func TestAPlainSocketAddressIsNotIOAndStaysAllowedInARustCoreCrate(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-cell-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
+func TestACleanGoRepoAndACleanRustCrateCarryNoFinding(t *testing.T) {
+	tests := []struct {
+		name    string
+		layout  string
+		rootDir string
+	}{
+		{
+			name:    "a go repo with the three layers and no crossed import passes",
+			layout:  goldenpath.LayoutGo,
+			rootDir: "testdata/go-clean",
+		},
+		{
+			name:    "a single crate with layers, a cell and one user impl file passes",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-clean",
+		},
+		{
+			name:    "the old rust-core-app spelling still names the single crate layout",
+			layout:  goldenpath.LayoutRustCoreApp,
+			rootDir: "testdata/rust-clean",
+		},
 	}
 
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
-}
-
-func TestASocketInARustCoreCrateIsStillForbidden(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-socket",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-
-	if !hasRule(findings, "rust-core-forbidden-usage") {
-		t.Fatalf("expected a rust-core-forbidden-usage finding, got %+v", findings)
-	}
-}
-
-func TestCheckReturnsZeroFindingsOnACleanRustAppCrate(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-app-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
-}
-
-func TestCheckFlagsARustAppDriverThatImportsTheAdapterModule(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-app-driver-imports-adapter",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "rust-driver-imports-adapter") {
-		t.Fatalf("expected a rust-driver-imports-adapter finding, got %+v", findings)
-	}
-}
-
-func TestCheckFlagsAMissingForgeDevYamlWhenZzGeneratedFilesExist(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-missing-forge-dev-yaml",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "rust-forge-dev-yaml") {
-		t.Fatalf("expected a rust-forge-dev-yaml finding, got %+v", findings)
-	}
-}
-
-func TestADirectoryUnderSrcThatHoldsAForgeDevYamlIsACellAndKeepsItsOwnModAndHandFiles(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-cell-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
-}
-
-func TestAnAppCellHoldsAdapterAndDriverAndItsProtoDirectoryIsNotALayer(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-app-cell-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("expected zero findings, got %+v", findings)
-	}
-}
-
-func TestAnAppCellKeepsItsHandDirectoryLikeACoreCellDoes(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-app-cell-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if hasRule(findings, "rust-cell-layout") {
-		t.Fatalf("an app cell hand directory must not be flagged, got %+v", findings)
-	}
-}
-
-func TestALayerModFileTheRootCellOwnsIsNotAHandWrittenFileOutsideHand(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-clean",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if hasRule(findings, "rust-hand-written-outside-hand") {
-		t.Fatalf("a layer mod file must not be flagged, got %+v", findings)
-	}
-}
-
-func TestCheckFlagsAPathAttributeInARustFileUnderSrc(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-path-attribute",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
-	}
-	if !hasRule(findings, "rust-no-path-attribute") {
-		t.Fatalf("expected a rust-no-path-attribute finding, got %+v", findings)
-	}
-}
-
-func TestACleanCrateCarriesNoPathAttributeFinding(t *testing.T) {
-	for _, root := range []string{
-		"testdata/rust-core-clean",
-		"testdata/rust-app-clean",
-		"testdata/rust-core-cell-clean",
-		"testdata/rust-app-cell-clean",
-	} {
-		findings, err := goldenpath.Check(goldenpath.Options{
-			Layout:  goldenpath.LayoutRustCoreApp,
-			RootDir: root,
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			findings := check(t, test.layout, test.rootDir)
+			if len(findings) != 0 {
+				t.Fatalf("expected zero findings, got %+v", findings)
+			}
 		})
-		if err != nil {
-			t.Fatalf("checking %s: %v", root, err)
-		}
-		if hasRule(findings, "rust-no-path-attribute") {
-			t.Fatalf("%s must carry no path attribute finding, got %+v", root, findings)
-		}
 	}
 }
 
-func TestACellThatHoldsRustOutsideItsLayersIsFlagged(t *testing.T) {
-	findings, err := goldenpath.Check(goldenpath.Options{
-		Layout:  goldenpath.LayoutRustCoreApp,
-		RootDir: "testdata/rust-core-cell-wrong-layer",
-	})
-	if err != nil {
-		t.Fatalf("checking: %v", err)
+func TestEveryRuleFlagsTheTreeThatBreaksIt(t *testing.T) {
+	tests := []struct {
+		name    string
+		layout  string
+		rootDir string
+		rule    string
+	}{
+		{
+			name:    "a go repo missing a layer directory is flagged",
+			layout:  goldenpath.LayoutGo,
+			rootDir: "testdata/go-missing-dirs",
+			rule:    "go-layout",
+		},
+		{
+			name:    "a go driver that imports an adapter is flagged",
+			layout:  goldenpath.LayoutGo,
+			rootDir: "testdata/go-driver-imports-adapter",
+			rule:    "go-driver-imports-adapter",
+		},
+		{
+			name:    "a go adapter that imports another adapter is flagged",
+			layout:  goldenpath.LayoutGo,
+			rootDir: "testdata/go-adapter-imports-adapter",
+			rule:    "go-adapter-imports-adapter",
+		},
+		{
+			name:    "a crate with no Cargo.toml is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-missing-cargo-toml",
+			rule:    "rust-cargo-toml",
+		},
+		{
+			name:    "a crate with no src lib.rs is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-missing-lib-rs",
+			rule:    "rust-lib-rs",
+		},
+		{
+			name:    "a crate with no forge.yaml is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-missing-forge-yaml",
+			rule:    "rust-forge-yaml",
+		},
+		{
+			name:    "a crate holding zz_generated files with no forge-dev.yaml is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-missing-forge-dev-yaml",
+			rule:    "rust-forge-dev-yaml",
+		},
+		{
+			name:    "a directory under src that is neither a layer nor a cell is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-src-not-a-layer",
+			rule:    "rust-src-layout",
+		},
+		{
+			name:    "a directory inside a cell that is not a layer is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-cell-not-a-layer",
+			rule:    "rust-cell-layout",
+		},
+		{
+			name:    "a cell holding zz_generated files with no cell manifest is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-missing-cell-manifest",
+			rule:    "rust-cell-manifest",
+		},
+		{
+			name:    "an io crate on a use line of a pure layer is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-io-use",
+			rule:    "rust-io-use",
+		},
+		{
+			name:    "a user file no generated mod line reaches is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-file-not-mounted",
+			rule:    "rust-file-not-mounted",
+		},
+		{
+			name:    "a path attribute under src is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-path-attribute",
+			rule:    "rust-no-path-attribute",
+		},
 	}
-	if !hasRule(findings, "rust-cell-layout") {
-		t.Fatalf("expected a rust-cell-layout finding, got %+v", findings)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			findings := check(t, test.layout, test.rootDir)
+			if !hasRule(findings, test.rule) {
+				t.Fatalf("expected a %s finding, got %+v", test.rule, findings)
+			}
+		})
+	}
+}
+
+func TestTheIOUseRuleNamesTheFileTheLineAndTheCrate(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		message string
+	}{
+		{
+			name:    "a user controller file naming tokio is flagged on its use line",
+			path:    "src/controller/greeting_controller.rs",
+			message: `line 1 uses "tokio" which no controller, port or types file may name`,
+		},
+		{
+			name:    "a generated types file naming std net is flagged too",
+			path:    "src/types/zz_generated_peer.rs",
+			message: `line 3 uses "std::net" which no controller, port or types file may name`,
+		},
+		{
+			name:    "a generated port file of a cell naming tonic is flagged too",
+			path:    "src/grpc/port/zz_generated_widget_client.rs",
+			message: `line 3 uses "tonic" which no controller, port or types file may name`,
+		},
+	}
+
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			finding, ok := findingFor(findings, "rust-io-use", test.path)
+			if !ok {
+				t.Fatalf("expected a rust-io-use finding for %s, got %+v", test.path, findings)
+			}
+			if finding.Message != test.message {
+				t.Fatalf("expected message %q, got %q", test.message, finding.Message)
+			}
+		})
+	}
+}
+
+func TestTheMountRuleNamesTheFileAndTheModFileThatShouldReachIt(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-file-not-mounted")
+
+	finding, ok := findingFor(findings, "rust-file-not-mounted", "src/controller/greeting_controller.rs")
+	if !ok {
+		t.Fatalf("expected a rust-file-not-mounted finding for the user file, got %+v", findings)
+	}
+
+	want := "no mod line in src/controller/mod.rs reaches this file"
+	if finding.Message != want {
+		t.Fatalf("expected message %q, got %q", want, finding.Message)
+	}
+}
+
+func TestAUserFileAGeneratedModFileMountsIsNeverFlagged(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
+
+	if hasRule(findings, "rust-file-not-mounted") {
+		t.Fatalf("a mounted user file must not be flagged, got %+v", findings)
+	}
+}
+
+func TestAnIOCrateInAnAdapterOrADriverIsNeverFlagged(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
+
+	if hasRule(findings, "rust-io-use") {
+		t.Fatalf("an adapter and a driver may name an io crate, got %+v", findings)
+	}
+}
+
+func TestTheRestCellIsACellLikeGrpcAndUdp(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
+
+	if hasRule(findings, "rust-src-layout") || hasRule(findings, "rust-cell-layout") {
+		t.Fatalf("src/rest is a cell and must not be flagged, got %+v", findings)
 	}
 }
 

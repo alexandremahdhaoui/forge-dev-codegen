@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -71,6 +72,114 @@ func Check(opts Options) ([]Finding, error) {
 
 	if isRustRepo(rootDir, cfg) {
 		findings = append(findings, checkRustUsesGoBuild(cfg.Build)...)
+
+		adapterFindings, err := checkAdapterIsOutOfReach(rootDir)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, adapterFindings...)
+	}
+
+	return findings, nil
+}
+
+var adapterReachLayers = []string{"controller", "driver"}
+
+var adapterReachRe = regexp.MustCompile(`\b(?:crate|super)(?:::[A-Za-z0-9_]+)?::adapter\b`)
+
+func checkAdapterIsOutOfReach(rootDir string) ([]Finding, error) {
+	var findings []Finding
+
+	for _, dir := range adapterReachDirs(rootDir) {
+		dirFindings, err := adapterReachFindings(rootDir, dir)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, dirFindings...)
+	}
+
+	return findings, nil
+}
+
+func adapterReachDirs(rootDir string) []string {
+	var dirs []string
+
+	for _, layer := range adapterReachLayers {
+		dirs = append(dirs, filepath.Join("src", layer))
+	}
+
+	for _, cell := range cellNames(rootDir) {
+		for _, layer := range adapterReachLayers {
+			dirs = append(dirs, filepath.Join("src", cell, layer))
+		}
+	}
+
+	return dirs
+}
+
+func cellNames(rootDir string) []string {
+	entries, err := os.ReadDir(filepath.Join(rootDir, "src"))
+	if err != nil {
+		return nil
+	}
+
+	var cells []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(rootDir, "src", e.Name(), "forge-dev.yaml")); err == nil {
+			cells = append(cells, e.Name())
+		}
+	}
+
+	return cells
+}
+
+func adapterReachFindings(rootDir, dir string) ([]Finding, error) {
+	var findings []Finding
+
+	fullDir := filepath.Join(rootDir, dir)
+	info, err := os.Stat(fullDir)
+	if err != nil || !info.IsDir() {
+		return findings, nil
+	}
+
+	err = filepath.Walk(fullDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".rs") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %q: %w", path, err)
+		}
+
+		rel, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+
+		for index, line := range strings.Split(string(content), "\n") {
+			match := adapterReachRe.FindString(line)
+			if match == "" {
+				continue
+			}
+
+			findings = append(findings, Finding{
+				Rule:    "forge-lint-adapter-out-of-reach",
+				Path:    filepath.ToSlash(rel),
+				Message: fmt.Sprintf("line %d names %q which no controller or driver file may reach", index+1, match),
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking %q: %w", fullDir, err)
 	}
 
 	return findings, nil

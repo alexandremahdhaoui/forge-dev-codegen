@@ -10,7 +10,7 @@ Fails a repo when its layout departs from the hexagonal golden path for its lang
 
 - **Type:** `string`
 - **Required:** Yes
-- **Description:** The golden path layout to check, either go or rust-core-app
+- **Description:** The golden path layout to check, either go or rust
 
 ### `rootDir`
 
