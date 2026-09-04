@@ -364,6 +364,224 @@ func TestASideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
 	}
 }
 
+var helloGrpcExtraModules = []hexrust.ExtraModule{
+	{Layer: "types", Module: "zz_generated_hello_messages"},
+	{Layer: "port", Module: "zz_generated_hello_client"},
+	{Layer: "controller", Module: "hello_controller"},
+	{Layer: "hand", Module: "hello_controller"},
+	{Layer: "adapter", Module: "zz_generated_hello_grpc_client"},
+	{Layer: "driver", Module: "zz_generated_hello_grpc_driver"},
+}
+
+func TestExtraModulesMountASecondEnginesFilesWithoutEditingAGeneratedFile(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+		Service:      "songe-hello",
+		ExtraModules: helloGrpcExtraModules,
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]hexrust.File{}
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a types extra module is mounted under its own file name",
+			path: "core/src/types/zz_generated_mod.rs",
+			want: "pub mod zz_generated_hello_messages;",
+		},
+		{
+			name: "a port extra module is mounted under its own file name",
+			path: "core/src/port/zz_generated_mod.rs",
+			want: "pub mod zz_generated_hello_client;",
+		},
+		{
+			name: "a controller extra module mounts the zz generated file under its logical name",
+			path: "core/src/controller/zz_generated_mod.rs",
+			want: "#[path = \"zz_generated_hello_controller.rs\"]\npub mod hello_controller;",
+		},
+		{
+			name: "an adapter extra module is mounted under its own file name",
+			path: "app/src/adapter/zz_generated_mod.rs",
+			want: "pub mod zz_generated_hello_grpc_client;",
+		},
+		{
+			name: "a driver extra module is mounted under its own file name",
+			path: "app/src/driver/zz_generated_mod.rs",
+			want: "pub mod zz_generated_hello_grpc_driver;",
+		},
+		{
+			name: "a hand extra module is mounted from the hand directory",
+			path: "core/src/zz_generated_hand.rs",
+			want: "#[path = \"hand/hello_controller.rs\"]\npub mod hello_controller;",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, ok := byPath[tt.path]
+			if !ok {
+				t.Fatalf("no file at %s", tt.path)
+			}
+
+			if !strings.Contains(f.Content, tt.want) {
+				t.Errorf("%s lacks %q\n%s", tt.path, tt.want, f.Content)
+			}
+		})
+	}
+}
+
+func TestAnExtraModuleTheSkeletonAlreadyMountsIsNotMountedTwice(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+		Service: "songe-hello",
+		ExtraModules: []hexrust.ExtraModule{
+			{Layer: "controller", Module: "greeting_controller"},
+			{Layer: "hand", Module: "greeting_controller"},
+			{Layer: "driver", Module: "wire"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		for _, line := range []string{"pub mod greeting_controller;", "pub mod wire;"} {
+			if strings.Count(f.Content, line) > 1 {
+				t.Errorf("%s mounts %q more than once\n%s", f.Path, line, f.Content)
+			}
+		}
+	}
+}
+
+func TestExtraModulesFollowTheSideThatOwnsTheirLayer(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+		Service:      "songe-hello",
+		Side:         "core",
+		CoreDir:      ".",
+		ExtraModules: helloGrpcExtraModules,
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		for _, appModule := range []string{"zz_generated_hello_grpc_client", "zz_generated_hello_grpc_driver"} {
+			if strings.Contains(f.Content, "pub mod "+appModule+";") {
+				t.Errorf("%s mounts the app module %q on the core side", f.Path, appModule)
+			}
+		}
+	}
+}
+
+func TestAnExtraModuleOnAnUnknownLayerIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		modules []hexrust.ExtraModule
+		want    string
+	}{
+		{
+			name:    "a layer no crate holds has nowhere to be mounted",
+			modules: []hexrust.ExtraModule{{Layer: "service", Module: "zz_generated_hello_client"}},
+			want:    `layer "service" is unknown`,
+		},
+		{
+			name:    "an empty layer names nothing",
+			modules: []hexrust.ExtraModule{{Layer: "", Module: "zz_generated_hello_client"}},
+			want:    `layer "" is unknown`,
+		},
+		{
+			name:    "a module Rust cannot spell is refused before it reaches the output",
+			modules: []hexrust.ExtraModule{{Layer: "port", Module: "HelloClient"}},
+			want:    "is not a name Rust can spell as a module",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+				Service:      "songe-hello",
+				ExtraModules: tt.modules,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want an error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestTheSurfaceCarriesTheExtraModulesList(t *testing.T) {
+	surface := map[string]interface{}{
+		"extraModules": []interface{}{
+			map[string]interface{}{"layer": "port", "module": "zz_generated_hello_client"},
+			map[string]interface{}{"layer": "hand", "module": "hello_controller"},
+		},
+	}
+
+	got, err := hexrust.ExtraModulesFromSurface(surface)
+	if err != nil {
+		t.Fatalf("reading the surface: %v", err)
+	}
+
+	want := []hexrust.ExtraModule{
+		{Layer: "port", Module: "zz_generated_hello_client"},
+		{Layer: "hand", Module: "hello_controller"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("extra modules\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestASurfaceThatMalformsTheExtraModulesListIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		surface map[string]interface{}
+		want    string
+	}{
+		{
+			name:    "a list is required",
+			surface: map[string]interface{}{"extraModules": "zz_generated_hello_client"},
+			want:    "it is a list of layer and module pairs",
+		},
+		{
+			name:    "an entry is an object",
+			surface: map[string]interface{}{"extraModules": []interface{}{"zz_generated_hello_client"}},
+			want:    "it is not an object",
+		},
+		{
+			name:    "an entry names both a layer and a module",
+			surface: map[string]interface{}{"extraModules": []interface{}{map[string]interface{}{"layer": "port"}}},
+			want:    "layer and module are both required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := hexrust.ExtraModulesFromSurface(tt.surface); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want an error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestASurfaceWithNoExtraModulesMountsNothingExtra(t *testing.T) {
+	got, err := hexrust.ExtraModulesFromSurface(map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("reading the surface: %v", err)
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("want no extra modules, got %+v", got)
+	}
+}
+
 func TestTheOutputRootsPrefixEveryPath(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
 		Service: "songe-hello",

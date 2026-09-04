@@ -37,6 +37,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		opts.AppDir = "app"
 	}
 
+	if opts.Side != "" && opts.Side != "core" && opts.Side != "app" {
+		return nil, fmt.Errorf("emitting the skeleton: side must be core, app or empty, got %q", opts.Side)
+	}
+
 	spec, err := Parse(doc)
 	if err != nil {
 		return nil, err
@@ -51,49 +55,67 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 	files := []File{}
 
+	add := func(side, p, name string, data any, writeOnce bool) error {
+		if opts.Side != "" && opts.Side != side {
+			return nil
+		}
+
+		content, err := render(name, data)
+		if err != nil {
+			return err
+		}
+
+		files = append(files, File{Path: p, Content: content, WriteOnce: writeOnce})
+
+		return nil
+	}
+
 	for _, svc := range spec.Services {
 		v, err := buildServiceView(spec, svc, opts)
 		if err != nil {
 			return nil, err
 		}
 
-		adapter, err := render("adapter", v)
-		if err != nil {
-			return nil, err
+		steps := []func() error{
+			func() error {
+				return add("app", path.Join(app, "adapter", "zz_generated_"+v.ServiceSnake+"_grpc_client.rs"), "adapter", v, false)
+			},
+			func() error {
+				return add("app", path.Join(app, "driver", "zz_generated_"+v.ServiceSnake+"_grpc_driver.rs"), "driver", v, false)
+			},
+			func() error {
+				return add("core", path.Join(core, "port", "zz_generated_"+v.ServiceSnake+"_client.rs"), "port", v, false)
+			},
+			func() error {
+				return add("core", path.Join(core, "types", "zz_generated_"+v.ServiceSnake+"_messages.rs"), "types", v, false)
+			},
+			func() error {
+				return add("core", path.Join(core, "controller", "zz_generated_"+v.ControllerSnake+"_controller.rs"), "controller", v, false)
+			},
+			func() error {
+				return add("core", path.Join(core, "hand", v.ControllerSnake+"_controller.rs"), "hand", v, true)
+			},
 		}
 
-		driver, err := render("driver", v)
-		if err != nil {
-			return nil, err
+		for _, step := range steps {
+			if err := step(); err != nil {
+				return nil, err
+			}
 		}
-
-		portFile, err := render("port", v)
-		if err != nil {
-			return nil, err
-		}
-
-		types, err := render("types", v)
-		if err != nil {
-			return nil, err
-		}
-
-		files = append(files,
-			File{Path: path.Join(app, "adapter", "zz_generated_"+v.ServiceSnake+"_grpc_client.rs"), Content: adapter},
-			File{Path: path.Join(app, "driver", "zz_generated_"+v.ServiceSnake+"_grpc_driver.rs"), Content: driver},
-			File{Path: path.Join(core, "port", "zz_generated_"+v.ServiceSnake+"_client.rs"), Content: portFile},
-			File{Path: path.Join(core, "types", "zz_generated_"+v.ServiceSnake+"_messages.rs"), Content: types},
-		)
 	}
 
-	build, err := render("build", map[string]any{"Header": header, "Name": opts.Service})
-	if err != nil {
+	buildData := map[string]any{"Header": header, "Name": opts.Service}
+
+	if err := add("app", path.Join(opts.AppDir, "zz_generated_build.rs"), "build", buildData, false); err != nil {
 		return nil, err
 	}
 
-	files = append(files,
-		File{Path: path.Join(opts.AppDir, "zz_generated_build.rs"), Content: build},
-		File{Path: path.Join(opts.AppDir, "proto", "zz_generated_"+opts.Service+".proto"), Content: header + "\n" + string(doc)},
-	)
+	if opts.Side == "" || opts.Side == "app" {
+		files = append(files, File{
+			Path:    path.Join(opts.AppDir, "proto", "zz_generated_"+opts.Service+".proto"),
+			Content: header + "\n" + string(doc),
+		})
+	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
@@ -152,6 +174,62 @@ impl<T: {{ .ClientTrait }} + ?Sized> {{ .ClientTrait }} for std::sync::Arc<T> {
     }
 {{- end }}
 }
+{{ end -}}
+
+{{- define "controller" -}}
+{{ .Header }}
+
+use crate::types::zz_generated_{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .ControllerError }} {
+    #[error("validating {field:?}: {reason}")]
+    Invalid { field: String, reason: String },
+    #[error("running {operation:?}: not implemented")]
+    NotImplemented { operation: String },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .ControllerTrait }}: Send + Sync {
+{{- range .Rpcs }}
+    fn {{ .Ident }}(&self, request: {{ .Request }}) -> Result<{{ .Response }}, {{ $.ControllerError }}>;
+{{- end }}
+}
+
+pub struct {{ .ControllerTrait }}Impl;
+
+impl {{ .ControllerTrait }}Impl {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for {{ .ControllerTrait }}Impl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl {{ .ControllerTrait }} for {{ .ControllerTrait }}Impl {
+{{- range .Rpcs }}
+    fn {{ .Ident }}(&self, request: {{ .Request }}) -> Result<{{ .Response }}, {{ $.ControllerError }}> {
+        crate::hand::{{ $.ControllerSnake }}_controller::{{ .Ident }}(request)
+    }
+{{ end -}}
+}
+{{ end -}}
+
+{{- define "hand" -}}
+use crate::controller::{{ .ControllerSnake }}_controller::{{ .ControllerError }};
+use crate::types::zz_generated_{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+{{ range .Rpcs }}
+pub fn {{ .Ident }}(request: {{ .Request }}) -> Result<{{ .Response }}, {{ $.ControllerError }}> {
+    let _ = request;
+    Err({{ $.ControllerError }}::NotImplemented {
+        operation: "{{ .Ident }}".to_string(),
+    })
+}
+{{ end -}}
 {{ end -}}
 
 {{- define "adapter" -}}

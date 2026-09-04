@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 )
 
 const cargoCheckWorkspaceManifest = `[workspace]
@@ -39,7 +40,7 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
-mockall = "0.13"
+mockall = "0.15"
 `
 
 const cargoCheckAppManifest = `[package]
@@ -60,19 +61,13 @@ tonic-prost-build = "0.14"
 `
 
 const cargoCheckCoreLib = `pub mod controller {
-    pub mod hello_controller {
-        use crate::types::zz_generated_hello_messages::{PingReply, PingRequest};
+    #[path = "../../src/controller/zz_generated_hello_controller.rs"]
+    pub mod hello_controller;
+}
 
-        #[derive(Debug, thiserror::Error)]
-        pub enum HelloControllerError {
-            #[error("running ping: not implemented")]
-            NotImplemented,
-        }
-
-        pub trait HelloController: Send + Sync {
-            fn ping(&self, request: PingRequest) -> Result<PingReply, HelloControllerError>;
-        }
-    }
+pub mod hand {
+    #[path = "../../src/hand/hello_controller.rs"]
+    pub mod hello_controller;
 }
 
 pub mod port {
@@ -130,6 +125,164 @@ func TestTheGeneratedSkeletonPassesCargoCheck(t *testing.T) {
 	write("app/src/lib.rs", cargoCheckAppLib)
 
 	for _, f := range files {
+		if f.Path == "app/zz_generated_build.rs" {
+			write("app/build.rs", f.Content)
+
+			continue
+		}
+
+		write(f.Path, f.Content)
+	}
+
+	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
+	cmd.Dir = root
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		lower := strings.ToLower(string(out))
+		if strings.Contains(lower, "could not resolve host") ||
+			strings.Contains(lower, "failed to get") ||
+			strings.Contains(lower, "network") ||
+			strings.Contains(lower, "spurious network error") {
+			t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+		}
+
+		t.Fatalf("cargo check: %v\n%s", err, out)
+	}
+}
+
+const bothEnginesOpenapi = `
+openapi: 3.1.0
+info:
+  title: Hello API
+  version: 1.0.0
+paths:
+  /greetings:
+    post:
+      operationId: createGreeting
+      x-controller: greeting
+      x-ports: [GreetingStore]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Greeting"
+      responses:
+        "201":
+          description: The created greeting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Greeting"
+components:
+  schemas:
+    Greeting:
+      type: object
+      x-store: true
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+`
+
+const bothEnginesCoreManifest = `[package]
+name = "songe-hello-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+mockall = "0.15"
+`
+
+const bothEnginesAppManifest = `[package]
+name = "songe-hello-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+songe-hello-core = { path = "../core" }
+anyhow = "1"
+axum = "0.8"
+prost = "0.14"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tonic = "0.14"
+tonic-prost = "0.14"
+
+[build-dependencies]
+protox = "0.9"
+tonic-prost-build = "0.14"
+`
+
+var bothEnginesExtraModules = []hexrust.ExtraModule{
+	{Layer: "types", Module: "zz_generated_hello_messages"},
+	{Layer: "port", Module: "zz_generated_hello_client"},
+	{Layer: "controller", Module: "hello_controller"},
+	{Layer: "hand", Module: "hello_controller"},
+	{Layer: "adapter", Module: "zz_generated_hello_grpc_client"},
+	{Layer: "driver", Module: "zz_generated_hello_grpc_driver"},
+}
+
+func TestBothEnginesFillOneCrateAndTheWorkspacePassesCargoCheck(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
+	}
+
+	hexFiles, err := hexrust.Generate([]byte(bothEnginesOpenapi), hexrust.Options{
+		Service:      "songe-hello",
+		ExtraModules: bothEnginesExtraModules,
+	})
+	if err != nil {
+		t.Fatalf("generating the hexagonal skeleton: %v", err)
+	}
+
+	grpcFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating the grpc skeleton: %v", err)
+	}
+
+	root := t.TempDir()
+	written := map[string]string{}
+
+	write := func(rel, content string) {
+		t.Helper()
+
+		if _, taken := written[rel]; taken {
+			t.Fatalf("%s is claimed by both engines", rel)
+		}
+
+		written[rel] = content
+
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("making %s: %v", filepath.Dir(p), err)
+		}
+
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", p, err)
+		}
+	}
+
+	write("Cargo.toml", cargoCheckWorkspaceManifest)
+	write("core/Cargo.toml", bothEnginesCoreManifest)
+	write("app/Cargo.toml", bothEnginesAppManifest)
+
+	for _, f := range hexFiles {
+		write(f.Path, f.Content)
+	}
+
+	for _, f := range grpcFiles {
 		if f.Path == "app/zz_generated_build.rs" {
 			write("app/build.rs", f.Content)
 

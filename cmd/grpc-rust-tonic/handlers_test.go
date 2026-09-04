@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,6 +87,93 @@ func TestTheOutputRootsComeFromTheTopLevelOrTheSurface(t *testing.T) {
 	for _, f := range out.Files {
 		if !strings.HasPrefix(f.Path, "c/") && !strings.HasPrefix(f.Path, "a/") {
 			t.Errorf("%s ignores the top level roots", f.Path)
+		}
+	}
+}
+
+func TestTheSurfaceSideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
+	tests := []struct {
+		side   string
+		dirKey string
+		want   []string
+		reject []string
+	}{
+		{
+			side:   "core",
+			dirKey: "coreDir",
+			want:   []string{"src/controller/zz_generated_hello_controller.rs", "src/hand/hello_controller.rs"},
+			reject: []string{"src/adapter/zz_generated_hello_grpc_client.rs", "zz_generated_build.rs"},
+		},
+		{
+			side:   "app",
+			dirKey: "appDir",
+			want:   []string{"src/driver/zz_generated_hello_grpc_driver.rs", "zz_generated_build.rs"},
+			reject: []string{"src/port/zz_generated_hello_client.rs", "src/hand/hello_controller.rs"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("the "+tt.side+" side answers only its own files", func(t *testing.T) {
+			out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+				Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
+				Surface: map[string]interface{}{"side": tt.side, tt.dirKey: "."},
+			})
+			if err != nil {
+				t.Fatalf("generating: %v", err)
+			}
+
+			got := map[string]bool{}
+			for _, f := range out.Files {
+				got[f.Path] = true
+			}
+
+			for _, path := range tt.want {
+				if !got[path] {
+					t.Errorf("the %s side did not answer %s", tt.side, path)
+				}
+			}
+
+			for _, path := range tt.reject {
+				if got[path] {
+					t.Errorf("the %s side answered %s, which belongs to the other crate", tt.side, path)
+				}
+			}
+		})
+	}
+}
+
+func TestASurfaceSideThatNamesNeitherCrateIsRefused(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
+		Surface: map[string]interface{}{"side": "both"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "side must be core, app or empty") {
+		t.Fatalf("want an error refusing the side, got %v", err)
+	}
+}
+
+func TestAHandControllerThatExistsIsNeverAnsweredAgain(t *testing.T) {
+	srcDir := t.TempDir()
+	hand := filepath.Join(srcDir, "core", "src", "hand", "hello_controller.rs")
+
+	if err := os.MkdirAll(filepath.Dir(hand), 0o755); err != nil {
+		t.Fatalf("making the hand dir: %v", err)
+	}
+
+	if err := os.WriteFile(hand, []byte("the author's body"), 0o644); err != nil {
+		t.Fatalf("writing the hand file: %v", err)
+	}
+
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "grpc", ProtoSpec: smallProto, SrcDir: srcDir,
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range out.Files {
+		if strings.Contains(f.Path, "/hand/") {
+			t.Errorf("%s was answered although it exists", f.Path)
 		}
 	}
 }

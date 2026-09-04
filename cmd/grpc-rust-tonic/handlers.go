@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 )
@@ -36,6 +38,7 @@ func NewHandlers() Handlers {
 				Service: input.Name,
 				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
 				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
+				Side:    surfaceString(input.Surface, "side"),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -44,6 +47,10 @@ func NewHandlers() Handlers {
 			out := make([]GeneratedFile, 0, len(files))
 
 			for _, f := range files {
+				if f.WriteOnce && existsUnder(input.SrcDir, f.Path) {
+					continue
+				}
+
 				out = append(out, GeneratedFile{Path: f.Path, Content: f.Content})
 			}
 
@@ -66,4 +73,14 @@ func surfaceString(surface map[string]interface{}, key string) string {
 	v, _ := surface[key].(string)
 
 	return v
+}
+
+func existsUnder(root, rel string) bool {
+	if root == "" {
+		return false
+	}
+
+	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+
+	return err == nil
 }

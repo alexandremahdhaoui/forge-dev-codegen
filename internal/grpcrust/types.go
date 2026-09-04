@@ -55,11 +55,13 @@ type Options struct {
 	Service string
 	CoreDir string
 	AppDir  string
+	Side    string
 }
 
 type File struct {
-	Path    string
-	Content string
+	Path      string
+	Content   string
+	WriteOnce bool
 }
 
 func messageByName(messages []Message, name string) (Message, bool) {

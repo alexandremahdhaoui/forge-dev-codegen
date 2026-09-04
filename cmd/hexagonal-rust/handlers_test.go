@@ -99,6 +99,44 @@ func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
 	}
 }
 
+func TestTheSurfaceMountsASecondEnginesModules(t *testing.T) {
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
+		Surface: map[string]interface{}{
+			"extraModules": []interface{}{
+				map[string]interface{}{"layer": "port", "module": "zz_generated_hello_client"},
+				map[string]interface{}{"layer": "controller", "module": "hello_controller"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range out.Files {
+		byPath[f.Path] = f.Content
+	}
+
+	if !strings.Contains(byPath["core/src/port/zz_generated_mod.rs"], "pub mod zz_generated_hello_client;") {
+		t.Error("the port mod file does not mount the extra port module")
+	}
+
+	if !strings.Contains(byPath["core/src/controller/zz_generated_mod.rs"], "pub mod hello_controller;") {
+		t.Error("the controller mod file does not mount the extra controller module")
+	}
+}
+
+func TestASurfaceThatMalformsTheExtraModulesListIsRefused(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
+		Surface: map[string]interface{}{"extraModules": "zz_generated_hello_client"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "it is a list of layer and module pairs") {
+		t.Fatalf("want an error refusing the extraModules shape, got %v", err)
+	}
+}
+
 func TestTheOutputRootsComeFromTheTopLevelOrTheSurface(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
