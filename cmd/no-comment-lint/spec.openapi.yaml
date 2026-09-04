@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: no-comment-lint Spec Schema
+  version: 0.1.0
+  description: Configuration schema for no-comment-lint test runner
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: Configuration for no-comment-lint. All fields are optional.
+      properties:
+        rootDir:
+          type: string
+          description: Root directory to scan for source files (default is current directory)
+        languages:
+          type: array
+          items:
+            type: string
+          description: Source languages to scan (default is go, rust, python, typescript)
+        exclude:
+          type: array
+          items:
+            type: string
+          description: Glob patterns excluded from the scan (default is zz_generated*, **/zz_generated*, **/docs/**)

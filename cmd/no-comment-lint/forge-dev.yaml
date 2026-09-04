@@ -1,0 +1,9 @@
+name: no-comment-lint
+kind: mcp-server
+profile: test-runner
+version: 0.1.0
+description: Fails a repo when a hand written source file carries a comment outside its allowed exemptions.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
