@@ -1,0 +1,14 @@
+name: widget
+artifactStorePath: .forge/artifact-store.yaml
+build:
+  - name: widget
+    src: ./cmd/widget
+    engine: forge://go-build
+test:
+  - name: unit
+    runner: forge://go-test
+  - name: architecture
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/architecture.sh", "0"]

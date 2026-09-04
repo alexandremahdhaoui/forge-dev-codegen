@@ -1,0 +1,15 @@
+openapi: 3.0.3
+info:
+  title: forge-lint Spec Schema
+  version: 0.1.0
+  description: Configuration schema for forge-lint test runner
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: Configuration for forge-lint. All fields are optional.
+      properties:
+        rootDir:
+          type: string
+          description: Root directory holding the forge.yaml to check (default is current directory)

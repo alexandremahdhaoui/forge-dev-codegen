@@ -1,0 +1,14 @@
+name: widget
+artifactStorePath: .forge/artifact-store.yaml
+build:
+  - name: widget
+    src: ./src
+    engine: forge://go-build
+test:
+  - name: unit
+    runner: forge://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "widget"]
+factory:
+  crate: widget

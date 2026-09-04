@@ -1,0 +1,9 @@
+name: forge-lint
+kind: mcp-server
+profile: test-runner
+version: 0.1.0
+description: Fails a repo when its forge.yaml carries a stale engine URI, a missing hack script, or a missing required field.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main

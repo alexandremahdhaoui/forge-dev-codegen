@@ -1,0 +1,9 @@
+name: widget
+artifactStorePath: .forge/artifact-store.yaml
+build:
+  - name: widget
+    src: ./cmd/widget
+    engine: go://go-build
+test:
+  - name: unit
+    runner: forge://go-test
