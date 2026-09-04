@@ -524,6 +524,45 @@ func filesImporting(dir string, forbiddenSubstrings []string) ([]string, error) 
 	return matches, nil
 }
 
+var plainAddressTypes = map[string][]string{
+	"std::net": {
+		"::SocketAddrV4",
+		"::SocketAddrV6",
+		"::SocketAddr",
+		"::Ipv4Addr",
+		"::Ipv6Addr",
+		"::IpAddr",
+	},
+}
+
+func usesForbidden(content, forbiddenPath string) bool {
+	allowed := plainAddressTypes[forbiddenPath]
+
+	for offset := 0; ; {
+		index := strings.Index(content[offset:], forbiddenPath)
+		if index < 0 {
+			return false
+		}
+
+		rest := content[offset+index+len(forbiddenPath):]
+		offset += index + len(forbiddenPath)
+
+		if !startsWithAnyOf(rest, allowed) {
+			return true
+		}
+	}
+}
+
+func startsWithAnyOf(text string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func filesUsing(dir string, forbidden []string) ([]Finding, error) {
 	var findings []Finding
 	if !dirExists(dir) {
@@ -542,7 +581,7 @@ func filesUsing(dir string, forbidden []string) ([]Finding, error) {
 			return fmt.Errorf("reading %q: %w", path, err)
 		}
 		for _, s := range forbidden {
-			if strings.Contains(string(content), s) {
+			if usesForbidden(string(content), s) {
 				findings = append(findings, Finding{
 					Rule:    "rust-core-forbidden-usage",
 					Path:    path,

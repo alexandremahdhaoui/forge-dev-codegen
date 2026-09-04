@@ -93,6 +93,34 @@ func TestCheckFlagsAForbiddenImportInARustCoreCrate(t *testing.T) {
 	}
 }
 
+func TestAPlainSocketAddressIsNotIOAndStaysAllowedInARustCoreCrate(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-cell-clean",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+
+	if len(findings) != 0 {
+		t.Fatalf("expected zero findings, got %+v", findings)
+	}
+}
+
+func TestASocketInARustCoreCrateIsStillForbidden(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-socket",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+
+	if !hasRule(findings, "rust-core-forbidden-usage") {
+		t.Fatalf("expected a rust-core-forbidden-usage finding, got %+v", findings)
+	}
+}
+
 func TestCheckReturnsZeroFindingsOnACleanRustAppCrate(t *testing.T) {
 	findings, err := goldenpath.Check(goldenpath.Options{
 		Layout:  goldenpath.LayoutRustCoreApp,
