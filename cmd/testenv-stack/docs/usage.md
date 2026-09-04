@@ -19,12 +19,13 @@ test:
           services:
             - name: hello
               binary: ./build/bin/hello
-              addrEnv: HELLO_URL
+              addrEnv: HELLO_ADDR
               readyTimeoutSeconds: 30
 ```
 
 Each service starts with the accumulated testenv env, then its own
-`env` block, then `<NAME>_ADDR=127.0.0.1:0`. The engine reads the
+`env` block, then `<addrEnv>=127.0.0.1:0` so the binary binds a free
+port on the variable it reads. The engine reads the
 service's stdout until a `LISTENING <port>` line appears or the timeout
 passes. Stdout and stderr go to `<TmpDir>/<name>.log`.
 
@@ -32,7 +33,8 @@ The artifact exports `addrEnv` as `http://127.0.0.1:<port>` per
 service, lists `stack.<name>.log` and `stack.pids` under files, and
 reports each pid in metadata as `testenv-stack.<name>.pid`.
 
-Processes outlive the create call. They run in their own session and
-their pids sit in `<TmpDir>/stack.pids`. Delete reads that file, sends
-SIGTERM to each process, and sends SIGKILL to any still alive after
-five seconds.
+Processes outlive the create call. Each runs as the leader of its own
+session and process group, and its pid sits in `<TmpDir>/stack.pids`.
+Delete reads that file, sends SIGTERM to each group, and sends SIGKILL
+to any group still alive after five seconds. Grandchildren die with
+their service.

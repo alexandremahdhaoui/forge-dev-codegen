@@ -29,7 +29,7 @@ import (
 )
 
 const fakeService = `#!/bin/sh
-echo "addr=$HELLO_ADDR store=$SONGE_STORE_GREETING_PATH mode=$MODE"
+echo "addr=$HELLO_URL store=$SONGE_STORE_GREETING_PATH mode=$MODE"
 echo "LISTENING 4321"
 sleep 60
 `

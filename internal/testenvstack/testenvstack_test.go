@@ -76,20 +76,10 @@ func TestFindListeningPicksTheFirstListeningLineOutOfMixedOutput(t *testing.T) {
 	}
 }
 
-func TestAddrEnvNameIsTheUpperSnakeOfTheServiceNamePlusAddr(t *testing.T) {
-	if got := AddrEnvName("hello"); got != "HELLO_ADDR" {
-		t.Errorf("hello -> %q", got)
-	}
-
-	if got := AddrEnvName("songe-hello"); got != "SONGE_HELLO_ADDR" {
-		t.Errorf("songe-hello -> %q", got)
-	}
-}
-
-func TestEnvironmentLayersTheServiceEnvOverTheBaseAndForcesAFreePort(t *testing.T) {
+func TestEnvironmentLayersTheServiceEnvOverTheBaseAndForcesAFreePortOnTheDeclaredAddrEnv(t *testing.T) {
 	t.Setenv("FROM_PARENT", "parent")
 
-	env := Environment(map[string]string{"SHARED": "base", "HELLO_ADDR": "1.2.3.4:9"}, Service{Name: "hello", Env: map[string]string{"SHARED": "service"}})
+	env := Environment(map[string]string{"SHARED": "base", "HELLO_ADDR": "1.2.3.4:9"}, Service{Name: "hello", AddrEnv: "HELLO_ADDR", Env: map[string]string{"SHARED": "service", "HELLO_ADDR": "5.6.7.8:9"}})
 
 	joined := strings.Join(env, "\n")
 
@@ -99,7 +89,7 @@ func TestEnvironmentLayersTheServiceEnvOverTheBaseAndForcesAFreePort(t *testing.
 		}
 	}
 
-	if strings.Contains(joined, "SHARED=base") || strings.Contains(joined, "HELLO_ADDR=1.2.3.4:9") {
+	if strings.Contains(joined, "SHARED=base") || strings.Contains(joined, "HELLO_ADDR=1.2.3.4:9") || strings.Contains(joined, "HELLO_ADDR=5.6.7.8:9") {
 		t.Errorf("an overridden value survived:\n%s", joined)
 	}
 }
@@ -125,7 +115,7 @@ func TestStartReturnsThePortFromTheListeningLineAndStopEndsTheProcess(t *testing
 	binary := writeBinary(t, fakeService)
 	tmpDir := t.TempDir()
 
-	started, err := Start(context.Background(), tmpDir, map[string]string{"EXTRA": "yes"}, Service{Name: "hello", Binary: binary, ReadyTimeout: 5 * time.Second})
+	started, err := Start(context.Background(), tmpDir, map[string]string{"EXTRA": "yes"}, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", ReadyTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +192,38 @@ func TestStartHonoursACancelledContext(t *testing.T) {
 	_, err := Start(ctx, t.TempDir(), nil, Service{Name: "silent", Binary: binary, ReadyTimeout: 5 * time.Second})
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestStopKillsTheGrandchildrenOfAServiceTooBecauseTheyShareItsGroup(t *testing.T) {
+	tmpDir := t.TempDir()
+	childPidPath := filepath.Join(tmpDir, "child.pid")
+	binary := writeBinary(t, "#!/bin/sh\nsleep 60 &\necho $! > "+childPidPath+"\necho \"LISTENING 1\"\nwait\n")
+
+	started, err := Start(context.Background(), tmpDir, nil, Service{Name: "parent", Binary: binary, AddrEnv: "PARENT_ADDR", ReadyTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(childPidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	child, err := ParsePids(string(raw))
+	if err != nil || len(child) != 1 || !Alive(child[0]) {
+		t.Fatalf("child: %v %v", child, err)
+	}
+
+	Stop([]int{started.PID}, 2*time.Second)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for (Alive(started.PID) || Alive(child[0])) && time.Now().Before(deadline) {
+		time.Sleep(pollInterval)
+	}
+
+	if Alive(child[0]) {
+		t.Error("the grandchild must be gone after Stop")
 	}
 }
 

@@ -79,7 +79,7 @@ func Alive(pid int) bool {
 
 func Stop(pids []int, grace time.Duration) {
 	for _, pid := range pids {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
 	}
 
 	deadline := time.Now().Add(grace)
@@ -90,7 +90,7 @@ func Stop(pids []int, grace time.Duration) {
 
 	for _, pid := range pids {
 		if Alive(pid) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	}
 }

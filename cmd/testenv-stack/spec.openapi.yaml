@@ -23,13 +23,13 @@ components:
       properties:
         name:
           type: string
-          description: Service name. Upper snake case of it plus _ADDR is set to 127.0.0.1:0 so the binary picks a free port. The log file is <TmpDir>/<name>.log.
+          description: Service name. The log file is <TmpDir>/<name>.log.
         binary:
           type: string
           description: Path to the binary to start. Relative paths resolve against the project root.
         addrEnv:
           type: string
-          description: Name of the environment variable the artifact exports with http://127.0.0.1:<port>.
+          description: The environment variable the binary binds on. It is set to 127.0.0.1:0 at start so the binary picks a free port, and the artifact exports it as http://127.0.0.1:<port>.
         env:
           type: object
           description: Extra environment variables for this service. They win over the accumulated testenv env.

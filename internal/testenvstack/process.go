@@ -23,8 +23,6 @@ import (
 	"sort"
 	"syscall"
 	"time"
-
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 )
 
 const DefaultReadyTimeout = 30 * time.Second
@@ -44,10 +42,6 @@ type Started struct {
 	PID     int
 	Port    int
 	LogPath string
-}
-
-func AddrEnvName(serviceName string) string {
-	return hexrust.Upper(serviceName) + "_ADDR"
 }
 
 func Environment(base map[string]string, service Service) []string {
@@ -71,7 +65,7 @@ func Environment(base map[string]string, service Service) []string {
 		merged[k] = v
 	}
 
-	merged[AddrEnvName(service.Name)] = "127.0.0.1:0"
+	merged[service.AddrEnv] = "127.0.0.1:0"
 
 	keys := make([]string, 0, len(merged))
 	for k := range merged {
@@ -160,5 +154,5 @@ func awaitListening(ctx context.Context, logPath string, timeout time.Duration, 
 }
 
 func terminate(pid int) {
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
