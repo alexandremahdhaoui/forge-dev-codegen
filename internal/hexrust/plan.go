@@ -81,9 +81,10 @@ type driverPlan struct {
 }
 
 type handConfigPlan struct {
-	Module string
-	Type   string
-	Fields []specField
+	Module  string
+	Adapter string
+	Type    string
+	Fields  []specField
 }
 
 type specField struct {
@@ -427,7 +428,7 @@ func planCandidate(
 		ConfigType: candidate.Type + "Config",
 	}
 
-	hand := handConfigPlan{Module: module, Type: cp.ConfigType}
+	hand := handConfigPlan{Module: module, Adapter: cp.Type, Type: cp.ConfigType}
 
 	for _, field := range sortedFieldNames(candidate.Config) {
 		declared := candidate.Config[field]

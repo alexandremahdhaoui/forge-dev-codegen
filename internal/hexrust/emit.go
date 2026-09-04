@@ -198,20 +198,15 @@ func Generate(opts Options) ([]File, error) {
 		layer := layer
 
 		mod := map[string]any{
-			"Header":   header,
-			"Allow":    allowingLayers[layer],
-			"HandMods": []string{},
-			"Configs":  []handConfigPlan{},
+			"Header":  header,
+			"Allow":   allowingLayers[layer],
+			"Configs": []handConfigPlan{},
 		}
 
 		if layer == "adapter" {
-			hands := append([]string{}, p.HandModules...)
-			sort.Strings(hands)
-
 			configs := append([]handConfigPlan{}, p.HandConfigs...)
 			sort.Slice(configs, func(i, j int) bool { return configs[i].Module < configs[j].Module })
 
-			mod["HandMods"] = hands
 			mod["Configs"] = configs
 		}
 
@@ -340,12 +335,13 @@ pub mod {{ . }};
 {{ range .Configs }}
 pub mod zz_generated_{{ .Module }}_config;
 {{- end }}
-{{- range .HandMods }}
+{{- range .Configs }}
 
-mod {{ . }};
+mod {{ .Module }};
 {{- end }}
 {{- range .Configs }}
 
+pub use {{ .Module }}::{{ .Adapter }};
 pub use zz_generated_{{ .Module }}_config::{{ .Type }};
 {{- end }}
 {{ end -}}
