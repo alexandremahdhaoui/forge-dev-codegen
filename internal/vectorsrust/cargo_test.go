@@ -162,8 +162,12 @@ const cargoVectors = `{
   ]
 }`
 
-func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
+func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root string, cargo string) {
+	t.Helper()
+
+	var err error
+
+	cargo, err = exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
 	}
@@ -178,7 +182,7 @@ func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t 
 		t.Fatalf("generating the vectors: %v", err)
 	}
 
-	root := t.TempDir()
+	root = t.TempDir()
 
 	write := func(rel, content string) {
 		t.Helper()
@@ -198,27 +202,89 @@ func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t 
 	write("app/Cargo.toml", cargoAppManifest)
 
 	for _, f := range hexFiles {
-		write(f.Path, f.Content)
+		content := f.Content
+		if f.Path == "app/src/driver/zz_generated_wire.rs" && mangleWire != nil {
+			content = mangleWire(content)
+		}
+
+		write(f.Path, content)
 	}
 
 	for _, f := range vectorFiles {
 		write(f.Path, f.Content)
 	}
 
+	return root, cargo
+}
+
+func runCargoTest(t *testing.T, root, cargo string) ([]byte, error) {
+	t.Helper()
+
 	cmd := exec.Command(cargo, "test", "--workspace")
 	cmd.Dir = root
 
-	out, err := cmd.CombinedOutput()
+	return cmd.CombinedOutput()
+}
+
+func skipOnNetworkError(t *testing.T, err error, out []byte) {
+	t.Helper()
+
+	lower := strings.ToLower(string(out))
+	if strings.Contains(lower, "could not resolve host") ||
+		strings.Contains(lower, "failed to get") ||
+		strings.Contains(lower, "network") ||
+		strings.Contains(lower, "spurious network error") ||
+		strings.Contains(lower, "403 forbidden") {
+		t.Skipf("cargo test needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+	}
+}
+
+func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t *testing.T) {
+	root, cargo := buildCargoWorkspace(t, nil)
+
+	out, err := runCargoTest(t, root, cargo)
 	if err != nil {
-		lower := strings.ToLower(string(out))
-		if strings.Contains(lower, "could not resolve host") ||
-			strings.Contains(lower, "failed to get") ||
-			strings.Contains(lower, "network") ||
-			strings.Contains(lower, "spurious network error") ||
-			strings.Contains(lower, "403 forbidden") {
-			t.Skipf("cargo test needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+		skipOnNetworkError(t, err, out)
+		t.Fatalf("cargo test: %v\n%s", err, out)
+	}
+}
+
+func TestAMangledRequestBodyMappingMakesTheWithPredicateFailTheGeneratedTest(t *testing.T) {
+	mangle := func(content string) string {
+		const original = `impl From<CreateGreetingRequestWire> for CreateGreetingRequest {
+    fn from(w: CreateGreetingRequestWire) -> Self {
+        Self {
+            name: w.name,
+        }
+    }
+}`
+
+		const mangled = `impl From<CreateGreetingRequestWire> for CreateGreetingRequest {
+    fn from(w: CreateGreetingRequestWire) -> Self {
+        let _ = w.name;
+        Self {
+            name: "mangled".to_string(),
+        }
+    }
+}`
+
+		if !strings.Contains(content, original) {
+			t.Fatalf("the wire content changed shape, update the mangle fixture:\n%s", content)
 		}
 
-		t.Fatalf("cargo test: %v\n%s", err, out)
+		return strings.Replace(content, original, mangled, 1)
+	}
+
+	root, cargo := buildCargoWorkspace(t, mangle)
+
+	out, err := runCargoTest(t, root, cargo)
+	if err == nil {
+		t.Fatalf("cargo test succeeded although the driver mangles the request body before it reaches the controller:\n%s", out)
+	}
+
+	skipOnNetworkError(t, err, out)
+
+	if !strings.Contains(string(out), "creating_a_greeting_succeeds") {
+		t.Fatalf("cargo test failed but not on the test asserting the body, got:\n%s", out)
 	}
 }

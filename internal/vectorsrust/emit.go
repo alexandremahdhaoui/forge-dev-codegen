@@ -101,9 +101,6 @@ use {{ .AppCrate }}::driver::http_driver::HttpDriver;
 {{ range .Controllers -}}
 use {{ $.CoreCrate }}::controller::{{ .Snake }}_controller::{{ .Pascal }}ControllerError;
 {{ end -}}
-{{ range .PortErrors -}}
-use {{ $.CoreCrate }}::port::{{ .Snake }}::{{ .Port }}Error;
-{{ end -}}
 {{ range .TypeImports -}}
 use {{ $.CoreCrate }}::types::{{ .Snake }}::{{ .Name }};
 {{ end }}
@@ -123,6 +120,9 @@ async fn {{ .Name }}() {
     let mut {{ .ArmVar }} = Mock{{ .ArmController }}Controller::new();
     {{ .ArmVar }}
         .{{ .ArmExpectMethod }}()
+{{- if .HasWith }}
+        .with({{ .WithPredicates }})
+{{- end }}
         .times(1)
         .returning(|{{ .ArmClosureParams }}| {{ .ArmReturning }});
 

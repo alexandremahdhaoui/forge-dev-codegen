@@ -30,14 +30,8 @@ type view struct {
 	CoreCrate   string
 	AppCrate    string
 	Controllers []controllerView
-	PortErrors  []portImportView
 	TypeImports []importView
 	Tests       []testView
-}
-
-type portImportView struct {
-	Port  string
-	Snake string
 }
 
 type importView struct {
@@ -87,6 +81,8 @@ type testView struct {
 	ArmExpectMethod          string
 	ArmClosureParams         string
 	ArmReturning             string
+	HasWith                  bool
+	WithPredicates           string
 	DriverArgs               []string
 	Method                   string
 	URI                      string
@@ -161,8 +157,6 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, er
 		v.TypeImports = append(v.TypeImports, importView{Snake: hexrust.Snake(name), Name: name})
 	}
 
-	portErrors := map[string]bool{}
-
 	for _, c := range vectors.Cases {
 		op, ok := opsByID[c.Operation]
 		if !ok {
@@ -171,13 +165,9 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, er
 
 		owner := controllerByName[op.Controller]
 
-		tv, arm, err := buildTest(c, op, owner)
+		tv, err := buildTest(c, op, owner)
 		if err != nil {
 			return view{}, err
-		}
-
-		if arm.kind == armKindPort {
-			portErrors[arm.port] = true
 		}
 
 		v.Tests = append(v.Tests, tv)
@@ -185,10 +175,6 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, er
 
 	for i := range v.Tests {
 		v.Tests[i].DriverArgs = driverArgs(v.Controllers, v.Tests[i].ArmController, v.Tests[i].ArmVar)
-	}
-
-	for _, port := range sortedStrings(portErrors) {
-		v.PortErrors = append(v.PortErrors, portImportView{Port: port, Snake: portSnake(port)})
 	}
 
 	return v, nil
@@ -201,47 +187,65 @@ const (
 	armKindNotFound
 	armKindInvalid
 	armKindNotImplemented
-	armKindPort
 )
 
 type arm struct {
 	kind armKind
 	id   string
-	port string
 }
 
-func chooseArm(c VectorCase, op hexrust.Operation) arm {
-	if len(c.ControllerReply) > 0 {
-		return arm{kind: armKindOK}
+func chooseArm(c VectorCase, op hexrust.Operation) (arm, error) {
+	isOK := len(c.ControllerReply) > 0
+	is2xx := c.ExpectedStatus >= 200 && c.ExpectedStatus < 300
+
+	if isOK && !is2xx {
+		return arm{}, fmt.Errorf("reading vector %q: controllerReply is present but expectedStatus is %d, a success case needs a 2xx status", c.Case, c.ExpectedStatus)
+	}
+
+	if !isOK && is2xx {
+		return arm{}, fmt.Errorf("reading vector %q: expectedStatus is %d but no controllerReply is present, a 2xx status needs a success case", c.Case, c.ExpectedStatus)
+	}
+
+	if isOK {
+		return arm{kind: armKindOK}, nil
 	}
 
 	switch {
 	case c.ExpectedStatus == 404:
-		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}
+		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}, nil
 	case c.ExpectedStatus == op.InvalidStatus:
-		return arm{kind: armKindInvalid, id: c.ExpectedErrorSubstring}
+		return arm{kind: armKindInvalid, id: c.ExpectedErrorSubstring}, nil
 	case c.ExpectedStatus == 501:
-		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}
-	case len(op.Ports) > 0:
-		return arm{kind: armKindPort, id: c.ExpectedErrorSubstring, port: op.Ports[0]}
+		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}, nil
 	default:
-		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}
+		return arm{}, fmt.Errorf(
+			"reading vector %q: expectedStatus %d matches none of NotFound (404), Invalid (%d) or NotImplemented (501), vectors-rust cannot choose which controller error to mock",
+			c.Case, c.ExpectedStatus, op.InvalidStatus,
+		)
 	}
 }
 
-func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (testView, arm, error) {
+func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (testView, error) {
 	sig := buildOpSignature(op)
 
 	uri, hasBody, bodyLiteral, err := buildRequest(op, c.Input)
 	if err != nil {
-		return testView{}, arm{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
-	chosen := chooseArm(c, op)
+	withPredicates, err := buildWithPredicates(op, c.Input)
+	if err != nil {
+		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+	}
+
+	chosen, err := chooseArm(c, op)
+	if err != nil {
+		return testView{}, err
+	}
 
 	returning, err := buildReturning(chosen, c, op, owner)
 	if err != nil {
-		return testView{}, arm{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
 	tv := testView{
@@ -251,6 +255,8 @@ func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (te
 		ArmExpectMethod:      "expect_" + sig.Ident,
 		ArmClosureParams:     sig.ClosureParams(),
 		ArmReturning:         returning,
+		HasWith:              len(withPredicates) > 0,
+		WithPredicates:       strings.Join(withPredicates, ", "),
 		Method:               op.Method,
 		URI:                  uri,
 		HasBody:              hasBody,
@@ -263,7 +269,7 @@ func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (te
 	if tv.HasExpectedBody {
 		compact, err := compactJSON(c.ExpectedBody)
 		if err != nil {
-			return testView{}, arm{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
+			return testView{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
 		}
 
 		tv.ExpectedBodyLiteral = strconv.Quote(compact)
@@ -273,34 +279,21 @@ func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (te
 		tv.ExpectedSubstringLiteral = strconv.Quote(c.ExpectedErrorSubstring)
 	}
 
-	return tv, chosen, nil
+	return tv, nil
 }
 
 func buildRequest(op hexrust.Operation, input json.RawMessage) (uri string, hasBody bool, bodyLiteral string, err error) {
-	inputMap := map[string]json.RawMessage{}
-
-	if len(input) > 0 {
-		if unmarshalErr := json.Unmarshal(input, &inputMap); unmarshalErr != nil {
-			return "", false, "", fmt.Errorf("reading input: %w", unmarshalErr)
-		}
+	inputMap, err := parseInput(input)
+	if err != nil {
+		return "", false, "", err
 	}
 
 	uri = op.Path
 
 	for _, p := range op.Params {
-		raw, ok := inputMap[p.Name]
-		if !ok {
-			return "", false, "", fmt.Errorf("reading input: path parameter %q is missing", p.Name)
-		}
-
-		var value string
-
-		if p.Kind == "string" {
-			if unmarshalErr := json.Unmarshal(raw, &value); unmarshalErr != nil {
-				return "", false, "", fmt.Errorf("reading input: path parameter %q must be a JSON string: %w", p.Name, unmarshalErr)
-			}
-		} else {
-			value = strings.TrimSpace(string(raw))
+		value, err := paramValue(p, inputMap)
+		if err != nil {
+			return "", false, "", err
 		}
 
 		uri = strings.ReplaceAll(uri, "{"+p.Name+"}", value)
@@ -316,6 +309,74 @@ func buildRequest(op hexrust.Operation, input json.RawMessage) (uri string, hasB
 	}
 
 	return uri, true, strconv.Quote(compact), nil
+}
+
+func buildWithPredicates(op hexrust.Operation, input json.RawMessage) ([]string, error) {
+	inputMap, err := parseInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	preds := make([]string, 0, len(op.Params)+1)
+
+	for _, p := range op.Params {
+		value, err := paramValue(p, inputMap)
+		if err != nil {
+			return nil, err
+		}
+
+		if p.Kind == "string" {
+			preds = append(preds, "mockall::predicate::eq("+strconv.Quote(value)+")")
+		} else {
+			preds = append(preds, "mockall::predicate::eq("+value+"i64)")
+		}
+	}
+
+	if op.Body != "" {
+		compact, err := compactJSON(input)
+		if err != nil {
+			return nil, fmt.Errorf("reading input: %w", err)
+		}
+
+		preds = append(preds, fmt.Sprintf(
+			"mockall::predicate::eq(serde_json::from_str::<%s>(%s).expect(\"decoding input\"))",
+			op.Body, strconv.Quote(compact),
+		))
+	}
+
+	return preds, nil
+}
+
+func parseInput(input json.RawMessage) (map[string]json.RawMessage, error) {
+	inputMap := map[string]json.RawMessage{}
+
+	if len(input) == 0 {
+		return inputMap, nil
+	}
+
+	if err := json.Unmarshal(input, &inputMap); err != nil {
+		return nil, fmt.Errorf("reading input: %w", err)
+	}
+
+	return inputMap, nil
+}
+
+func paramValue(p hexrust.Param, inputMap map[string]json.RawMessage) (string, error) {
+	raw, ok := inputMap[p.Name]
+	if !ok {
+		return "", fmt.Errorf("reading input: path parameter %q is missing", p.Name)
+	}
+
+	if p.Kind != "string" {
+		return strings.TrimSpace(string(raw)), nil
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("reading input: path parameter %q must be a JSON string: %w", p.Name, err)
+	}
+
+	return value, nil
 }
 
 func buildReturning(a arm, c VectorCase, op hexrust.Operation, owner hexrust.Controller) (string, error) {
@@ -337,13 +398,6 @@ func buildReturning(a arm, c VectorCase, op hexrust.Operation, owner hexrust.Con
 		return fmt.Sprintf("Err(%sControllerError::Invalid { field: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	case armKindNotImplemented:
 		return fmt.Sprintf("Err(%sControllerError::NotImplemented { operation: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindPort:
-		idLit := strconv.Quote(a.id)
-
-		return fmt.Sprintf(
-			"Err(%sControllerError::%s { id: %s.to_string(), source: %sError::Get { id: %s.to_string(), source: %s.into() } })",
-			owner.Pascal, a.port, idLit, a.port, idLit, idLit,
-		), nil
 	default:
 		return "", fmt.Errorf("choosing a mock arm: unhandled kind %v", a.kind)
 	}
@@ -363,10 +417,6 @@ func driverArgs(controllers []controllerView, armedPascal, armedVar string) []st
 	}
 
 	return args
-}
-
-func portSnake(port string) string {
-	return hexrust.Snake(strings.TrimSuffix(port, "Store")) + "_store"
 }
 
 func compactJSON(raw json.RawMessage) (string, error) {

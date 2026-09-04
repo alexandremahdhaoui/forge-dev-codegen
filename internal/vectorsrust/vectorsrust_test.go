@@ -163,6 +163,7 @@ async fn create_valid_name() {
     let mut greeting_controller = MockGreetingController::new();
     greeting_controller
         .expect_create_greeting()
+        .with(mockall::predicate::eq(serde_json::from_str::<CreateGreetingRequest>("{\"name\":\"Songe\"}").expect("decoding input")))
         .times(1)
         .returning(|_body| Ok(serde_json::from_str::<Greeting>("{\"id\":\"6ba7b810-9dad-11d1-80b4-00c04fd430c8\",\"name\":\"Songe\",\"count\":0}").expect("decoding controllerReply")));
 
@@ -319,6 +320,53 @@ func TestAServiceNameThatCannotBeACrateNameIsRefused(t *testing.T) {
 	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{Service: `svc"; drop table greeting; --`})
 	if err == nil || !strings.Contains(err.Error(), "is not one Rust or Cargo can spell") {
 		t.Fatalf("want a refusal naming the unspellable service, got %v", err)
+	}
+}
+
+func TestAControllerReplyWithANon2xxExpectedStatusIsRefused(t *testing.T) {
+	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": "Songe"}, "controllerReply": {"id": "g1", "name": "Songe", "count": 0}, "expectedStatus": 422}]}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `controllerReply is present but expectedStatus is 422, a success case needs a 2xx status`) {
+		t.Fatalf("want a refusal naming the case and the mismatched status, got %v", err)
+	}
+}
+
+func TestA2xxExpectedStatusWithoutAControllerReplyIsRefused(t *testing.T) {
+	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": ""}, "expectedStatus": 201, "expectedErrorSubstring": "name"}]}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `expectedStatus is 201 but no controllerReply is present, a 2xx status needs a success case`) {
+		t.Fatalf("want a refusal naming the case and the mismatched status, got %v", err)
+	}
+}
+
+func TestAnErrorStatusThatMatchesNoKnownControllerErrorIsRefused(t *testing.T) {
+	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": "x"}, "expectedStatus": 500, "expectedErrorSubstring": "boom"}]}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `expectedStatus 500 matches none of NotFound (404), Invalid (422) or NotImplemented (501)`) {
+		t.Fatalf("want a refusal naming the case and the unmatched status, got %v", err)
+	}
+}
+
+func TestTheMockAssertsTheDecodedBodyAndPathParameterAgainstTheVectorInput(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	want := []string{
+		`.with(mockall::predicate::eq(serde_json::from_str::<CreateGreetingRequest>("{\"name\":\"Songe\"}").expect("decoding input")))`,
+		`.with(mockall::predicate::eq("6ba7b810-9dad-11d1-80b4-00c04fd430c8"))`,
+	}
+
+	for _, line := range want {
+		if !strings.Contains(content, line) {
+			t.Errorf("the file lacks %q\n%s", line, content)
+		}
 	}
 }
 
