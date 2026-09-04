@@ -147,6 +147,8 @@ type Spec struct {
 
 var methods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
+const forgeDevSpecSchema = "Spec"
+
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
 
 func Parse(doc []byte) (*Spec, error) {
@@ -185,6 +187,10 @@ func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
 	types := make([]TypeDef, 0, len(names))
 
 	for _, name := range names {
+		if name == forgeDevSpecSchema {
+			continue
+		}
+
 		s := schemas[name]
 
 		if s.Type != "object" && s.Type != "" {

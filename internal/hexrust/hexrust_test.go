@@ -288,6 +288,26 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 	}
 }
 
+func TestTheSpecSchemaBelongsToForgeDevAndNeverBecomesAType(t *testing.T) {
+	doc := oneStoreOneOperation + `    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+`
+
+	files, err := hexrust.Generate([]byte(doc), hexrust.Options{Service: "svc"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if strings.HasSuffix(f.Path, "zz_generated_spec.rs") {
+			t.Errorf("%s was emitted for the forge-dev Spec schema", f.Path)
+		}
+	}
+}
+
 func TestEveryGeneratedFileCarriesTheHeaderAndOnlyHandFilesAreWriteOnce(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
 	if err != nil {
