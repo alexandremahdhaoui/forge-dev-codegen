@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest/cell.schema.json",
+  "title": "Cell manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cell", "generator"],
+  "properties": {
+    "cell": { "$ref": "#/$defs/snakeName" },
+    "generator": { "type": "string", "minLength": 1 },
+    "provides": { "$ref": "#/$defs/provides" },
+    "requires": { "$ref": "#/$defs/requires" }
+  },
+  "$defs": {
+    "snakeName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "rustIdent": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "modulePath": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*(::[a-z_][a-z0-9_]*)*$"
+    },
+    "traitList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rustIdent" }
+    },
+    "configField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "boolean", "duration"]
+        },
+        "required": { "type": "boolean" },
+        "default": true,
+        "description": { "type": "string" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/snakeName" },
+      "additionalProperties": { "$ref": "#/$defs/configField" }
+    },
+    "provides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "drivers": { "type": "array", "items": { "$ref": "#/$defs/driver" } },
+        "adapters": { "type": "array", "items": { "$ref": "#/$defs/adapter" } },
+        "controllers": { "type": "array", "items": { "$ref": "#/$defs/controller" } },
+        "ports": { "type": "array", "items": { "$ref": "#/$defs/port" } }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ports": { "$ref": "#/$defs/traitList" }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "requires"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snakeName" },
+        "type": { "$ref": "#/$defs/rustIdent" },
+        "module": { "$ref": "#/$defs/modulePath" },
+        "requires": {
+          "allOf": [{ "$ref": "#/$defs/traitList" }, { "minItems": 1 }]
+        },
+        "config": { "$ref": "#/$defs/config" }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "implements"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snakeName" },
+        "type": { "$ref": "#/$defs/rustIdent" },
+        "module": { "$ref": "#/$defs/modulePath" },
+        "implements": { "$ref": "#/$defs/rustIdent" },
+        "config": { "$ref": "#/$defs/config" }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trait", "impl"],
+      "properties": {
+        "trait": { "$ref": "#/$defs/rustIdent" },
+        "impl": { "$ref": "#/$defs/rustIdent" },
+        "module": { "$ref": "#/$defs/modulePath" },
+        "ports": { "$ref": "#/$defs/traitList" }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trait"],
+      "properties": {
+        "trait": { "$ref": "#/$defs/rustIdent" },
+        "module": { "$ref": "#/$defs/modulePath" }
+      }
+    }
+  }
+}
