@@ -1,9 +1,11 @@
 # grpc-rust-tonic
 
 A forge-dev generator that turns one proto3 file into the rust skeleton
-of every gRPC service it declares. `core` holds the plain message types
-and the client port trait. `app` holds the client adapter, the server
-driver, and the files tonic-build needs to compile the proto.
+of every gRPC service it declares. It fills one cell, a module directory
+under `src`. The cell of the core crate holds the plain message types,
+the client port trait and the controller. The cell of the app crate
+holds the client adapter, the server driver, and the files tonic-build
+needs to compile the proto.
 
 The parser is small and on purpose. It reads `package`, `message` with
 scalar and message fields, and `service` with unary rpcs. It refuses
@@ -11,54 +13,57 @@ imports, options, enums, extend, streaming, nested messages, oneofs,
 maps, repeated fields and qualified type references, with a clear error
 naming what broke.
 
+This file sits inside the cell, at `src/grpc/forge-dev.yaml`. The build
+step that runs it points `src` at the cell.
+
 ```yaml
 name: songe-hello
 kind: grpc
 language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/grpc-rust-tonic
 proto:
-  specPath: ./.forge/spec-cache/hello.v1.proto
+  specPath: ../../.forge/spec-cache/hello.v1.proto
 surface:
-  coreDir: ../songe-hello-core
-  appDir: ../songe-hello-app
+  side: core
 ```
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
-service. `protoSpec` is the proto3 document. `coreDir` and `appDir` are
-the crate roots relative to the engine directory and default to `core`
-and `app`. Both may sit at the top level of the model or under
-`surface`.
+service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
+is the proto3 document. `surface.side` picks the half of the skeleton
+this cell holds, `core` or `app`. `surface.cell` names the module
+directory and defaults to `grpc`.
+
+Every emitted path is relative to the cell directory. The engine never
+writes above it.
 
 ## What the proto decides
 
 For every `service` in the file:
 
-| Emitted | Holds |
+| Emitted, under the cell | Holds |
 |---|---|
-| `core/src/types/zz_generated_<service>_messages.rs` | one plain serde struct per message reachable from the service's rpcs |
-| `core/src/port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` |
-| `app/src/adapter/zz_generated_<service>_grpc_client.rs` | `<Service>GrpcClient`, a tonic channel behind the port trait |
-| `app/src/driver/zz_generated_<service>_grpc_driver.rs` | `<Service>GrpcDriver`, a tonic server forwarding each rpc to `Arc<dyn <Service>Controller>` from core |
-| `app/zz_generated_build.rs` | the build script tonic-build needs |
-| `app/proto/<name>.proto` | the proto file, copied verbatim |
+| `types/zz_generated_<service>_messages.rs` | one plain serde struct per message reachable from the service's rpcs |
+| `port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` |
+| `controller/zz_generated_<service>_controller.rs` | trait `<Service>Controller` and the impl that calls the hand body |
+| `hand/<service>_controller.rs` | the body, written once and never again |
+| `adapter/zz_generated_<service>_grpc_client.rs` | `<Service>GrpcClient`, a tonic channel behind the port trait |
+| `driver/zz_generated_<service>_grpc_driver.rs` | `<Service>GrpcDriver`, a tonic server forwarding each rpc to `Arc<dyn <Service>Controller>` from core |
+| `zz_generated_build.rs` | the build script tonic-build needs |
+| `proto/zz_generated_<service>.proto` | the proto file, copied verbatim |
+
+Each layer directory carries a `mod.rs` that mounts its generated file
+and aliases it under the logical name, so a reader writes
+`<core_crate>::grpc::controller::hello_controller::HelloController` and
+never a `#[path]` attribute. The cell's own `mod.rs` lists the layers.
 
 `<service>` is the snake case of the proto service name. `<Service>` is
 its Pascal case. The crates are named `<name>-core` and `<name>-app`
 from the model's `name`, matching hexagonal-rust, so the two engines
 can fill the same pair of crates.
 
-## The controller is not generated here
-
-The driver expects `core::controller::<service>_controller::{<Service>Controller, <Service>ControllerError}`,
-one method per rpc, `fn <rpc>(&self, request: <Request>) -> Result<<Response>, <Service>ControllerError>`.
-This engine does not emit that trait. Either hexagonal-rust's
-`x-controller` fills it for the same service name, or it is hand
-written once in core, the same way a hexagonal-rust hand stub is
-written once and never regenerated.
-
 ## Where the prost types live
 
-`app/zz_generated_build.rs` compiles the proto with `protox`, a pure
+`zz_generated_build.rs` compiles the proto with `protox`, a pure
 rust protobuf parser, so no `protoc` binary is required. It calls
 `tonic_prost_build::configure().compile_fds(...)`, not
 `tonic_prost_build::compile_protos`, because `protox::compile` already
@@ -94,36 +99,16 @@ adapter alongside its axum driver.
 `prost` and `tokio` with at least `rt-multi-thread`. `app`'s
 build-dependencies need `protox` and `tonic-prost-build`.
 
-Consumer's own `lib.rs` mounts the emitted files with `#[path]`, the
-same way hexagonal-rust's generated `mod` files do, since this engine
-never writes outside `types/`, `port/`, `adapter/` and `driver/`:
+The consumer's own `lib.rs` mounts the cell with one plain line, which
+hexagonal-rust writes from `surface.cells`:
 
 ```rust
-// core/src/lib.rs
-pub mod types {
-    #[path = "types/zz_generated_<service>_messages.rs"]
-    pub mod zz_generated_hello_messages;
-}
-pub mod port {
-    #[path = "port/zz_generated_<service>_client.rs"]
-    pub mod zz_generated_hello_client;
-}
+pub mod grpc;
 ```
 
-```rust
-// app/src/lib.rs
-pub mod adapter {
-    #[path = "adapter/zz_generated_<service>_grpc_client.rs"]
-    pub mod zz_generated_hello_grpc_client;
-}
-pub mod driver {
-    #[path = "driver/zz_generated_<service>_grpc_driver.rs"]
-    pub mod zz_generated_hello_grpc_driver;
-}
-```
-
-and `app/build.rs` includes the generated one:
+The app crate's `build.rs` sits at the crate root and includes the
+generated one:
 
 ```rust
-include!("zz_generated_build.rs");
+include!("src/grpc/zz_generated_build.rs");
 ```

@@ -34,17 +34,17 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: hexagonal-rust generates rust only", input.Language)
 			}
 
-			extraModules, err := hexrust.ExtraModulesFromSurface(input.Surface)
+			cells, err := hexrust.CellsFromSurface(input.Surface)
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
 			files, err := hexrust.Generate([]byte(input.OpenapiSpec), hexrust.Options{
-				Service:      input.Name,
-				CoreDir:      firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
-				AppDir:       firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
-				Side:         firstOf(input.Side, surfaceString(input.Surface, "side")),
-				ExtraModules: extraModules,
+				Service: input.Name,
+				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
+				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
+				Side:    firstOf(input.Side, surfaceString(input.Surface, "side")),
+				Cells:   cells,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)

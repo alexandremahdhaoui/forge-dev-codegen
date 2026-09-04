@@ -33,13 +33,7 @@ type view struct {
 	Routes       []opView
 	WireImports  []string
 	UsesPath     bool
-
-	ExtraTypes      []string
-	ExtraPort       []string
-	ExtraController []string
-	ExtraAdapter    []string
-	ExtraDriver     []string
-	ExtraHand       []string
+	Cells        []string
 }
 
 type fieldView struct {
@@ -187,68 +181,10 @@ func buildView(spec *Spec, opts Options) view {
 
 	v.WireImports = sortedKeys(wire)
 
-	addExtraModules(&v, opts.ExtraModules)
+	v.Cells = append([]string{}, opts.Cells...)
+	sort.Strings(v.Cells)
 
 	return v
-}
-
-func addExtraModules(v *view, modules []ExtraModule) {
-	taken := map[string]map[string]bool{}
-
-	take := func(layer, module string) bool {
-		byLayer, ok := taken[layer]
-		if !ok {
-			byLayer = map[string]bool{}
-			taken[layer] = byLayer
-		}
-
-		if byLayer[module] {
-			return false
-		}
-
-		byLayer[module] = true
-
-		return true
-	}
-
-	for _, t := range v.Types {
-		take("types", t.Snake)
-	}
-
-	for _, s := range v.Stores {
-		take("port", s.PortSnake)
-		take("adapter", s.Snake+"_sqlite")
-	}
-
-	for _, c := range v.Controllers {
-		take("controller", c.Snake+"_controller")
-		take("hand", c.Snake+"_controller")
-	}
-
-	take("driver", "wire")
-	take("driver", "http_driver")
-
-	targets := map[string]*[]string{
-		"types":      &v.ExtraTypes,
-		"port":       &v.ExtraPort,
-		"controller": &v.ExtraController,
-		"adapter":    &v.ExtraAdapter,
-		"driver":     &v.ExtraDriver,
-		"hand":       &v.ExtraHand,
-	}
-
-	for _, m := range modules {
-		if !take(m.Layer, m.Module) {
-			continue
-		}
-
-		into := targets[m.Layer]
-		*into = append(*into, m.Module)
-	}
-
-	for _, into := range targets {
-		sort.Strings(*into)
-	}
 }
 
 func buildTypeView(t TypeDef) typeView {

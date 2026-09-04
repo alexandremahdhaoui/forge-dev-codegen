@@ -176,13 +176,137 @@ func checkRustCoreApp(rootDir string) ([]Finding, error) {
 		})
 	}
 
-	handFindings, err := checkHandWrittenFiles(rootDir)
+	cells, err := cellNames(rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	cellFindings, err := checkCells(rootDir, cells, crateName)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, cellFindings...)
+
+	handFindings, err := checkHandWrittenFiles(rootDir, cells)
 	if err != nil {
 		return nil, err
 	}
 	findings = append(findings, handFindings...)
 
 	return findings, nil
+}
+
+const cellMarker = "forge-dev.yaml"
+
+var coreCellLayers = []string{"port", "controller", "types", "hand"}
+
+var appCellLayers = []string{"adapter", "driver"}
+
+func cellNames(rootDir string) ([]string, error) {
+	srcDir := filepath.Join(rootDir, "src")
+	if !dirExists(srcDir) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", srcDir, err)
+	}
+
+	var cells []string
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(srcDir, e.Name(), cellMarker)) {
+			cells = append(cells, e.Name())
+		}
+	}
+
+	return cells, nil
+}
+
+func cellLayersFor(crateName string) []string {
+	if strings.HasSuffix(crateName, "-app") {
+		return appCellLayers
+	}
+
+	return coreCellLayers
+}
+
+func checkCells(rootDir string, cells []string, crateName string) ([]Finding, error) {
+	var findings []Finding
+
+	allowed := map[string]bool{}
+	for _, layer := range cellLayersFor(crateName) {
+		allowed[layer] = true
+	}
+
+	for _, cell := range cells {
+		cellDir := filepath.Join(rootDir, "src", cell)
+
+		entries, err := os.ReadDir(cellDir)
+		if err != nil {
+			return nil, fmt.Errorf("reading %q: %w", cellDir, err)
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() || allowed[e.Name()] {
+				continue
+			}
+
+			holdsRust, err := treeHasRust(filepath.Join(cellDir, e.Name()))
+			if err != nil {
+				return nil, err
+			}
+
+			if !holdsRust {
+				continue
+			}
+
+			findings = append(findings, Finding{
+				Rule:    "rust-cell-layout",
+				Path:    filepath.Join("src", cell, e.Name()),
+				Message: fmt.Sprintf("a cell holds rust only under %s", strings.Join(cellLayersFor(crateName), ", ")),
+			})
+		}
+	}
+
+	return findings, nil
+}
+
+func treeHasRust(dir string) (bool, error) {
+	found := false
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".rs") {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("walking %q: %w", dir, err)
+	}
+
+	return found, nil
+}
+
+func cellAllowsHandWritten(rel string, cells []string) bool {
+	if filepath.Base(rel) == "mod.rs" {
+		for _, cell := range cells {
+			if strings.HasPrefix(rel, cell+"/") {
+				return true
+			}
+		}
+	}
+
+	for _, cell := range cells {
+		if strings.HasPrefix(rel, cell+"/hand/") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func checkRustCore(rootDir string) []Finding {
@@ -251,7 +375,7 @@ func checkRustApp(rootDir string) []Finding {
 	return findings
 }
 
-func checkHandWrittenFiles(rootDir string) ([]Finding, error) {
+func checkHandWrittenFiles(rootDir string, cells []string) ([]Finding, error) {
 	var findings []Finding
 
 	srcDir := filepath.Join(rootDir, "src")
@@ -285,11 +409,14 @@ func checkHandWrittenFiles(rootDir string) ([]Finding, error) {
 		if strings.HasPrefix(filepath.Base(path), "zz_generated") {
 			return nil
 		}
+		if cellAllowsHandWritten(rel, cells) {
+			return nil
+		}
 
 		findings = append(findings, Finding{
 			Rule:    "rust-hand-written-outside-hand",
 			Path:    filepath.Join("src", rel),
-			Message: "hand written Rust file must live under src/hand, be src/lib.rs, or be under src/bin",
+			Message: "hand written Rust file must live under src/hand, be src/lib.rs, be under src/bin, or be a cell's mod.rs or hand file",
 		})
 		return nil
 	})

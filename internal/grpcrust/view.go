@@ -44,6 +44,7 @@ type rpcView struct {
 type serviceView struct {
 	Header          string
 	Package         string
+	Cell            string
 	CoreCrate       string
 	ServicePascal   string
 	ServiceSnake    string
@@ -190,6 +191,7 @@ func buildServiceView(spec *Spec, svc Service, opts Options) (serviceView, error
 	sv := serviceView{
 		Header:          header,
 		Package:         spec.Package,
+		Cell:            opts.Cell,
 		CoreCrate:       Snake(opts.Service) + "_core",
 		ServicePascal:   Pascal(svc.Name),
 		ServiceSnake:    Snake(svc.Name),

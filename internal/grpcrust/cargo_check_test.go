@@ -60,52 +60,53 @@ protox = "0.9"
 tonic-prost-build = "0.14"
 `
 
-const cargoCheckCoreLib = `pub mod controller {
-    #[path = "../../src/controller/zz_generated_hello_controller.rs"]
-    pub mod hello_controller;
-}
-
-pub mod hand {
-    #[path = "../../src/hand/hello_controller.rs"]
-    pub mod hello_controller;
-}
-
-pub mod port {
-    #[path = "../../src/port/zz_generated_hello_client.rs"]
-    pub mod zz_generated_hello_client;
-}
-
-pub mod types {
-    #[path = "../../src/types/zz_generated_hello_messages.rs"]
-    pub mod zz_generated_hello_messages;
-}
+const cargoCheckCellLib = `pub mod grpc;
 `
 
-const cargoCheckAppLib = `pub mod adapter {
-    #[path = "../../src/adapter/zz_generated_hello_grpc_client.rs"]
-    pub mod zz_generated_hello_grpc_client;
-}
-
-pub mod driver {
-    #[path = "../../src/driver/zz_generated_hello_grpc_driver.rs"]
-    pub mod zz_generated_hello_grpc_driver;
-}
+const cargoCheckBuildScript = `include!("src/grpc/zz_generated_build.rs");
 `
 
-func TestTheGeneratedSkeletonPassesCargoCheck(t *testing.T) {
+func TestTheGeneratedCellPassesCargoCheck(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	coreFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello", Side: "core"})
 	if err != nil {
-		t.Fatalf("generating: %v", err)
+		t.Fatalf("generating the core cell: %v", err)
+	}
+
+	appFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello", Side: "app"})
+	if err != nil {
+		t.Fatalf("generating the app cell: %v", err)
 	}
 
 	root := t.TempDir()
+	write := writerUnder(t, root)
 
-	write := func(rel, content string) {
+	write("Cargo.toml", cargoCheckWorkspaceManifest)
+	write("core/Cargo.toml", cargoCheckCoreManifest)
+	write("core/src/lib.rs", cargoCheckCellLib)
+	write("app/Cargo.toml", cargoCheckAppManifest)
+	write("app/src/lib.rs", cargoCheckCellLib)
+	write("app/build.rs", cargoCheckBuildScript)
+
+	for _, f := range coreFiles {
+		write(filepath.Join("core", "src", "grpc", f.Path), f.Content)
+	}
+
+	for _, f := range appFiles {
+		write(filepath.Join("app", "src", "grpc", f.Path), f.Content)
+	}
+
+	runCargoCheck(t, cargo, root)
+}
+
+func writerUnder(t *testing.T, root string) func(rel, content string) {
+	t.Helper()
+
+	return func(rel, content string) {
 		t.Helper()
 
 		p := filepath.Join(root, rel)
@@ -117,38 +118,28 @@ func TestTheGeneratedSkeletonPassesCargoCheck(t *testing.T) {
 			t.Fatalf("writing %s: %v", p, err)
 		}
 	}
+}
 
-	write("Cargo.toml", cargoCheckWorkspaceManifest)
-	write("core/Cargo.toml", cargoCheckCoreManifest)
-	write("core/src/lib.rs", cargoCheckCoreLib)
-	write("app/Cargo.toml", cargoCheckAppManifest)
-	write("app/src/lib.rs", cargoCheckAppLib)
-
-	for _, f := range files {
-		if f.Path == "app/zz_generated_build.rs" {
-			write("app/build.rs", f.Content)
-
-			continue
-		}
-
-		write(f.Path, f.Content)
-	}
+func runCargoCheck(t *testing.T, cargo, root string) {
+	t.Helper()
 
 	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
 	cmd.Dir = root
 
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		lower := strings.ToLower(string(out))
-		if strings.Contains(lower, "could not resolve host") ||
-			strings.Contains(lower, "failed to get") ||
-			strings.Contains(lower, "network") ||
-			strings.Contains(lower, "spurious network error") {
-			t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
-		}
-
-		t.Fatalf("cargo check: %v\n%s", err, out)
+	if err == nil {
+		return
 	}
+
+	lower := strings.ToLower(string(out))
+	if strings.Contains(lower, "could not resolve host") ||
+		strings.Contains(lower, "failed to get") ||
+		strings.Contains(lower, "network") ||
+		strings.Contains(lower, "spurious network error") {
+		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+	}
+
+	t.Fatalf("cargo check: %v\n%s", err, out)
 }
 
 const bothEnginesOpenapi = `
@@ -224,15 +215,6 @@ protox = "0.9"
 tonic-prost-build = "0.14"
 `
 
-var bothEnginesExtraModules = []hexrust.ExtraModule{
-	{Layer: "types", Module: "zz_generated_hello_messages"},
-	{Layer: "port", Module: "zz_generated_hello_client"},
-	{Layer: "controller", Module: "hello_controller"},
-	{Layer: "hand", Module: "hello_controller"},
-	{Layer: "adapter", Module: "zz_generated_hello_grpc_client"},
-	{Layer: "driver", Module: "zz_generated_hello_grpc_driver"},
-}
-
 func TestBothEnginesFillOneCrateAndTheWorkspacePassesCargoCheck(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
@@ -240,71 +222,55 @@ func TestBothEnginesFillOneCrateAndTheWorkspacePassesCargoCheck(t *testing.T) {
 	}
 
 	hexFiles, err := hexrust.Generate([]byte(bothEnginesOpenapi), hexrust.Options{
-		Service:      "songe-hello",
-		ExtraModules: bothEnginesExtraModules,
+		Service: "songe-hello",
+		Cells:   []string{"grpc"},
 	})
 	if err != nil {
 		t.Fatalf("generating the hexagonal skeleton: %v", err)
 	}
 
-	grpcFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	coreFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello", Side: "core"})
 	if err != nil {
-		t.Fatalf("generating the grpc skeleton: %v", err)
+		t.Fatalf("generating the core cell: %v", err)
+	}
+
+	appFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello", Side: "app"})
+	if err != nil {
+		t.Fatalf("generating the app cell: %v", err)
 	}
 
 	root := t.TempDir()
-	written := map[string]string{}
+	written := map[string]bool{}
+	writeFile := writerUnder(t, root)
 
 	write := func(rel, content string) {
 		t.Helper()
 
-		if _, taken := written[rel]; taken {
+		if written[rel] {
 			t.Fatalf("%s is claimed by both engines", rel)
 		}
 
-		written[rel] = content
+		written[rel] = true
 
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("making %s: %v", filepath.Dir(p), err)
-		}
-
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatalf("writing %s: %v", p, err)
-		}
+		writeFile(rel, content)
 	}
 
 	write("Cargo.toml", cargoCheckWorkspaceManifest)
 	write("core/Cargo.toml", bothEnginesCoreManifest)
 	write("app/Cargo.toml", bothEnginesAppManifest)
+	write("app/build.rs", cargoCheckBuildScript)
 
 	for _, f := range hexFiles {
 		write(f.Path, f.Content)
 	}
 
-	for _, f := range grpcFiles {
-		if f.Path == "app/zz_generated_build.rs" {
-			write("app/build.rs", f.Content)
-
-			continue
-		}
-
-		write(f.Path, f.Content)
+	for _, f := range coreFiles {
+		write(filepath.Join("core", "src", "grpc", f.Path), f.Content)
 	}
 
-	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
-	cmd.Dir = root
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		lower := strings.ToLower(string(out))
-		if strings.Contains(lower, "could not resolve host") ||
-			strings.Contains(lower, "failed to get") ||
-			strings.Contains(lower, "network") ||
-			strings.Contains(lower, "spurious network error") {
-			t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
-		}
-
-		t.Fatalf("cargo check: %v\n%s", err, out)
+	for _, f := range appFiles {
+		write(filepath.Join("app", "src", "grpc", f.Path), f.Content)
 	}
+
+	runCargoCheck(t, cargo, root)
 }

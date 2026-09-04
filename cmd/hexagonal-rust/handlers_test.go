@@ -99,15 +99,10 @@ func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceMountsASecondEnginesModules(t *testing.T) {
+func TestTheSurfaceMountsEverySecondEnginesCell(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{
-			"extraModules": []interface{}{
-				map[string]interface{}{"layer": "port", "module": "zz_generated_hello_client"},
-				map[string]interface{}{"layer": "controller", "module": "hello_controller"},
-			},
-		},
+		Surface: map[string]interface{}{"cells": []interface{}{"grpc"}},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -118,22 +113,20 @@ func TestTheSurfaceMountsASecondEnginesModules(t *testing.T) {
 		byPath[f.Path] = f.Content
 	}
 
-	if !strings.Contains(byPath["core/src/port/zz_generated_mod.rs"], "pub mod zz_generated_hello_client;") {
-		t.Error("the port mod file does not mount the extra port module")
-	}
-
-	if !strings.Contains(byPath["core/src/controller/zz_generated_mod.rs"], "pub mod hello_controller;") {
-		t.Error("the controller mod file does not mount the extra controller module")
+	for _, path := range []string{"core/src/lib.rs", "app/src/lib.rs"} {
+		if !strings.Contains(byPath[path], "pub mod grpc;") {
+			t.Errorf("%s does not mount the cell", path)
+		}
 	}
 }
 
-func TestASurfaceThatMalformsTheExtraModulesListIsRefused(t *testing.T) {
+func TestASurfaceThatMalformsTheCellsListIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Surface: map[string]interface{}{"extraModules": "zz_generated_hello_client"},
+		Surface: map[string]interface{}{"cells": "grpc"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "it is a list of layer and module pairs") {
-		t.Fatalf("want an error refusing the extraModules shape, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "it is a list of module directory names under src") {
+		t.Fatalf("want an error refusing the cells shape, got %v", err)
 	}
 }
 

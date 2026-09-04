@@ -61,54 +61,56 @@ func TestTheEngineFillsTheGrpcRustCellOnly(t *testing.T) {
 	}
 }
 
-func TestTheOutputRootsComeFromTheTopLevelOrTheSurface(t *testing.T) {
+func TestTheSurfaceCellNamesTheModuleTheCrateMounts(t *testing.T) {
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-		Surface: map[string]interface{}{"coreDir": "../svc-core", "appDir": "../svc-app"},
+		Surface: map[string]interface{}{"cell": "wire"},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
 	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, "../svc-core/") && !strings.HasPrefix(f.Path, "../svc-app/") {
-			t.Errorf("%s ignores the surface roots", f.Path)
+		if f.Path != "zz_generated_build.rs" {
+			continue
 		}
-	}
 
-	out, err = NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "grpc", ProtoSpec: smallProto, CoreDir: "c", AppDir: "a",
-		Surface: map[string]interface{}{"coreDir": "../svc-core"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, "c/") && !strings.HasPrefix(f.Path, "a/") {
-			t.Errorf("%s ignores the top level roots", f.Path)
+		if !strings.Contains(f.Content, "src/wire/proto") {
+			t.Fatalf("the build script does not read the cell name\n%s", f.Content)
 		}
 	}
 }
 
-func TestTheSurfaceSideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
+func TestEveryAnsweredPathStaysInsideTheCellDirectory(t *testing.T) {
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range out.Files {
+		if strings.HasPrefix(f.Path, "..") || strings.HasPrefix(f.Path, "/") {
+			t.Errorf("%s reaches above the cell directory", f.Path)
+		}
+	}
+}
+
+func TestTheSurfaceSideAnswersOnlyItsOwnLayers(t *testing.T) {
 	tests := []struct {
 		side   string
-		dirKey string
 		want   []string
 		reject []string
 	}{
 		{
 			side:   "core",
-			dirKey: "coreDir",
-			want:   []string{"src/controller/zz_generated_hello_controller.rs", "src/hand/hello_controller.rs"},
-			reject: []string{"src/adapter/zz_generated_hello_grpc_client.rs", "zz_generated_build.rs"},
+			want:   []string{"controller/zz_generated_hello_controller.rs", "hand/hello_controller.rs"},
+			reject: []string{"adapter/zz_generated_hello_grpc_client.rs", "zz_generated_build.rs"},
 		},
 		{
 			side:   "app",
-			dirKey: "appDir",
-			want:   []string{"src/driver/zz_generated_hello_grpc_driver.rs", "zz_generated_build.rs"},
-			reject: []string{"src/port/zz_generated_hello_client.rs", "src/hand/hello_controller.rs"},
+			want:   []string{"driver/zz_generated_hello_grpc_driver.rs", "zz_generated_build.rs"},
+			reject: []string{"port/zz_generated_hello_client.rs", "hand/hello_controller.rs"},
 		},
 	}
 
@@ -116,7 +118,7 @@ func TestTheSurfaceSideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
 		t.Run("the "+tt.side+" side answers only its own files", func(t *testing.T) {
 			out, err := NewHandlers().Generate(context.Background(), GenerateInput{
 				Name: "svc", Kind: "grpc", ProtoSpec: smallProto,
-				Surface: map[string]interface{}{"side": tt.side, tt.dirKey: "."},
+				Surface: map[string]interface{}{"side": tt.side},
 			})
 			if err != nil {
 				t.Fatalf("generating: %v", err)
@@ -154,7 +156,7 @@ func TestASurfaceSideThatNamesNeitherCrateIsRefused(t *testing.T) {
 
 func TestAHandControllerThatExistsIsNeverAnsweredAgain(t *testing.T) {
 	srcDir := t.TempDir()
-	hand := filepath.Join(srcDir, "core", "src", "hand", "hello_controller.rs")
+	hand := filepath.Join(srcDir, "hand", "hello_controller.rs")
 
 	if err := os.MkdirAll(filepath.Dir(hand), 0o755); err != nil {
 		t.Fatalf("making the hand dir: %v", err)

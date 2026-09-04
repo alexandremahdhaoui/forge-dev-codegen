@@ -53,8 +53,7 @@ type Spec struct {
 
 type Options struct {
 	Service string
-	CoreDir string
-	AppDir  string
+	Cell    string
 	Side    string
 }
 

@@ -36,8 +36,7 @@ func NewHandlers() Handlers {
 
 			files, err := grpcrust.Generate([]byte(input.ProtoSpec), grpcrust.Options{
 				Service: input.Name,
-				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
-				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
+				Cell:    surfaceString(input.Surface, "cell"),
 				Side:    surfaceString(input.Surface, "side"),
 			})
 			if err != nil {
@@ -57,16 +56,6 @@ func NewHandlers() Handlers {
 			return &GenerateOutput{Files: out}, nil
 		},
 	}
-}
-
-func firstOf(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-
-	return ""
 }
 
 func surfaceString(surface map[string]interface{}, key string) string {

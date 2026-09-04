@@ -132,6 +132,45 @@ func TestCheckFlagsAMissingForgeDevYamlWhenZzGeneratedFilesExist(t *testing.T) {
 	}
 }
 
+func TestADirectoryUnderSrcThatHoldsAForgeDevYamlIsACellAndKeepsItsOwnModAndHandFiles(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-cell-clean",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected zero findings, got %+v", findings)
+	}
+}
+
+func TestAnAppCellHoldsAdapterAndDriverAndItsProtoDirectoryIsNotALayer(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-app-cell-clean",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected zero findings, got %+v", findings)
+	}
+}
+
+func TestACellThatHoldsRustOutsideItsLayersIsFlagged(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-cell-wrong-layer",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if !hasRule(findings, "rust-cell-layout") {
+		t.Fatalf("expected a rust-cell-layout finding, got %+v", findings)
+	}
+}
+
 func TestCheckReturnsAnErrorForAnUnknownLayout(t *testing.T) {
 	_, err := goldenpath.Check(goldenpath.Options{
 		Layout:  "unknown",

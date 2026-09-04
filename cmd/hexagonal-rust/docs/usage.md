@@ -18,6 +18,7 @@ openapi:
 surface:
   side: core
   coreDir: .
+  cells: [grpc]
 ```
 
 The app crate says `side: app` and `appDir: .`.
@@ -27,6 +28,16 @@ service. `openapiSpec` is the document. `coreDir` and `appDir` are the
 crate roots relative to the engine directory and default to `core` and
 `app`. `side` is `core`, `app` or absent for both. The three may sit at
 the top level of the model or under `surface`.
+
+## Cells
+
+`surface.cells` lists the module directories under `src` that another
+generator fills. `lib.rs` gains one plain `pub mod <cell>;` line per
+name. No `#[path]` attribute. The cell owns its directory and writes its
+own `mod.rs`.
+
+A name Rust cannot spell as a module is refused. So is a name the
+skeleton already owns, and a name listed twice.
 
 ## What the spec decides
 
