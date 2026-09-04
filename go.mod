@@ -5,7 +5,8 @@ module github.com/alexandremahdhaoui/forge-dev-codegen
 go 1.26.5
 
 require (
-	github.com/alexandremahdhaoui/forge v0.43.0
+	github.com/alexandremahdhaoui/forge v0.45.49
+	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	sigs.k8s.io/yaml v1.6.0
@@ -20,7 +21,6 @@ require (
 	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
