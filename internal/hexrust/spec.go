@@ -149,6 +149,16 @@ var methods = []string{"get", "put", "post", "delete", "options", "head", "patch
 
 const forgeDevSpecSchema = "Spec"
 
+var rustAndSQLIdent = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+func checkName(what, name string) error {
+	if rustAndSQLIdent.MatchString(Snake(name)) {
+		return nil
+	}
+
+	return fmt.Errorf("reading %s %q: its snake form %q is not a name Rust or SQL can spell, use letters, digits and underscores and start with a letter", what, name, Snake(name))
+}
+
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
 
 func Parse(doc []byte) (*Spec, error) {
@@ -189,6 +199,10 @@ func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
 	for _, name := range names {
 		if name == forgeDevSpecSchema {
 			continue
+		}
+
+		if err := checkName("schema", name); err != nil {
+			return nil, err
 		}
 
 		s := schemas[name]
@@ -232,6 +246,10 @@ func parseFields(typeName string, s schema, schemas map[string]schema) ([]Field,
 	fields := make([]Field, 0, len(names))
 
 	for _, name := range names {
+		if err := checkName("property", name); err != nil {
+			return nil, fmt.Errorf("reading schema %q: %w", typeName, err)
+		}
+
 		ft, err := parseFieldType(s.Properties[name], schemas)
 		if err != nil {
 			return nil, fmt.Errorf("reading property %q of schema %q: %w", name, typeName, err)
@@ -358,6 +376,14 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, fmt.Errorf("reading %s: x-controller is required, it names the controller", where)
 	}
 
+	if err := checkName("operationId", op.OperationID); err != nil {
+		return Operation{}, fmt.Errorf("reading %s: %w", where, err)
+	}
+
+	if err := checkName("x-controller", op.Controller); err != nil {
+		return Operation{}, fmt.Errorf("reading %s: %w", where, err)
+	}
+
 	ports := append([]string{}, op.Ports...)
 	sort.Strings(ports)
 
@@ -409,6 +435,10 @@ func parseParams(where, path string, op operation) ([]Param, error) {
 		kind := string(p.Schema.Type)
 		if kind != "string" && kind != "integer" {
 			return nil, fmt.Errorf("reading %s: path parameter %q must be a string or an integer, got %q", where, p.Name, kind)
+		}
+
+		if err := checkName("path parameter", p.Name); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", where, err)
 		}
 
 		declared[p.Name] = Param{Name: p.Name, Ident: Snake(p.Name), Kind: kind}

@@ -495,6 +495,73 @@ components:
 	}
 }
 
+func TestANameRustOrSQLCannotSpellIsRefusedBeforeItReachesTheOutput(t *testing.T) {
+	withParam := func(name string) string {
+		doc := strings.ReplaceAll(twoOperationsAndAPathParam, "{id}", "{"+name+"}")
+
+		return strings.ReplaceAll(doc, "- name: id\n", "- name: "+name+"\n")
+	}
+
+	tests := []struct {
+		name string
+		doc  string
+		opts hexrust.Options
+		want string
+	}{
+		{
+			name: "a service name with a quote never reaches main or the crate name",
+			doc:  oneStoreOneOperation,
+			opts: hexrust.Options{Service: `svc"; DROP TABLE greeting; --`},
+			want: `reading service "svc\"; DROP TABLE greeting; --"`,
+		},
+		{
+			name: "a schema name with a semicolon cannot be a struct or a table",
+			doc:  strings.ReplaceAll(oneStoreOneOperation, "Greeting", "Greet;ing"),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading schema "Greet;ing"`,
+		},
+		{
+			name: "a schema name starting with a digit cannot be a struct",
+			doc:  strings.ReplaceAll(oneStoreOneOperation, "Greeting", "1Greeting"),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading schema "1Greeting"`,
+		},
+		{
+			name: "a property name with a quote cannot be a field",
+			doc:  strings.Replace(oneStoreOneOperation, "        name:\n", "        \"na'me\":\n", 1),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading property "na'me"`,
+		},
+		{
+			name: "an operationId with a semicolon cannot be a method",
+			doc:  strings.Replace(oneStoreOneOperation, "createGreeting", "create;Greeting", 1),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading operationId "create;Greeting"`,
+		},
+		{
+			name: "an x-controller with a slash cannot be a module",
+			doc:  strings.Replace(oneStoreOneOperation, "x-controller: greeting", "x-controller: greet/ing", 1),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading x-controller "greet/ing"`,
+		},
+		{
+			name: "a path parameter with a parenthesis cannot be an extractor binding",
+			doc:  withParam("i(d)"),
+			opts: hexrust.Options{Service: "svc"},
+			want: `reading path parameter "i(d)"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := hexrust.Generate([]byte(tt.doc), tt.opts)
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "Rust or SQL can spell") {
+				t.Fatalf("want an error naming %s, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestNamesFollowRustCasing(t *testing.T) {
 	tests := []struct {
 		in     string

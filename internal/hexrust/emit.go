@@ -42,6 +42,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the skeleton: the service name is required")
 	}
 
+	if err := checkName("service", opts.Service); err != nil {
+		return nil, fmt.Errorf("emitting the skeleton: %w", err)
+	}
+
 	if opts.CoreDir == "" {
 		opts.CoreDir = "core"
 	}
