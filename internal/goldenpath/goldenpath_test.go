@@ -1,6 +1,8 @@
 package goldenpath_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/goldenpath"
@@ -153,6 +155,18 @@ func TestEveryRuleFlagsTheTreeThatBreaksIt(t *testing.T) {
 			rootDir: "testdata/rust-path-attribute",
 			rule:    "rust-no-path-attribute",
 		},
+		{
+			name:    "a subdirectory inside a layer is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-layer-not-flat",
+			rule:    "rust-layer-not-flat",
+		},
+		{
+			name:    "a layer carrying no generated mod rs is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-layer-without-generated-mod",
+			rule:    "rust-layer-mod-rs",
+		},
 	}
 
 	for _, test := range tests {
@@ -200,6 +214,126 @@ func TestTheIOUseRuleNamesTheFileTheLineAndTheCrate(t *testing.T) {
 				t.Fatalf("expected message %q, got %q", test.message, finding.Message)
 			}
 		})
+	}
+}
+
+func hitsLine(findings []goldenpath.Finding, path string, line int, name string) bool {
+	want := fmt.Sprintf("line %d uses %q which no controller, port or types file may name", line, name)
+
+	for _, f := range findings {
+		if f.Rule == "rust-io-use" && f.Path == path && f.Message == want {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hitsAnythingOnLine(findings []goldenpath.Finding, path string, line int) bool {
+	prefix := fmt.Sprintf("line %d uses ", line)
+
+	for _, f := range findings {
+		if f.Rule == "rust-io-use" && f.Path == path && strings.HasPrefix(f.Message, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func TestEveryNameInsideAGroupedUseLineIsMatched(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+	path := "src/controller/greeting_controller.rs"
+
+	for _, name := range []string{"std::fs", "std::net"} {
+		t.Run("a grouped use line naming "+name+" is banned", func(t *testing.T) {
+			if !hitsLine(findings, path, 7, name) {
+				t.Fatalf("expected line 7 to be flagged for %s, got %+v", name, findings)
+			}
+		})
+	}
+}
+
+func TestAPathThatOnlyStartsWithABannedPathIsNeverFlagged(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+
+	if hitsAnythingOnLine(findings, "src/controller/greeting_controller.rs", 9) {
+		t.Fatalf("std::netlink is not std::net and must not be flagged, got %+v", findings)
+	}
+}
+
+func TestAUseLineInsideACfgTestBlockOfAControllerIsBannedLikeAnyOther(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+
+	if !hitsLine(findings, "src/controller/greeting_controller.rs", 13, "tokio") {
+		t.Fatalf("expected line 13 to be flagged for tokio, got %+v", findings)
+	}
+}
+
+func TestAnAttributeLineNamingABannedCrateIsFlagged(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+
+	if !hitsLine(findings, "src/controller/greeting_controller.rs", 15, "tokio") {
+		t.Fatalf("expected line 15 to be flagged for tokio, got %+v", findings)
+	}
+}
+
+func TestAHandWrittenBinaryUnderSrcBinIsNeverFlagged(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
+
+	if _, ok := findingFor(findings, "rust-file-not-mounted", "src/bin/hello_cli.rs"); ok {
+		t.Fatalf("cargo discovers src/bin by name, a binary is never mounted, got %+v", findings)
+	}
+}
+
+func TestALayerHoldsNoSubdirectoryAtTheRootAndInsideACell(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-layer-not-flat")
+
+	tests := []struct {
+		name    string
+		path    string
+		message string
+	}{
+		{
+			name:    "a subdirectory of a root layer names the directory",
+			path:    "src/controller/greeting",
+			message: `the layer src/controller holds the subdirectory "greeting", a layer directory is flat`,
+		},
+		{
+			name:    "a subdirectory of a cell layer names the directory",
+			path:    "src/rest/driver/http",
+			message: `the layer src/rest/driver holds the subdirectory "http", a layer directory is flat`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			finding, ok := findingFor(findings, "rust-layer-not-flat", test.path)
+			if !ok {
+				t.Fatalf("expected a rust-layer-not-flat finding for %s, got %+v", test.path, findings)
+			}
+			if finding.Message != test.message {
+				t.Fatalf("expected message %q, got %q", test.message, finding.Message)
+			}
+		})
+	}
+}
+
+func TestALayerWithNoGeneratedModFileIsFlaggedOnceAndNeverPerFile(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-layer-without-generated-mod")
+
+	finding, ok := findingFor(findings, "rust-layer-mod-rs", "src/controller/mod.rs")
+	if !ok {
+		t.Fatalf("expected a rust-layer-mod-rs finding for the layer, got %+v", findings)
+	}
+
+	want := "the layer src/controller carries no generated mod.rs"
+	if finding.Message != want {
+		t.Fatalf("expected message %q, got %q", want, finding.Message)
+	}
+
+	if hasRule(findings, "rust-file-not-mounted") {
+		t.Fatalf("no user file is flagged when the layer carries no generated mod.rs, got %+v", findings)
 	}
 }
 

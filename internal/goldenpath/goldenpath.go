@@ -38,7 +38,13 @@ func Check(opts Options) ([]Finding, error) {
 	case LayoutRust, LayoutRustCoreApp:
 		return checkRust(rootDir)
 	default:
-		return nil, fmt.Errorf("unknown layout %q: must be %q or %q", opts.Layout, LayoutGo, LayoutRust)
+		return nil, fmt.Errorf(
+			"unknown layout %q: must be %q, %q or %q",
+			opts.Layout,
+			LayoutGo,
+			LayoutRust,
+			LayoutRustCoreApp,
+		)
 	}
 }
 
@@ -142,6 +148,23 @@ var cellLayers = []string{"adapter", "controller", "driver", "port", "types"}
 
 var pureLayers = []string{"controller", "port", "types"}
 
+const cargoDiscoveredLayer = "bin"
+
+var mountedRootLayers = namesWithout(rootLayers, cargoDiscoveredLayer)
+
+func namesWithout(names []string, dropped string) []string {
+	var kept []string
+
+	for _, name := range names {
+		if name == dropped {
+			continue
+		}
+		kept = append(kept, name)
+	}
+
+	return kept
+}
+
 func checkRust(rootDir string) ([]Finding, error) {
 	var findings []Finding
 
@@ -178,6 +201,7 @@ func checkRust(rootDir string) ([]Finding, error) {
 		checkRootLayout,
 		checkCellLayout,
 		checkCellManifests,
+		checkLayersAreFlat,
 		checkPureLayers,
 		checkEveryFileIsMounted,
 	} {
@@ -319,16 +343,61 @@ func checkCellManifests(rootDir string, cells []string) ([]Finding, error) {
 	return findings, nil
 }
 
+func checkLayersAreFlat(rootDir string, cells []string) ([]Finding, error) {
+	var findings []Finding
+
+	for _, dir := range flatLayerDirs(cells) {
+		fullDir := filepath.Join(rootDir, dir)
+		if !dirExists(fullDir) {
+			continue
+		}
+
+		entries, err := os.ReadDir(fullDir)
+		if err != nil {
+			return nil, fmt.Errorf("reading %q: %w", fullDir, err)
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+
+			findings = append(findings, Finding{
+				Rule: "rust-layer-not-flat",
+				Path: filepath.ToSlash(filepath.Join(dir, e.Name())),
+				Message: fmt.Sprintf(
+					"the layer %s holds the subdirectory %q, a layer directory is flat",
+					filepath.ToSlash(dir),
+					e.Name(),
+				),
+			})
+		}
+	}
+
+	return findings, nil
+}
+
 var bannedCrates = []string{"axum", "hyper", "reqwest", "rusqlite", "tokio", "tonic", "tower"}
 
 var bannedPaths = []string{"std::fs", "std::net", "std::process", "std::time::Instant"}
 
 var bannedCratePatterns = compileCratePatterns(bannedCrates)
 
+var bannedPathPatterns = compilePathPatterns(bannedPaths)
+
 func compileCratePatterns(crates []string) map[string]*regexp.Regexp {
 	patterns := make(map[string]*regexp.Regexp, len(crates))
 	for _, crate := range crates {
 		patterns[crate] = regexp.MustCompile(`(^|[^A-Za-z0-9_:])` + crate + `(::|[;,}\s]|$)`)
+	}
+
+	return patterns
+}
+
+func compilePathPatterns(paths []string) map[string]*regexp.Regexp {
+	patterns := make(map[string]*regexp.Regexp, len(paths))
+	for _, path := range paths {
+		patterns[path] = regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(path) + `(::|[;,}\s]|$)`)
 	}
 
 	return patterns
@@ -416,18 +485,20 @@ func bannedUseHits(content string) []useHit {
 	var hits []useHit
 
 	for index, line := range strings.Split(content, "\n") {
-		if !isUseLine(line) {
+		if !isUseLine(line) && !isAttributeLine(line) {
 			continue
 		}
 
+		flattened := flattenGroupedPaths(line)
+
 		for _, name := range bannedCrates {
-			if bannedCratePatterns[name].MatchString(line) {
+			if bannedCratePatterns[name].MatchString(flattened) {
 				hits = append(hits, useHit{line: index + 1, name: name})
 			}
 		}
 
 		for _, name := range bannedPaths {
-			if strings.Contains(line, name) {
+			if bannedPathPatterns[name].MatchString(flattened) {
 				hits = append(hits, useHit{line: index + 1, name: name})
 			}
 		}
@@ -436,12 +507,36 @@ func bannedUseHits(content string) []useHit {
 	return hits
 }
 
+var groupedPathRe = regexp.MustCompile(`([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*::)\{([^}]*)\}`)
+
+func flattenGroupedPaths(line string) string {
+	flattened := line
+
+	for _, group := range groupedPathRe.FindAllStringSubmatch(line, -1) {
+		for _, name := range strings.Split(group[2], ",") {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
+				continue
+			}
+			flattened += " " + group[1] + trimmed + " "
+		}
+	}
+
+	return flattened
+}
+
 func isUseLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	trimmed = strings.TrimPrefix(trimmed, "pub ")
 	trimmed = strings.TrimPrefix(trimmed, "pub(crate) ")
 
 	return strings.HasPrefix(trimmed, "use ")
+}
+
+func isAttributeLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+
+	return strings.HasPrefix(trimmed, "#[") || strings.HasPrefix(trimmed, "#![")
 }
 
 func checkEveryFileIsMounted(rootDir string, cells []string) ([]Finding, error) {
@@ -459,9 +554,17 @@ func checkEveryFileIsMounted(rootDir string, cells []string) ([]Finding, error) 
 }
 
 func layerDirs(cells []string) []string {
+	return dirsForLayers(mountedRootLayers, cells)
+}
+
+func flatLayerDirs(cells []string) []string {
+	return dirsForLayers(rootLayers, cells)
+}
+
+func dirsForLayers(layers []string, cells []string) []string {
 	var dirs []string
 
-	for _, layer := range rootLayers {
+	for _, layer := range layers {
 		dirs = append(dirs, filepath.Join("src", layer))
 	}
 
@@ -491,6 +594,7 @@ func unmountedFindings(rootDir, dir string) ([]Finding, error) {
 
 	mounted := map[string]bool{}
 	modFileRel := filepath.ToSlash(filepath.Join(dir, "mod.rs"))
+	hasGeneratedModFile := false
 
 	for _, e := range entries {
 		if e.IsDir() || e.Name() != "mod.rs" {
@@ -507,6 +611,8 @@ func unmountedFindings(rootDir, dir string) ([]Finding, error) {
 			continue
 		}
 
+		hasGeneratedModFile = true
+
 		content, err := os.ReadFile(modPath)
 		if err != nil {
 			return nil, fmt.Errorf("reading %q: %w", modPath, err)
@@ -515,6 +621,22 @@ func unmountedFindings(rootDir, dir string) ([]Finding, error) {
 		for _, m := range modLineRe.FindAllStringSubmatch(string(content), -1) {
 			mounted[m[1]] = true
 		}
+	}
+
+	if !hasGeneratedModFile {
+		userFiles, err := holdsUserRustFile(fullDir, entries)
+		if err != nil {
+			return nil, err
+		}
+		if !userFiles {
+			return findings, nil
+		}
+
+		return append(findings, Finding{
+			Rule:    "rust-layer-mod-rs",
+			Path:    modFileRel,
+			Message: fmt.Sprintf("the layer %s carries no generated mod.rs", filepath.ToSlash(dir)),
+		}), nil
 	}
 
 	for _, e := range entries {
@@ -538,6 +660,24 @@ func unmountedFindings(rootDir, dir string) ([]Finding, error) {
 	}
 
 	return findings, nil
+}
+
+func holdsUserRustFile(fullDir string, entries []os.DirEntry) (bool, error) {
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".rs") || e.Name() == "mod.rs" {
+			continue
+		}
+
+		generated, err := isGenerated(filepath.Join(fullDir, e.Name()))
+		if err != nil {
+			return false, err
+		}
+		if !generated {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 const generatedMarker = "Code generated by"
