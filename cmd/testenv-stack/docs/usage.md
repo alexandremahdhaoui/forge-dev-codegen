@@ -29,9 +29,17 @@ port on the variable it reads. The engine reads the
 service's stdout until a `LISTENING <port>` line appears or the timeout
 passes. Stdout and stderr go to `<TmpDir>/<name>.log`.
 
-The artifact exports `addrEnv` as `http://127.0.0.1:<port>` per
-service, lists `stack.<name>.log` and `stack.pids` under files, and
-reports each pid in metadata as `testenv-stack.<name>.pid`.
+A service that serves more than one transport announces one line per
+transport. `LISTENING <port>` is REST. `LISTENING_GRPC <port>` and
+`LISTENING_UDP <port>` are the other two. The engine waits half a second
+after the REST line for the others to arrive.
+
+The artifact exports `addrEnv` as `http://127.0.0.1:<port>` per service.
+A service that announced gRPC also exports `<addrEnv>_GRPC` as
+`http://127.0.0.1:<port>`. One that announced UDP exports `<addrEnv>_UDP`
+as `127.0.0.1:<port>`, with no scheme, because UDP has none. It lists
+`stack.<name>.log` and `stack.pids` under files, and reports each pid in
+metadata as `testenv-stack.<name>.pid`.
 
 Processes outlive the create call. Each runs as the leader of its own
 session and process group, and its pid sits in `<TmpDir>/stack.pids`.

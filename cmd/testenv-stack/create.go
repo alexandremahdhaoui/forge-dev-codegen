@@ -55,7 +55,11 @@ func Create(ctx context.Context, input engineframework.CreateInput, spec *Spec) 
 		started = append(started, one)
 
 		artifact.Files["stack."+service.Name+".log"] = service.Name + ".log"
-		artifact.Env[service.AddrEnv] = "http://127.0.0.1:" + strconv.Itoa(one.Port)
+
+		for key, value := range Addresses(service.AddrEnv, one.Ports) {
+			artifact.Env[key] = value
+		}
+
 		artifact.Metadata["testenv-stack."+service.Name+".pid"] = strconv.Itoa(one.PID)
 		artifact.ManagedResources = append(artifact.ManagedResources, one.LogPath)
 	}
@@ -91,6 +95,22 @@ func Delete(_ context.Context, input engineframework.DeleteInput, _ *Spec) error
 	testenvstack.Stop(pids, testenvstack.KillGrace)
 
 	return nil
+}
+
+func Addresses(addrEnv string, ports testenvstack.Ports) map[string]string {
+	out := map[string]string{
+		addrEnv: "http://127.0.0.1:" + strconv.Itoa(ports.Rest),
+	}
+
+	if ports.Grpc > 0 {
+		out[addrEnv+"_GRPC"] = "http://127.0.0.1:" + strconv.Itoa(ports.Grpc)
+	}
+
+	if ports.Udp > 0 {
+		out[addrEnv+"_UDP"] = "127.0.0.1:" + strconv.Itoa(ports.Udp)
+	}
+
+	return out
 }
 
 func toService(rootDir string, service Service) testenvstack.Service {

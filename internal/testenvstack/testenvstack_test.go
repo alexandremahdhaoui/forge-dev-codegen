@@ -29,6 +29,14 @@ echo "LISTENING 4321"
 sleep 60
 `
 
+const nodeService = `#!/bin/sh
+echo "booting $HELLO_ADDR"
+echo "LISTENING 4321"
+echo "LISTENING_GRPC 4322"
+echo "LISTENING_UDP 4323"
+sleep 60
+`
+
 const exitingService = `#!/bin/sh
 echo "dying"
 exit 3
@@ -49,30 +57,66 @@ func writeBinary(t *testing.T, script string) string {
 	return path
 }
 
-func TestParseListeningReadsThePortAndRefusesEverythingElse(t *testing.T) {
-	if port, ok := ParseListening("LISTENING 8080"); !ok || port != 8080 {
-		t.Errorf("LISTENING 8080 -> %d %v", port, ok)
+func TestParseListeningReadsTheTransportAndThePortAndRefusesEverythingElse(t *testing.T) {
+	tests := []struct {
+		line      string
+		transport string
+		port      int
+	}{
+		{line: "LISTENING 8080", transport: "rest", port: 8080},
+		{line: "  LISTENING 1  ", transport: "rest", port: 1},
+		{line: "LISTENING_GRPC 8081", transport: "grpc", port: 8081},
+		{line: "LISTENING_UDP 8082", transport: "udp", port: 8082},
 	}
 
-	if port, ok := ParseListening("  LISTENING 1  "); !ok || port != 1 {
-		t.Errorf("padded line -> %d %v", port, ok)
+	for _, tt := range tests {
+		transport, port, ok := ParseListening(tt.line)
+		if !ok || transport != tt.transport || port != tt.port {
+			t.Errorf("%q -> %q %d %v", tt.line, transport, port, ok)
+		}
 	}
 
-	for _, line := range []string{"", "LISTENING", "LISTENING x", "LISTENING 0", "LISTENING 70000", "listening 80", "LISTENING 80 more", "READY 80"} {
-		if _, ok := ParseListening(line); ok {
+	for _, line := range []string{
+		"", "LISTENING", "LISTENING x", "LISTENING 0", "LISTENING 70000", "listening 80",
+		"LISTENING 80 more", "READY 80", "LISTENING_HTTP 80", "LISTENING_GRPC x", "LISTENING_UDP 0",
+	} {
+		if _, _, ok := ParseListening(line); ok {
 			t.Errorf("%q must be refused", line)
 		}
 	}
 }
 
-func TestFindListeningPicksTheFirstListeningLineOutOfMixedOutput(t *testing.T) {
-	port, ok := FindListening("starting\nwarn: something\nLISTENING 5555\nLISTENING 6666\n")
-	if !ok || port != 5555 {
-		t.Errorf("got %d %v", port, ok)
+func TestFindListeningPicksTheFirstPortOfEachTransportOutOfMixedOutput(t *testing.T) {
+	ports, ok := FindListening("starting\nwarn: something\nLISTENING 5555\nLISTENING_GRPC 5556\nLISTENING_UDP 5557\nLISTENING 6666\n")
+	if !ok {
+		t.Fatal("the rest port must be found")
+	}
+
+	if ports.Rest != 5555 || ports.Grpc != 5556 || ports.Udp != 5557 {
+		t.Errorf("got %+v", ports)
+	}
+
+	if !ports.Complete() {
+		t.Error("every transport announced its port")
 	}
 
 	if _, ok := FindListening("starting\nstill starting\n"); ok {
 		t.Error("output without the line must not match")
+	}
+}
+
+func TestAServiceThatAnnouncesOnlyItsRestPortIsStillReady(t *testing.T) {
+	ports, ok := FindListening("LISTENING 5555\n")
+	if !ok || ports.Rest != 5555 {
+		t.Fatalf("got %+v %v", ports, ok)
+	}
+
+	if ports.Grpc != 0 || ports.Udp != 0 {
+		t.Errorf("a port nobody announced stays zero, got %+v", ports)
+	}
+
+	if ports.Complete() {
+		t.Error("a stack that announces one transport is not complete")
 	}
 }
 
@@ -152,6 +196,25 @@ func TestStartReturnsThePortFromTheListeningLineAndStopEndsTheProcess(t *testing
 
 	if Alive(started.PID) {
 		t.Error("the service must be gone after Stop")
+	}
+}
+
+func TestStartReturnsEveryPortAServiceAnnounces(t *testing.T) {
+	binary := writeBinary(t, nodeService)
+
+	started, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", ReadyTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer Stop([]int{started.PID}, 2*time.Second)
+
+	if started.Ports.Rest != 4321 || started.Ports.Grpc != 4322 || started.Ports.Udp != 4323 {
+		t.Errorf("ports: %+v", started.Ports)
+	}
+
+	if started.Port != started.Ports.Rest {
+		t.Errorf("the rest port stays the port of the service, got %+v", started)
 	}
 }
 

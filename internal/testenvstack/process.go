@@ -29,6 +29,8 @@ const DefaultReadyTimeout = 30 * time.Second
 
 const pollInterval = 50 * time.Millisecond
 
+const SettleGrace = 500 * time.Millisecond
+
 type Service struct {
 	Name         string
 	Binary       string
@@ -41,6 +43,7 @@ type Started struct {
 	Name    string
 	PID     int
 	Port    int
+	Ports   Ports
 	LogPath string
 }
 
@@ -110,14 +113,14 @@ func Start(ctx context.Context, tmpDir string, base map[string]string, service S
 
 	go func() { exited <- cmd.Wait() }()
 
-	port, err := awaitListening(ctx, logPath, readyTimeout(service), exited)
+	ports, err := awaitListening(ctx, logPath, readyTimeout(service), exited)
 	if err != nil {
 		terminate(cmd.Process.Pid)
 
 		return Started{}, fmt.Errorf("waiting for service %q on %s: %w", service.Name, logPath, err)
 	}
 
-	return Started{Name: service.Name, PID: cmd.Process.Pid, Port: port, LogPath: logPath}, nil
+	return Started{Name: service.Name, PID: cmd.Process.Pid, Port: ports.Rest, Ports: ports, LogPath: logPath}, nil
 }
 
 func readyTimeout(service Service) time.Duration {
@@ -128,26 +131,35 @@ func readyTimeout(service Service) time.Duration {
 	return service.ReadyTimeout
 }
 
-func awaitListening(ctx context.Context, logPath string, timeout time.Duration, exited <-chan error) (int, error) {
+func awaitListening(ctx context.Context, logPath string, timeout time.Duration, exited <-chan error) (Ports, error) {
 	deadline := time.After(timeout)
+
+	var settle <-chan time.Time
 
 	for {
 		output, err := os.ReadFile(logPath)
 		if err != nil {
-			return 0, fmt.Errorf("reading the log: %w", err)
+			return Ports{}, fmt.Errorf("reading the log: %w", err)
 		}
 
-		if port, ok := FindListening(string(output)); ok {
-			return port, nil
+		ports, ok := FindListening(string(output))
+		if ok && ports.Complete() {
+			return ports, nil
+		}
+
+		if ok && settle == nil {
+			settle = time.After(SettleGrace)
 		}
 
 		select {
 		case <-ctx.Done():
-			return 0, fmt.Errorf("cancelled: %w", ctx.Err())
+			return Ports{}, fmt.Errorf("cancelled: %w", ctx.Err())
 		case err := <-exited:
-			return 0, fmt.Errorf("the process exited before printing LISTENING: %v", err)
+			return Ports{}, fmt.Errorf("the process exited before printing LISTENING: %v", err)
+		case <-settle:
+			return ports, nil
 		case <-deadline:
-			return 0, fmt.Errorf("no LISTENING line within %s", timeout)
+			return Ports{}, fmt.Errorf("no LISTENING line within %s", timeout)
 		case <-time.After(pollInterval):
 		}
 	}

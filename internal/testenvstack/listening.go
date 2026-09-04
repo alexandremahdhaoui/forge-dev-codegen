@@ -19,26 +19,65 @@ import (
 	"strings"
 )
 
-func ParseListening(line string) (int, bool) {
+type Ports struct {
+	Rest int
+	Grpc int
+	Udp  int
+}
+
+func (p Ports) Complete() bool {
+	return p.Rest > 0 && p.Grpc > 0 && p.Udp > 0
+}
+
+var transportByKeyword = map[string]string{
+	"LISTENING":      "rest",
+	"LISTENING_GRPC": "grpc",
+	"LISTENING_UDP":  "udp",
+}
+
+func ParseListening(line string) (string, int, bool) {
 	fields := strings.Fields(line)
-	if len(fields) != 2 || fields[0] != "LISTENING" {
-		return 0, false
+	if len(fields) != 2 {
+		return "", 0, false
+	}
+
+	transport, ok := transportByKeyword[fields[0]]
+	if !ok {
+		return "", 0, false
 	}
 
 	port, err := strconv.Atoi(fields[1])
 	if err != nil || port < 1 || port > 65535 {
-		return 0, false
+		return "", 0, false
 	}
 
-	return port, true
+	return transport, port, true
 }
 
-func FindListening(output string) (int, bool) {
+func FindListening(output string) (Ports, bool) {
+	var ports Ports
+
 	for _, line := range strings.Split(output, "\n") {
-		if port, ok := ParseListening(line); ok {
-			return port, true
+		transport, port, ok := ParseListening(line)
+		if !ok {
+			continue
+		}
+
+		switch transport {
+		case "rest":
+			if ports.Rest == 0 {
+				ports.Rest = port
+			}
+		case "grpc":
+			if ports.Grpc == 0 {
+				ports.Grpc = port
+			}
+		case "udp":
+			if ports.Udp == 0 {
+				ports.Udp = port
+			}
 		}
 	}
 
-	return 0, false
+	return ports, ports.Rest > 0
 }

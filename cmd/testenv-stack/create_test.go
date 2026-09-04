@@ -34,6 +34,13 @@ echo "LISTENING 4321"
 sleep 60
 `
 
+const nodeService = `#!/bin/sh
+echo "LISTENING 4321"
+echo "LISTENING_GRPC 4322"
+echo "LISTENING_UDP 4323"
+sleep 60
+`
+
 const exitingService = `#!/bin/sh
 exit 1
 `
@@ -147,6 +154,47 @@ func TestCreateStartsEveryServiceExportsItsAddressAndDeleteStopsIt(t *testing.T)
 
 	if testenvstack.Alive(pid) {
 		t.Error("the service must be gone after Delete")
+	}
+}
+
+func TestCreateExportsOneAddressPerPortTheServiceAnnounces(t *testing.T) {
+	root := t.TempDir()
+	writeBinary(t, root, "hello", nodeService)
+	tmpDir := t.TempDir()
+
+	spec := &Spec{Services: []Service{{Name: "hello", Binary: "hello", AddrEnv: "HELLO_URL", ReadyTimeoutSeconds: 5}}}
+
+	artifact, err := Create(context.Background(), engineframework.CreateInput{TestID: "t2", TmpDir: tmpDir, RootDir: root}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_ = Delete(context.Background(), engineframework.DeleteInput{TestID: "t2", Metadata: artifact.Metadata}, nil)
+	}()
+
+	want := map[string]string{
+		"HELLO_URL":      "http://127.0.0.1:4321",
+		"HELLO_URL_GRPC": "http://127.0.0.1:4322",
+		"HELLO_URL_UDP":  "127.0.0.1:4323",
+	}
+
+	for key, value := range want {
+		if artifact.Env[key] != value {
+			t.Errorf("%s is %q, want %q", key, artifact.Env[key], value)
+		}
+	}
+}
+
+func TestAServiceThatAnnouncesOnlyItsRestPortExportsOneAddress(t *testing.T) {
+	env := Addresses("HELLO_URL", testenvstack.Ports{Rest: 4321})
+
+	if env["HELLO_URL"] != "http://127.0.0.1:4321" {
+		t.Errorf("env: %v", env)
+	}
+
+	if len(env) != 1 {
+		t.Errorf("a port nobody announced exports nothing, got %v", env)
 	}
 }
 
