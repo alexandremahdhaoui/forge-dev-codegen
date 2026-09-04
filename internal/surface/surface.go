@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package surface reads the kind vocabulary out of the opaque surface map
+// Package surface reads the kind vocabulary out of the opaque layout map
 // every generator receives. Shared by every cli engine here, so the cells
 // cannot drift on what a command is.
 package surface
@@ -34,8 +34,8 @@ type Command struct {
 
 // Commands reads the commands list, sorted by name so generation is
 // deterministic.
-func Commands(surface map[string]interface{}) ([]Command, error) {
-	raw, ok := surface["commands"].([]interface{})
+func Commands(layout map[string]interface{}) ([]Command, error) {
+	raw, ok := layout["commands"].([]interface{})
 	if !ok || len(raw) == 0 {
 		return nil, fmt.Errorf("at least one command is required")
 	}

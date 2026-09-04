@@ -22,11 +22,11 @@ import (
 )
 
 // NewHandlers wires the generate tool: one Containerfile per binary the
-// surface declares, from the shared concerns renderer.
-// Delivery is the one concern with per-repo data - which binaries ship -
-// so its surface carries them:
+// layout declares, from the shared concerns renderer.
+// Delivery is the one concern with per-repo data. Its layout carries the
+// binaries that ship:
 //
-//	surface:
+//	layout:
 //	  repo: golden-go
 //	  binaries:
 //	    - name: golden-go-server

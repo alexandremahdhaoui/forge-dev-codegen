@@ -96,7 +96,7 @@ func TestEveryAnsweredPathStaysInsideTheCellDirectory(t *testing.T) {
 	}
 }
 
-func TestTheSurfaceSideAnswersOnlyItsOwnLayers(t *testing.T) {
+func TestTheLayoutSideAnswersOnlyItsOwnLayers(t *testing.T) {
 	tests := []struct {
 		side   string
 		want   []string

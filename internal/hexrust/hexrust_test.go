@@ -540,7 +540,7 @@ func TestNoGeneratedFileCarriesAPathAttribute(t *testing.T) {
 	}
 }
 
-func TestTheRootCellMountsEveryExtraHandModuleTheSurfaceLists(t *testing.T) {
+func TestTheRootCellMountsEveryExtraHandModuleTheLayoutLists(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
 		Service: "songe-hello",
 		Hand:    []string{"echo_controller", "datagram"},
