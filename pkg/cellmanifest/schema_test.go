@@ -83,11 +83,11 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 		},
 		{
 			name:         "a cell that provides nothing validates against the schema",
-			manifestYAML: "cell: udp\ngenerator: udp-rust\n",
+			manifestYAML: "version: \"1\"\ncell: udp\ngenerator: udp-rust\n",
 		},
 		{
 			name: "a config field with every key validates against the schema",
-			manifestYAML: "cell: rest\ngenerator: rest-rust-axum\n" +
+			manifestYAML: "version: \"1\"\ncell: rest\ngenerator: rest-rust-axum\n" +
 				"provides:\n  adapters:\n    - name: greeting_sqlite\n      type: GreetingSqliteStore\n" +
 				"      module: adapter::greeting_sqlite\n      implements: GreetingStore\n" +
 				"      config:\n        path:\n          type: string\n          required: true\n" +
@@ -120,36 +120,69 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 	}{
 		{
 			name: "a config field type outside the list fails the schema",
-			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n" +
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n" +
 				"      implements: HelloClient\n      config:\n        addr: { type: float }\n",
 		},
 		{
 			name:         "a manifest with no cell name fails the schema",
-			manifestYAML: "generator: grpc-rust-tonic\n",
+			manifestYAML: "version: \"1\"\ngenerator: grpc-rust-tonic\n",
+		},
+		{
+			name:         "a manifest with no version fails the schema",
+			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n",
+		},
+		{
+			name:         "a version other than one fails the schema",
+			manifestYAML: "version: \"2\"\ncell: grpc\ngenerator: grpc-rust-tonic\n",
 		},
 		{
 			name:         "a cell name that is not snake case fails the schema",
-			manifestYAML: "cell: GrpcCell\ngenerator: grpc-rust-tonic\n",
+			manifestYAML: "version: \"1\"\ncell: GrpcCell\ngenerator: grpc-rust-tonic\n",
 		},
 		{
 			name: "a driver that requires no controller trait fails the schema",
-			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n" +
-				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n      requires: []\n",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      module: grpc::driver::hello_grpc_driver\n      requires: []\n",
 		},
 		{
 			name: "an adapter that implements no port fails the schema",
-			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n" +
-				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      module: grpc::adapter::hello_grpc_client\n",
+		},
+		{
+			name: "a driver with no module fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
+				"      requires: [HelloController]\n",
+		},
+		{
+			name: "an adapter with no module fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
+				"      implements: HelloClient\n",
+		},
+		{
+			name: "a controller with no module fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  controllers:\n    - trait: HelloController\n      impl: HelloControllerImpl\n",
+		},
+		{
+			name: "a port with no module fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"provides:\n  ports:\n    - trait: GreetingStore\n",
 		},
 		{
 			name: "a module that is not a double colon path fails the schema",
-			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n" +
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  ports:\n    - trait: GreetingStore\n      module: rest/port/greeting_store\n",
 		},
 		{
 			name:         "an unknown top level key fails the schema",
-			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\nprovide: {}\n",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nprovide: {}\n",
 		},
 	}
 
@@ -176,5 +209,52 @@ func TestWhatWriteProducesStillValidatesAgainstTheSchema(t *testing.T) {
 
 	if err := resolvedSchema(t).Validate(instanceOf(t, body)); err != nil {
 		t.Fatalf("validating the written manifest returned %v", err)
+	}
+}
+
+func TestAManifestWithNilSlicesStillValidatesAgainstTheSchema(t *testing.T) {
+	t.Parallel()
+
+	m := exampleManifest()
+	m.Requires.Ports = nil
+	m.Provides.Controllers[0].Ports = nil
+
+	written, err := cellmanifest.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshalling a manifest with nil slices returned %v", err)
+	}
+
+	if strings.Contains(string(written), "null") {
+		t.Fatalf("got %q, want no null in the written manifest", string(written))
+	}
+
+	body := strings.SplitN(string(written), "\n", 2)[1]
+
+	if err := resolvedSchema(t).Validate(instanceOf(t, body)); err != nil {
+		t.Fatalf("validating a manifest written from nil slices returned %v", err)
+	}
+
+	back, err := cellmanifest.Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("parsing back a manifest written from nil slices returned %v", err)
+	}
+
+	if len(back.Requires.Ports) != 0 || len(back.Provides.Controllers[0].Ports) != 0 {
+		t.Fatalf("got %+v, want empty port lists", back)
+	}
+}
+
+func TestMarshalLeavesTheManifestItWasGivenAlone(t *testing.T) {
+	t.Parallel()
+
+	m := exampleManifest()
+	m.Requires.Ports = nil
+
+	if _, err := cellmanifest.Marshal(m); err != nil {
+		t.Fatalf("marshalling the example returned %v", err)
+	}
+
+	if m.Requires.Ports != nil {
+		t.Fatalf("got %v, want the required ports to stay nil", m.Requires.Ports)
 	}
 }

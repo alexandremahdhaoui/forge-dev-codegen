@@ -13,6 +13,8 @@ says so.
 Every transport engine writes `zz_generated_cell.yaml` beside the code it
 generates. The first line names the generator and forbids hand edits.
 
+Every manifest carries `version: "1"`. A reader refuses any other value.
+
 The manifest lists what the cell provides and what it needs.
 
 - `provides.drivers` a driver, the controller traits it needs, its config fields
@@ -23,7 +25,11 @@ The manifest lists what the cell provides and what it needs.
 
 A config field carries a type among string, integer, boolean and duration, plus
 `required`, `default` and `description`. Names are snake case. Types and traits
-are Rust idents. Modules are `::` paths.
+are Rust idents. Modules are `::` paths and every driver, adapter, controller
+and port names one.
+
+An integer default above 2 to the 53 travels as a string, because JSON numbers
+lose precision past that point.
 
 ## Who writes and who reads
 
@@ -33,6 +39,8 @@ are Rust idents. Modules are `::` paths.
 | reader | hexagonal-rust |
 
 `Read`, `Parse` and `Write` move the file. `Validate` refuses a manifest the
-reader cannot use. `Merge` gathers the cells of one service and refuses two
-cells that provide one driver name or one controller trait. `Schema` returns the
-JSON Schema so a writer in another language checks its own output.
+reader cannot use. `Merge` gathers the cells of one service. It refuses two
+manifests that name one cell. It refuses two cells that provide one driver name,
+one adapter name or one controller trait. It refuses two cells that provide one
+port trait from different modules and accepts a repeat that matches. `Schema`
+returns the JSON Schema so a writer in another language checks its own output.

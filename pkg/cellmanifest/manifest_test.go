@@ -9,7 +9,8 @@ import (
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
-const grpcCellExample = `cell: grpc
+const grpcCellExample = `version: "1"
+cell: grpc
 generator: grpc-rust-tonic
 provides:
   drivers:
@@ -22,6 +23,7 @@ provides:
   adapters:
     - name: hello_grpc_client
       type: HelloGrpcClient
+      module: grpc::adapter::hello_grpc_client
       implements: HelloClient
       config:
         addr: { type: string, required: true }
@@ -39,6 +41,7 @@ requires:
 
 func exampleManifest() cellmanifest.Manifest {
 	return cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
 		Cell:      "grpc",
 		Generator: "grpc-rust-tonic",
 		Provides: cellmanifest.Provides{
@@ -54,6 +57,7 @@ func exampleManifest() cellmanifest.Manifest {
 			Adapters: []cellmanifest.Adapter{{
 				Name:       "hello_grpc_client",
 				Type:       "HelloGrpcClient",
+				Module:     "grpc::adapter::hello_grpc_client",
 				Implements: "HelloClient",
 				Config: map[string]cellmanifest.ConfigField{
 					"addr": {Type: cellmanifest.FieldTypeString, Required: true},
@@ -87,6 +91,7 @@ func TestParseReadsEveryFieldOfTheGrpcCellExample(t *testing.T) {
 		got  any
 		want any
 	}{
+		{"the version is one", m.Version, "1"},
 		{"the cell name is grpc", m.Cell, "grpc"},
 		{"the generator is grpc-rust-tonic", m.Generator, "grpc-rust-tonic"},
 		{"one driver is provided", len(m.Provides.Drivers), 1},
@@ -192,6 +197,54 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 	badAdapterFieldType := exampleManifest()
 	badAdapterFieldType.Provides.Adapters[0].Config["addr"] = cellmanifest.ConfigField{Type: "port"}
 
+	noVersion := exampleManifest()
+	noVersion.Version = ""
+
+	wrongVersion := exampleManifest()
+	wrongVersion.Version = "2"
+
+	shoutingCell := exampleManifest()
+	shoutingCell.Cell = "GrpcCell"
+
+	driverWithoutType := exampleManifest()
+	driverWithoutType.Provides.Drivers[0].Type = ""
+
+	driverWithABadType := exampleManifest()
+	driverWithABadType.Provides.Drivers[0].Type = "hello-grpc-driver"
+
+	driverWithoutModule := exampleManifest()
+	driverWithoutModule.Provides.Drivers[0].Module = ""
+
+	driverWithABadModule := exampleManifest()
+	driverWithABadModule.Provides.Drivers[0].Module = "grpc/driver/hello_grpc_driver"
+
+	adapterWithoutType := exampleManifest()
+	adapterWithoutType.Provides.Adapters[0].Type = ""
+
+	adapterWithoutModule := exampleManifest()
+	adapterWithoutModule.Provides.Adapters[0].Module = ""
+
+	controllerWithoutTrait := exampleManifest()
+	controllerWithoutTrait.Provides.Controllers[0].Trait = ""
+
+	controllerWithoutImpl := exampleManifest()
+	controllerWithoutImpl.Provides.Controllers[0].Impl = ""
+
+	controllerWithABadImpl := exampleManifest()
+	controllerWithABadImpl.Provides.Controllers[0].Impl = "hello controller impl"
+
+	controllerWithoutModule := exampleManifest()
+	controllerWithoutModule.Provides.Controllers[0].Module = ""
+
+	portWithoutTrait := exampleManifest()
+	portWithoutTrait.Provides.Ports[0].Trait = ""
+
+	portWithABadTrait := exampleManifest()
+	portWithABadTrait.Provides.Ports[0].Trait = "greeting-store"
+
+	portWithoutModule := exampleManifest()
+	portWithoutModule.Provides.Ports[0].Module = ""
+
 	cases := []struct {
 		name     string
 		manifest cellmanifest.Manifest
@@ -203,9 +256,91 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			message:  "cell name is empty",
 		},
 		{
+			name:     "a cell name that is not snake case is refused",
+			manifest: shoutingCell,
+			message:  `cell name "GrpcCell" is not snake case`,
+		},
+		{
+			name:     "a manifest with no version is refused",
+			manifest: noVersion,
+			message:  `cell "grpc" declares version "" and the only version is "1"`,
+		},
+		{
+			name:     "a manifest with a version other than one is refused",
+			manifest: wrongVersion,
+			message:  `cell "grpc" declares version "2" and the only version is "1"`,
+		},
+		{
 			name:     "a manifest with no generator is refused",
 			manifest: noGenerator,
 			message:  `cell "grpc" names no generator`,
+		},
+		{
+			name:     "a driver with no type is refused",
+			manifest: driverWithoutType,
+			message:  `driver "grpc" in cell "grpc" names no type`,
+		},
+		{
+			name:     "a driver type that is not a Rust ident is refused",
+			manifest: driverWithABadType,
+			message:  `driver "grpc" in cell "grpc" has type "hello-grpc-driver" which is not a Rust ident`,
+		},
+		{
+			name:     "a driver with no module is refused",
+			manifest: driverWithoutModule,
+			message:  `driver "grpc" in cell "grpc" names no module`,
+		},
+		{
+			name:     "a driver module that is not a double colon path is refused",
+			manifest: driverWithABadModule,
+			message: `driver "grpc" in cell "grpc" has module "grpc/driver/hello_grpc_driver" ` +
+				`which is not a :: path`,
+		},
+		{
+			name:     "an adapter with no type is refused",
+			manifest: adapterWithoutType,
+			message:  `adapter "hello_grpc_client" in cell "grpc" names no type`,
+		},
+		{
+			name:     "an adapter with no module is refused",
+			manifest: adapterWithoutModule,
+			message:  `adapter "hello_grpc_client" in cell "grpc" names no module`,
+		},
+		{
+			name:     "a controller with no trait is refused",
+			manifest: controllerWithoutTrait,
+			message:  `cell "grpc" provides a controller with no trait`,
+		},
+		{
+			name:     "a controller with no impl is refused",
+			manifest: controllerWithoutImpl,
+			message:  `controller "HelloController" in cell "grpc" names no impl`,
+		},
+		{
+			name:     "a controller impl that is not a Rust ident is refused",
+			manifest: controllerWithABadImpl,
+			message: `controller "HelloController" in cell "grpc" has impl "hello controller impl" ` +
+				`which is not a Rust ident`,
+		},
+		{
+			name:     "a controller with no module is refused",
+			manifest: controllerWithoutModule,
+			message:  `controller "HelloController" in cell "grpc" names no module`,
+		},
+		{
+			name:     "a port with no trait is refused",
+			manifest: portWithoutTrait,
+			message:  `cell "grpc" provides a port with no trait`,
+		},
+		{
+			name:     "a port trait that is not a Rust ident is refused",
+			manifest: portWithABadTrait,
+			message:  `port trait "greeting-store" in cell "grpc" is not a Rust ident`,
+		},
+		{
+			name:     "a port with no module is refused",
+			manifest: portWithoutModule,
+			message:  `port "GreetingStore" in cell "grpc" names no module`,
 		},
 		{
 			name:     "a driver that requires no controller trait is refused",

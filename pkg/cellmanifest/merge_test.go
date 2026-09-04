@@ -9,6 +9,7 @@ import (
 
 func cell(name string, provides cellmanifest.Provides, requires ...string) cellmanifest.Manifest {
 	return cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
 		Cell:      name,
 		Generator: name + "-generator",
 		Provides:  provides,
@@ -20,8 +21,30 @@ func driver(name, controllerTrait string) cellmanifest.Driver {
 	return cellmanifest.Driver{
 		Name:     name,
 		Type:     "Driver",
+		Module:   "driver::" + name,
 		Requires: []string{controllerTrait},
 	}
+}
+
+func adapter(name, portTrait string) cellmanifest.Adapter {
+	return cellmanifest.Adapter{
+		Name:       name,
+		Type:       "Adapter",
+		Module:     "adapter::" + name,
+		Implements: portTrait,
+	}
+}
+
+func controller(trait, impl string) cellmanifest.Controller {
+	return cellmanifest.Controller{
+		Trait:  trait,
+		Impl:   impl,
+		Module: "controller::hello_controller",
+	}
+}
+
+func port(trait, module string) cellmanifest.Port {
+	return cellmanifest.Port{Trait: trait, Module: module}
 }
 
 func TestMergeGathersWhatEveryCellProvides(t *testing.T) {
@@ -29,15 +52,15 @@ func TestMergeGathersWhatEveryCellProvides(t *testing.T) {
 
 	rest := cell("rest", cellmanifest.Provides{
 		Drivers:     []cellmanifest.Driver{driver("rest", "HelloController")},
-		Adapters:    []cellmanifest.Adapter{{Name: "greeting_sqlite", Type: "S", Implements: "GreetingStore"}},
-		Controllers: []cellmanifest.Controller{{Trait: "HelloController", Impl: "HelloControllerImpl"}},
-		Ports:       []cellmanifest.Port{{Trait: "GreetingStore"}},
+		Adapters:    []cellmanifest.Adapter{adapter("greeting_sqlite", "GreetingStore")},
+		Controllers: []cellmanifest.Controller{controller("HelloController", "HelloControllerImpl")},
+		Ports:       []cellmanifest.Port{port("GreetingStore", "rest::port::greeting_store")},
 	}, "Clock")
 
 	grpc := cell("grpc", cellmanifest.Provides{
 		Drivers:  []cellmanifest.Driver{driver("grpc", "HelloController")},
-		Adapters: []cellmanifest.Adapter{{Name: "hello_grpc_client", Type: "C", Implements: "HelloClient"}},
-		Ports:    []cellmanifest.Port{{Trait: "HelloClient"}},
+		Adapters: []cellmanifest.Adapter{adapter("hello_grpc_client", "HelloClient")},
+		Ports:    []cellmanifest.Port{port("HelloClient", "grpc::port::hello_client")},
 	}, "Clock", "Random")
 
 	merged, err := cellmanifest.Merge([]cellmanifest.Manifest{rest, grpc})
@@ -98,16 +121,30 @@ func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 
 	sameControllerTrait := []cellmanifest.Manifest{
 		cell("rest", cellmanifest.Provides{
-			Controllers: []cellmanifest.Controller{{Trait: "HelloController", Impl: "A"}},
+			Controllers: []cellmanifest.Controller{controller("HelloController", "A")},
 		}),
 		cell("grpc", cellmanifest.Provides{
-			Controllers: []cellmanifest.Controller{{Trait: "HelloController", Impl: "B"}},
+			Controllers: []cellmanifest.Controller{controller("HelloController", "B")},
 		}),
+	}
+
+	sameAdapterName := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{adapter("greeting_store", "GreetingStore")},
+		}),
+		cell("grpc", cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{adapter("greeting_store", "HelloClient")},
+		}),
+	}
+
+	sameCellName := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{}),
+		cell("rest", cellmanifest.Provides{}),
 	}
 
 	invalidCell := []cellmanifest.Manifest{
 		cell("rest", cellmanifest.Provides{}),
-		{Cell: "", Generator: "grpc-rust-tonic"},
+		{Version: cellmanifest.Version, Cell: "", Generator: "grpc-rust-tonic"},
 	}
 
 	cases := []struct {
@@ -124,6 +161,16 @@ func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 			name:      "two cells providing one controller trait are refused by name",
 			manifests: sameControllerTrait,
 			message:   `controller trait "HelloController" is provided by cell "rest" and by cell "grpc"`,
+		},
+		{
+			name:      "two cells providing one adapter name are refused by name",
+			manifests: sameAdapterName,
+			message:   `adapter "greeting_store" is provided by cell "rest" and by cell "grpc"`,
+		},
+		{
+			name:      "two manifests naming one cell are refused",
+			manifests: sameCellName,
+			message:   `cell "rest" is named by two manifests`,
 		},
 		{
 			name:      "a cell that does not validate is refused before it is merged",
@@ -148,17 +195,48 @@ func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 	}
 }
 
-func TestMergeKeepsTheFirstCellThatProvidesAPortTrait(t *testing.T) {
+func TestMergeRefusesTwoCellsThatProvideOnePortTraitFromDifferentModules(t *testing.T) {
 	t.Parallel()
 
 	manifests := []cellmanifest.Manifest{
-		cell("rest", cellmanifest.Provides{Ports: []cellmanifest.Port{{Trait: "GreetingStore"}}}),
-		cell("grpc", cellmanifest.Provides{Ports: []cellmanifest.Port{{Trait: "GreetingStore"}}}),
+		cell("rest", cellmanifest.Provides{
+			Ports: []cellmanifest.Port{port("GreetingStore", "rest::port::greeting_store")},
+		}),
+		cell("grpc", cellmanifest.Provides{
+			Ports: []cellmanifest.Port{port("GreetingStore", "grpc::port::greeting_store")},
+		}),
+	}
+
+	_, err := cellmanifest.Merge(manifests)
+	if err == nil {
+		t.Fatal("merging two cells that name one port from two modules returned no error")
+	}
+
+	want := `port trait "GreetingStore" is provided by cell "rest" and by cell "grpc" with a different module`
+	if err.Error() != want {
+		t.Fatalf("got %q, want %q", err.Error(), want)
+	}
+}
+
+func TestMergeAcceptsTwoCellsThatProvideTheSamePort(t *testing.T) {
+	t.Parallel()
+
+	manifests := []cellmanifest.Manifest{
+		cell("rest", cellmanifest.Provides{
+			Ports: []cellmanifest.Port{port("GreetingStore", "rest::port::greeting_store")},
+		}),
+		cell("grpc", cellmanifest.Provides{
+			Ports: []cellmanifest.Port{port("GreetingStore", "rest::port::greeting_store")},
+		}),
 	}
 
 	merged, err := cellmanifest.Merge(manifests)
 	if err != nil {
-		t.Fatalf("merging two cells that name one port returned %v", err)
+		t.Fatalf("merging two cells that name the same port returned %v", err)
+	}
+
+	if len(merged.Ports) != 1 {
+		t.Fatalf("got %d ports, want 1", len(merged.Ports))
 	}
 
 	if merged.Ports["GreetingStore"].Cell != "rest" {

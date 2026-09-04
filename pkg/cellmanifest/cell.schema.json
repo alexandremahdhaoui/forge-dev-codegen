@@ -4,8 +4,9 @@
   "title": "Cell manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["cell", "generator"],
+  "required": ["version", "cell", "generator"],
   "properties": {
+    "version": { "type": "string", "const": "1" },
     "cell": { "$ref": "#/$defs/snakeName" },
     "generator": { "type": "string", "minLength": 1 },
     "provides": { "$ref": "#/$defs/provides" },
@@ -67,7 +68,7 @@
     "driver": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "type", "requires"],
+      "required": ["name", "type", "module", "requires"],
       "properties": {
         "name": { "$ref": "#/$defs/snakeName" },
         "type": { "$ref": "#/$defs/rustIdent" },
@@ -81,7 +82,7 @@
     "adapter": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "type", "implements"],
+      "required": ["name", "type", "module", "implements"],
       "properties": {
         "name": { "$ref": "#/$defs/snakeName" },
         "type": { "$ref": "#/$defs/rustIdent" },
@@ -93,7 +94,7 @@
     "controller": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["trait", "impl"],
+      "required": ["trait", "impl", "module"],
       "properties": {
         "trait": { "$ref": "#/$defs/rustIdent" },
         "impl": { "$ref": "#/$defs/rustIdent" },
@@ -104,7 +105,7 @@
     "port": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["trait"],
+      "required": ["trait", "module"],
       "properties": {
         "trait": { "$ref": "#/$defs/rustIdent" },
         "module": { "$ref": "#/$defs/modulePath" }

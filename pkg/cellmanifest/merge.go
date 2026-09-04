@@ -44,11 +44,19 @@ func Merge(manifests []Manifest) (Merged, error) {
 	}
 
 	required := map[string]bool{}
+	cellOfAdapter := map[string]string{}
+	seenCell := map[string]bool{}
 
 	for _, m := range manifests {
 		if err := m.Validate(); err != nil {
 			return Merged{}, fmt.Errorf("merging cell manifests: %w", err)
 		}
+
+		if seenCell[m.Cell] {
+			return Merged{}, fmt.Errorf("cell %q is named by two manifests", m.Cell)
+		}
+
+		seenCell[m.Cell] = true
 
 		merged.Cells = append(merged.Cells, m.Cell)
 
@@ -60,10 +68,12 @@ func Merge(manifests []Manifest) (Merged, error) {
 			return Merged{}, err
 		}
 
-		mergePorts(&merged, m)
+		if err := mergePorts(&merged, m); err != nil {
+			return Merged{}, err
+		}
 
-		for _, adapter := range m.Provides.Adapters {
-			merged.Adapters = append(merged.Adapters, AdapterEntry{Cell: m.Cell, Adapter: adapter})
+		if err := mergeAdapters(&merged, cellOfAdapter, m); err != nil {
+			return Merged{}, err
 		}
 
 		for _, trait := range m.Requires.Ports {
@@ -106,14 +116,40 @@ func mergeControllers(merged *Merged, m Manifest) error {
 	return nil
 }
 
-func mergePorts(merged *Merged, m Manifest) {
+func mergeAdapters(merged *Merged, cellOfAdapter map[string]string, m Manifest) error {
+	for _, adapter := range m.Provides.Adapters {
+		if cell, taken := cellOfAdapter[adapter.Name]; taken {
+			return fmt.Errorf(
+				"adapter %q is provided by cell %q and by cell %q",
+				adapter.Name, cell, m.Cell,
+			)
+		}
+
+		cellOfAdapter[adapter.Name] = m.Cell
+		merged.Adapters = append(merged.Adapters, AdapterEntry{Cell: m.Cell, Adapter: adapter})
+	}
+
+	return nil
+}
+
+func mergePorts(merged *Merged, m Manifest) error {
 	for _, port := range m.Provides.Ports {
-		if _, taken := merged.Ports[port.Trait]; taken {
+		existing, taken := merged.Ports[port.Trait]
+		if taken {
+			if existing.Port != port {
+				return fmt.Errorf(
+					"port trait %q is provided by cell %q and by cell %q with a different module",
+					port.Trait, existing.Cell, m.Cell,
+				)
+			}
+
 			continue
 		}
 
 		merged.Ports[port.Trait] = PortEntry{Cell: m.Cell, Port: port}
 	}
+
+	return nil
 }
 
 func sortedKeys(set map[string]bool) []string {
