@@ -1,0 +1,197 @@
+// Copyright 2024 Alexandre Mahdhaoui
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package grpcrust_test
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+)
+
+func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantPaths := []string{
+		"app/proto/songe-hello.proto",
+		"app/src/adapter/zz_generated_hello_grpc_client.rs",
+		"app/src/driver/zz_generated_hello_grpc_driver.rs",
+		"app/zz_generated_build.rs",
+		"core/src/port/zz_generated_hello_client.rs",
+		"core/src/types/zz_generated_hello_messages.rs",
+	}
+
+	gotPaths := []string{}
+	byPath := map[string]grpcrust.File{}
+
+	for _, f := range files {
+		gotPaths = append(gotPaths, f.Path)
+		byPath[f.Path] = f
+	}
+
+	if !reflect.DeepEqual(gotPaths, wantPaths) {
+		t.Fatalf("emitted paths\n got %q\nwant %q", gotPaths, wantPaths)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{
+			name: "the proto file is copied verbatim",
+			path: "app/proto/songe-hello.proto",
+			want: []string{"service Hello {", "message PingRequest {"},
+		},
+		{
+			name: "the messages file holds plain serde structs",
+			path: "core/src/types/zz_generated_hello_messages.rs",
+			want: []string{
+				"#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]",
+				"pub struct PingRequest {",
+				"    pub message: String,",
+				"    pub count: u64,",
+				"pub struct PingReply {",
+			},
+		},
+		{
+			name: "the port trait is mockable and returns the client error",
+			path: "core/src/port/zz_generated_hello_client.rs",
+			want: []string{
+				"use crate::types::zz_generated_hello_messages::{PingRequest, PingReply};",
+				"#[cfg_attr(test, mockall::automock)]",
+				"pub trait HelloClient: Send + Sync {",
+				"    fn ping(&self, request: PingRequest) -> Result<PingReply, HelloClientError>;",
+				"pub enum HelloClientError {",
+				"        source: Box<dyn std::error::Error + Send + Sync>,",
+			},
+		},
+		{
+			name: "the adapter wraps a tonic channel behind the port trait",
+			path: "app/src/adapter/zz_generated_hello_grpc_client.rs",
+			want: []string{
+				"use songe_hello_core::port::zz_generated_hello_client::{HelloClient, HelloClientError};",
+				"mod pb {",
+				`    tonic::include_proto!("songe.hello.v1");`,
+				"pub struct HelloGrpcClient {",
+				"    channel: tonic::transport::Channel,",
+				"impl HelloClient for HelloGrpcClient {",
+				"    fn ping(&self, request: PingRequest) -> Result<PingReply, HelloClientError> {",
+				"let mut client = pb::hello_client::HelloClient::new(channel);",
+				"impl From<PingRequest> for pb::PingRequest {",
+				"impl From<pb::PingReply> for PingReply {",
+			},
+		},
+		{
+			name: "the driver forwards each rpc to the core controller",
+			path: "app/src/driver/zz_generated_hello_grpc_driver.rs",
+			want: []string{
+				"use songe_hello_core::controller::hello_controller::HelloController;",
+				"pub struct HelloGrpcDriver {",
+				"    controller: Arc<dyn HelloController>,",
+				"pub fn into_server(self) -> pb::hello_server::HelloServer<Self> {",
+				"#[tonic::async_trait]",
+				"impl pb::hello_server::Hello for HelloGrpcDriver {",
+				"    async fn ping(&self, request: tonic::Request<pb::PingRequest>) -> Result<tonic::Response<pb::PingReply>, tonic::Status> {",
+				".controller",
+				".ping(core_request)",
+			},
+		},
+		{
+			name: "the build script compiles the proto without a protoc binary",
+			path: "app/zz_generated_build.rs",
+			want: []string{
+				`let file_descriptors = protox::compile(["proto/songe-hello.proto"], ["proto"])?;`,
+				"tonic_prost_build::configure()",
+				".compile_fds(file_descriptors)?;",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, ok := byPath[tt.path]
+			if !ok {
+				t.Fatalf("no file at %s", tt.path)
+			}
+
+			for _, line := range tt.want {
+				if !strings.Contains(content.Content, line) {
+					t.Errorf("%s lacks %q\n%s", tt.path, line, content.Content)
+				}
+			}
+		})
+	}
+}
+
+func TestEveryGeneratedFileStartsWithTheHeaderLine(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	const header = "// Code generated by grpc-rust-tonic (forge-dev-codegen). DO NOT EDIT.\n"
+
+	for _, f := range files {
+		if f.Path == "app/proto/songe-hello.proto" {
+			continue
+		}
+
+		if !strings.HasPrefix(f.Content, header) {
+			t.Errorf("%s does not start with the generated header", f.Path)
+		}
+	}
+}
+
+func TestGeneratingRefusesAnEmptyServiceName(t *testing.T) {
+	_, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{})
+	if err == nil || !strings.Contains(err.Error(), "the service name is required") {
+		t.Fatalf("want an error requiring the service name, got %v", err)
+	}
+}
+
+func TestGeneratingRefusesAProtoWithNoService(t *testing.T) {
+	const doc = `
+syntax = "proto3";
+package demo;
+message Empty {}
+`
+
+	_, err := grpcrust.Generate([]byte(doc), grpcrust.Options{Service: "svc"})
+	if err == nil || !strings.Contains(err.Error(), "declares no service") {
+		t.Fatalf("want an error requiring a service, got %v", err)
+	}
+}
+
+func TestTheOutputRootsPrefixEveryPath(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
+		Service: "songe-hello",
+		CoreDir: "../songe-hello-core",
+		AppDir:  "../songe-hello-app",
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if !strings.HasPrefix(f.Path, "../songe-hello-core/") && !strings.HasPrefix(f.Path, "../songe-hello-app/") {
+			t.Errorf("%s is outside both roots", f.Path)
+		}
+	}
+}

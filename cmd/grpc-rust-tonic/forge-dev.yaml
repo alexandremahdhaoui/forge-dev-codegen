@@ -1,0 +1,15 @@
+name: grpc-rust-tonic
+kind: mcp-server
+version: 0.1.0
+description: Emits the tonic rust skeleton of one gRPC service from its proto file - a client adapter and port trait, a server driver, and plain message types.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer the core and app crates of one gRPC service from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

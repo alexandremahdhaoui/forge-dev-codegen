@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: grpc-rust-tonic Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+          description: Unused. The engine has no configuration; the model it receives carries everything.
+    GenerateInput:
+      type: object
+      description: The normalized model forge-dev hands every generator.
+      properties:
+        name:
+          type: string
+          description: The service name. The crates are <name>-core and <name>-app.
+        version:
+          type: string
+          description: The service version.
+        description:
+          type: string
+          description: The service description.
+        kind:
+          type: string
+          description: What the program is. This engine fills the grpc kind only.
+        language:
+          type: string
+          description: The cell's language. This engine emits rust only.
+        packageName:
+          type: string
+          description: Unused here.
+        surface:
+          type: object
+          additionalProperties: true
+          description: The kind's surface. coreDir and appDir may be given here instead of at the top level.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
+        protoSpec:
+          type: string
+          description: The raw proto3 document. Its package, messages and services decide everything emitted.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed.
+        srcDir:
+          type: string
+          description: The engine source directory. Unused here.
+        coreDir:
+          type: string
+          description: The root of the core crate, relative to the engine source directory. Absent means core.
+        appDir:
+          type: string
+          description: The root of the app crate, relative to the engine source directory. Absent means app.
+      required:
+        - name
+        - kind
+        - protoSpec
+    GeneratedFile:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The file path, relative to the engine source directory.
+        content:
+          type: string
+          description: The file content.
+      required:
+        - path
+        - content
+    GenerateOutput:
+      type: object
+      properties:
+        files:
+          type: array
+          description: The emitted files. forge-dev core writes them.
+          items:
+            $ref: "#/components/schemas/GeneratedFile"
+      required:
+        - files
