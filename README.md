@@ -39,6 +39,7 @@ it fills, then the library that fills it.
 | rest-typescript-fastify | rest-api x typescript | fastify |
 | hexagonal-rust | hexagonal x rust | axum, rusqlite, thiserror, mockall |
 | grpc-rust-tonic | grpc x rust | tonic, prost, protox |
+| vectors-rust | vectors x rust | mockall, tower, http-body-util |
 
 `cmd/demo-cli-go-cobra` consumes cli-go-cobra and pins its behavior
 against the built binary; the other cells' demos live in the matching
