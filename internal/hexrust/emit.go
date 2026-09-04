@@ -33,19 +33,12 @@ type Options struct {
 	Hand    []string
 }
 
-var coreLayers = []string{"controller", "hand", "port", "types"}
-
-var appLayers = []string{"adapter", "driver"}
-
-func layerSide(layer string) string {
-	for _, name := range appLayers {
-		if name == layer {
-			return "app"
-		}
-	}
-
-	return "core"
+var layersBySide = map[string][]string{
+	"core": {"controller", "hand", "port", "types"},
+	"app":  {"adapter", "driver", "hand"},
 }
+
+var sides = []string{"app", "core"}
 
 var reservedCellNames = map[string]bool{
 	"types": true, "port": true, "controller": true, "hand": true, "adapter": true, "driver": true,
@@ -199,29 +192,37 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil
 	}
 
-	entries := map[string][]modEntry{
-		"driver": {
-			{Module: "zz_generated_wire", Alias: "wire"},
-			{Module: "zz_generated_http_driver", Alias: "http_driver"},
+	entries := map[string]map[string][]modEntry{
+		"core": {},
+		"app": {
+			"driver": {
+				{Module: "zz_generated_wire", Alias: "wire"},
+				{Module: "zz_generated_http_driver", Alias: "http_driver"},
+			},
 		},
 	}
 
-	mount := func(layer string, entry modEntry) {
-		entries[layer] = append(entries[layer], entry)
+	mount := func(side, layer string, entry modEntry) {
+		entries[side][layer] = append(entries[side][layer], entry)
 	}
 
 	for _, t := range v.Types {
-		mount("types", modEntry{Module: "zz_generated_" + t.Snake, Alias: t.Snake})
+		mount("core", "types", modEntry{Module: "zz_generated_" + t.Snake, Alias: t.Snake})
 	}
 
 	for _, s := range v.Stores {
-		mount("port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
-		mount("adapter", modEntry{Module: "zz_generated_" + s.Snake + "_sqlite", Alias: s.Snake + "_sqlite"})
+		mount("core", "port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
+		mount("app", "adapter", modEntry{Module: "zz_generated_" + s.Snake + "_sqlite", Alias: s.Snake + "_sqlite"})
 	}
 
 	for _, c := range v.Controllers {
-		mount("controller", modEntry{Module: "zz_generated_" + c.Snake + "_controller", Alias: c.Snake + "_controller"})
-		mount("hand", modEntry{Module: c.Snake + "_controller"})
+		mount("core", "controller", modEntry{Module: "zz_generated_" + c.Snake + "_controller", Alias: c.Snake + "_controller"})
+		mount("core", "hand", modEntry{Module: c.Snake + "_controller"})
+	}
+
+	handSide := "core"
+	if opts.Side == "app" {
+		handSide = "app"
 	}
 
 	for _, module := range opts.Hand {
@@ -231,7 +232,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			}
 		}
 
-		mount("hand", modEntry{Module: module})
+		mount(handSide, "hand", modEntry{Module: module})
 	}
 
 	steps := []func() error{
@@ -277,20 +278,22 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		)
 	}
 
-	for _, layer := range append(append([]string{}, coreLayers...), appLayers...) {
-		layer := layer
+	for _, side := range sides {
 		root := core
-
-		if layerSide(layer) == "app" {
+		if side == "app" {
 			root = app
 		}
 
-		mod := layerMod{Header: header, Entries: entries[layer]}
-		sort.Slice(mod.Entries, func(i, j int) bool { return mod.Entries[i].Module < mod.Entries[j].Module })
+		for _, layer := range layersBySide[side] {
+			side, layer, root := side, layer, root
 
-		steps = append(steps, func() error {
-			return add(layerSide(layer), path.Join(root, layer, "mod.rs"), "layer_mod", mod, false)
-		})
+			mod := layerMod{Header: header, Entries: entries[side][layer]}
+			sort.Slice(mod.Entries, func(i, j int) bool { return mod.Entries[i].Module < mod.Entries[j].Module })
+
+			steps = append(steps, func() error {
+				return add(side, path.Join(root, layer, "mod.rs"), "layer_mod", mod, false)
+			})
+		}
 	}
 
 	for _, step := range steps {
@@ -473,6 +476,7 @@ pub fn {{ .Ident }}{{ .HandGenerics }}({{ .HandParams }}) -> Result<{{ .ReturnTy
 
 pub mod adapter;
 pub mod driver;
+pub mod hand;
 {{ range .Cells }}
 pub mod {{ . }};
 {{- end }}

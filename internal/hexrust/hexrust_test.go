@@ -167,6 +167,7 @@ func TestOneStoreAndOneOperationEmitTheWholeSkeleton(t *testing.T) {
 		"app/src/driver/mod.rs",
 		"app/src/driver/zz_generated_http_driver.rs",
 		"app/src/driver/zz_generated_wire.rs",
+		"app/src/hand/mod.rs",
 		"app/src/lib.rs",
 		"core/src/controller/mod.rs",
 		"core/src/controller/zz_generated_greeting_controller.rs",
@@ -567,6 +568,40 @@ func TestTheRootCellMountsEveryExtraHandModuleTheSurfaceLists(t *testing.T) {
 	}
 
 	t.Fatal("no core/src/hand/mod.rs was emitted")
+}
+
+func TestTheAppSideMountsItsOwnHandModulesAndNoController(t *testing.T) {
+	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+		Service: "songe-hello",
+		Side:    "app",
+		AppDir:  ".",
+		Hand:    []string{"udp_driver"},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	if !strings.Contains(byPath["src/lib.rs"], "pub mod hand;") {
+		t.Errorf("the app lib does not mount the hand module\n%s", byPath["src/lib.rs"])
+	}
+
+	mod, ok := byPath["src/hand/mod.rs"]
+	if !ok {
+		t.Fatal("no src/hand/mod.rs was emitted for the app side")
+	}
+
+	if !strings.Contains(mod, "pub mod udp_driver;") {
+		t.Errorf("the app hand mount lacks the driver\n%s", mod)
+	}
+
+	if strings.Contains(mod, "greeting_controller") {
+		t.Errorf("a controller belongs to the core hand mount\n%s", mod)
+	}
 }
 
 func TestAnExtraHandModuleRustCannotSpellIsRefused(t *testing.T) {

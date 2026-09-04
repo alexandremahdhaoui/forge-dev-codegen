@@ -95,7 +95,7 @@ func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
 	mounted := false
 
 	for _, f := range out.Files {
-		if f.Path == "core/src/hand/mod.rs" {
+		if strings.HasSuffix(f.Path, "/hand/mod.rs") {
 			mounted = true
 
 			continue

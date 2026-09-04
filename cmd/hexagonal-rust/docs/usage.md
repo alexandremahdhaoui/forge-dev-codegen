@@ -55,6 +55,9 @@ surface:
 controller stubs. The modules are siblings, so one reaches another with
 `crate::hand::<name>`.
 
+Both crates carry a hand mount. The core one also lists the controller stub
+per `x-controller`. The app one lists nothing but its own names.
+
 A name Rust cannot spell as a module is refused. So is `mod`, a name
 listed twice, and a controller the spec already declares.
 
