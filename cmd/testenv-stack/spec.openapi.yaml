@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: testenv-stack Spec Schema
+  version: 0.1.0
+  description: Configuration schema for the testenv-stack test environment subengine
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: The services to start. Each runs as a detached child process on a free port.
+      required: [services]
+      properties:
+        services:
+          type: array
+          description: Services started in order. Each one must print LISTENING <port> on stdout once bound.
+          items:
+            $ref: "#/components/schemas/Service"
+    Service:
+      type: object
+      description: One service binary to start.
+      required: [name, binary, addrEnv]
+      properties:
+        name:
+          type: string
+          description: Service name. Upper snake case of it plus _ADDR is set to 127.0.0.1:0 so the binary picks a free port. The log file is <TmpDir>/<name>.log.
+        binary:
+          type: string
+          description: Path to the binary to start. Relative paths resolve against the project root.
+        addrEnv:
+          type: string
+          description: Name of the environment variable the artifact exports with http://127.0.0.1:<port>.
+        env:
+          type: object
+          description: Extra environment variables for this service. They win over the accumulated testenv env.
+          additionalProperties:
+            type: string
+        readyTimeoutSeconds:
+          type: integer
+          description: Seconds to wait for the LISTENING line before create fails. Default 30.

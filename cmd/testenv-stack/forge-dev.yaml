@@ -1,0 +1,10 @@
+name: testenv-stack
+kind: mcp-server
+profile: testenv-subengine
+version: 0.1.0
+description: Starts a list of service binaries on free ports, waits for their LISTENING line, and exports one address env var per service.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
