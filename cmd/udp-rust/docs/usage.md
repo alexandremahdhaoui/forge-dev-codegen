@@ -25,11 +25,17 @@ kind: udp
 language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/udp-rust
 proto:
-  specPath: ../../.forge/spec-cache/hello.v1.proto
+  specPath: ../../.forge/spec-cache/udp/hello.v1.proto
 surface:
   side: core
   cell: udp
 ```
+
+The path is cell relative, so it climbs to the repo root and reads
+`.forge/spec-cache/udp/hello.v1.proto`. The resolver copies a spec under
+its own basename, and a repo resolves a REST spec, a gRPC proto and a
+UDP proto at once. The udp directory keeps the UDP proto from landing on
+the gRPC one when both are named `hello.v1.proto`.
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
 service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
@@ -52,7 +58,7 @@ For every `service` in the file:
 | `controller/zz_generated_<service>_controller.rs` | trait `<Service>Controller` and the impl that calls the hand body |
 | `port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one async method per rpc, and its error enum |
 | `hand/<service>_controller.rs` | the body, written once and never again |
-| `driver/zz_generated_<service>_udp_driver.rs` | `<Service>UdpDriver`, a socket loop forwarding each datagram to `Arc<dyn <Service>Controller>` |
+| `driver/zz_generated_<service>_udp_driver.rs` | `<Service>UdpDriver<C>`, a socket loop forwarding each datagram to the `<Service>Controller` it was built with |
 | `adapter/zz_generated_<service>_udp_client.rs` | `<Service>UdpClient`, one datagram out and one reply in, behind the port trait |
 
 Each layer directory carries a `mod.rs` that mounts its generated file
@@ -86,13 +92,14 @@ the same byte end the generation with an error naming both.
 
 The codec refuses a datagram with no magic, one shorter than a header,
 one over 508 bytes, one that speaks another schema version, and one
-whose function hash names no rpc.
+whose function hash names no rpc. A client reading a reply also refuses
+a datagram framed with a session id it never opened.
 
 ## The driver
 
-`serve` binds nothing. It takes a bound `tokio::net::UdpSocket` and an
-`Arc<dyn <Service>Controller>`. `announce` prints `LISTENING_UDP <port>`
-when a caller asks for it.
+`serve` binds nothing. `new` takes a bound `tokio::net::UdpSocket` and
+one `<Service>Controller` by value, stored behind a type parameter.
+`announce` prints `LISTENING_UDP <port>` when a caller asks for it.
 
 A datagram whose session id is 16 zero bytes is the udplb health probe.
 The driver answers it verbatim before it decodes anything.

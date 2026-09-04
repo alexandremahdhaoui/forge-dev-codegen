@@ -60,9 +60,7 @@ mockall = "0.15"
 const cargoCellLib = `pub mod udp;
 `
 
-const cargoRoundTripTest = `use std::sync::Arc;
-
-use songe_hello_app::udp::adapter::hello_datagram_udp_client::HelloDatagramUdpClient;
+const cargoRoundTripTest = `use songe_hello_app::udp::adapter::hello_datagram_udp_client::HelloDatagramUdpClient;
 use songe_hello_app::udp::driver::hello_datagram_udp_driver::HelloDatagramUdpDriver;
 use songe_hello_core::udp::controller::hello_datagram_codec as codec;
 use songe_hello_core::udp::controller::hello_datagram_controller::{
@@ -104,7 +102,23 @@ fn a_framed_echo_request_comes_back_out_of_the_codec_unchanged() {
 fn a_framed_reply_comes_back_out_of_the_codec_unchanged() {
     let datagram = codec::encode_echo_reply(&SESSION, &echo()).expect("a datagram");
 
-    assert_eq!(codec::decode_echo_reply(&datagram).expect("a reply"), echo());
+    assert_eq!(
+        codec::decode_echo_reply(&SESSION, &datagram).expect("a reply"),
+        echo()
+    );
+}
+
+#[test]
+fn a_reply_framed_with_another_session_id_is_refused() {
+    let mut datagram = codec::encode_echo_reply(&SESSION, &echo()).expect("a datagram");
+    datagram[codec::MAGIC_LEN] = b'z';
+
+    let error = codec::decode_echo_reply(&SESSION, &datagram).expect_err("a refusal");
+
+    assert!(matches!(
+        error,
+        codec::HelloDatagramCodecError::UnknownSession { .. }
+    ));
 }
 
 #[test]
@@ -219,7 +233,7 @@ async fn the_generated_client_round_trips_one_datagram_through_the_generated_dri
         .await
         .expect("a bound socket");
 
-    let driver = HelloDatagramUdpDriver::new(socket, Arc::new(controller));
+    let driver = HelloDatagramUdpDriver::new(socket, controller);
     let port = driver.local_port().expect("a bound port");
 
     driver.announce().expect("an announced port");
@@ -245,7 +259,7 @@ async fn the_driver_answers_the_health_probe_with_the_zeroed_session_id_it_recei
         .await
         .expect("a bound socket");
 
-    let driver = HelloDatagramUdpDriver::new(socket, Arc::new(controller));
+    let driver = HelloDatagramUdpDriver::new(socket, controller);
     let port = driver.local_port().expect("a bound port");
 
     tokio::spawn(async move {

@@ -235,6 +235,28 @@ func TestTwoMethodsThatFoldToTheSameFunctionHashAreRefusedByName(t *testing.T) {
 	}
 }
 
+func TestTwoServicesInOneProtoFileWhoseRpcsFoldToTheSameFunctionHashAreRefusedByName(t *testing.T) {
+	const first = "songe.collision.v1.Alpha/Ping"
+	const second = "songe.collision.v1.Beta/AabE"
+
+	if udprust.FunctionHash(first) != udprust.FunctionHash(second) {
+		t.Fatalf("%s and %s no longer fold to the same byte", first, second)
+	}
+
+	doc := "syntax = \"proto3\";\n\npackage songe.collision.v1;\n\nservice Alpha {\n  rpc Ping(Ping) returns (Ping);\n}\n\nservice Beta {\n  rpc AabE(Ping) returns (Ping);\n}\n\nmessage Ping {\n  string text = 1;\n}\n"
+
+	_, err := udprust.Generate([]byte(doc), udprust.Options{Service: "songe-hello"})
+	if err == nil {
+		t.Fatal("two services whose rpcs collide were accepted")
+	}
+
+	for _, want := range []string{first, second, "fold to the function hash"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal %q never named %q", err, want)
+		}
+	}
+}
+
 func TestTheCodecRefusesAMissingMagicAShortDatagramAnOversizeOneAWrongVersionAndAnUnknownMethod(t *testing.T) {
 	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
 
@@ -291,12 +313,37 @@ func TestAnRpcReplyingNothingIsNeverAnsweredOnTheWire(t *testing.T) {
 		t.Fatalf("the driver answered a Nothing rpc:\n%s", driver)
 	}
 
-	if !strings.Contains(driver, "Ok(reply) => codec::encode_echo_reply(&session_id, &reply).ok(),") {
+	if !strings.Contains(driver, "Ok(reply) => match codec::encode_echo_reply(&session_id, &reply) {") {
 		t.Fatalf("the driver never answered the echo rpc:\n%s", driver)
 	}
 
 	if !strings.Contains(adapter, "Ok(Nothing::default())") {
 		t.Fatalf("the client waited for an answer to a Nothing rpc:\n%s", adapter)
+	}
+}
+
+func TestTheGeneratedClientConnectsItsSocketAndRefusesAnAnswerCarryingAnotherSessionId(t *testing.T) {
+	adapter := generate(t, udprust.Options{Service: "songe-hello", Side: "app"})["adapter/zz_generated_hello_datagram_udp_client.rs"].Content
+	codec := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})["controller/zz_generated_hello_datagram_codec.rs"].Content
+
+	for _, want := range []string{
+		".connect(&self.address)",
+		"socket.send(&datagram).await.map_err(failing_echo)?;",
+		"codec::decode_echo_reply(&self.session_id, &buffer[..read])",
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Fatalf("the client never carried %q:\n%s", want, adapter)
+		}
+	}
+
+	for _, want := range []string{
+		"UnknownSession {",
+		"if framed.session_id != *session_id {",
+		"if payload.len() > MAX_PAYLOAD_LEN {",
+	} {
+		if !strings.Contains(codec, want) {
+			t.Fatalf("the codec never carried %q:\n%s", want, codec)
+		}
 	}
 }
 
@@ -315,6 +362,10 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 	for _, want := range []string{
 		"const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);",
 		"const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;",
+		"const MAX_PEERS_TOLD_ABOUT_THE_VERSION: usize = 256;",
+		"pub struct HelloDatagramUdpDriver<C: HelloDatagramController> {",
+		"    controller: C,",
+		"if peers_told_about_the_version.len() >= MAX_PEERS_TOLD_ABOUT_THE_VERSION {",
 		"println!(\"LISTENING_UDP {}\", self.local_port()?);",
 		"if peers_told_about_the_version.insert(peer) {",
 		"dropping a datagram from {peer}: function hash {hash} names no rpc",

@@ -1,7 +1,7 @@
 name: udp-rust
 kind: mcp-server
 version: 0.1.0
-description: Emits the rust skeleton of one UDP datagram service from its proto file - prost message types, a codec that frames the udplb layout, a controller trait, a listening driver and a client adapter.
+description: Emits the rust skeleton of one UDP datagram service from its proto file. It writes prost message types, a codec that frames the udplb layout, a controller trait, a listening driver and a client adapter.
 openapi:
   specPath: ./spec.openapi.yaml
 generate:

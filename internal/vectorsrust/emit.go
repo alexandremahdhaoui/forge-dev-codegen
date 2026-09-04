@@ -147,6 +147,18 @@ use {{ .CoreCrate }}::{{ .Datagram.Cell }}::controller::{{ .Datagram.Snake }}_co
 use {{ .CoreCrate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_client::{{ .Datagram.ClientTrait }};
 use {{ .CoreCrate }}::{{ .Datagram.Cell }}::types::context::Context;
 use {{ .CoreCrate }}::{{ .Datagram.Cell }}::types::{{ .Datagram.Snake }}_messages::{{ "{" }}{{ range $i, $t := .Datagram.TypeImports }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        parts.push(current.to_string());
+        source = current.source();
+    }
+
+    parts.join(": ")
+}
 {{ end }}
 {{- if .NeedsBodyMatcher }}
 const UUID_PLACEHOLDER: &str = "<uuid>";
@@ -237,11 +249,13 @@ async fn {{ .Name }}() {
         .await
         .expect("a bound udp socket");
 
-    let driver = {{ .DriverStruct }}::new(socket, std::sync::Arc::new({{ .ControllerVar }}));
+    let driver = {{ .DriverStruct }}::new(socket, {{ .ControllerVar }});
     let port = driver.local_port().expect("a bound udp port");
 
     tokio::spawn(async move {
-        let _ = driver.serve().await;
+        if let Err(error) = driver.serve().await {
+            eprintln!("serving {{ .DriverStruct }}: {}", error_chain(&error));
+        }
     });
 
     let client = {{ .ClientStruct }}::new(format!("127.0.0.1:{port}"), {{ .SessionLiteral }});

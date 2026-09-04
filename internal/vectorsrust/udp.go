@@ -157,7 +157,7 @@ func buildDatagramServiceView(svc *datagramService) datagramServiceView {
 		ClientTrait:   svc.ClientTrait,
 		ClientStruct:  svc.Pascal + "UdpClient",
 		DriverStruct:  svc.Pascal + "UdpDriver",
-		ControllerVar: svc.Snake + "_datagram_controller",
+		ControllerVar: svc.Snake + "_controller",
 	}
 
 	types := map[string]bool{}
@@ -209,7 +209,7 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 	return datagramTestView{
 		Name:            c.Case,
 		ServicePascal:   svc.Pascal,
-		ControllerVar:   svc.Snake + "_datagram_controller",
+		ControllerVar:   svc.Snake + "_controller",
 		ExpectMethod:    "expect_" + rpc.Ident,
 		RequestLiteral:  request,
 		ReplyLiteral:    reply,

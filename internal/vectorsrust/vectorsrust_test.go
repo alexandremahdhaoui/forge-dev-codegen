@@ -551,9 +551,10 @@ func TestADatagramVectorDrivesTheGeneratedUdpDriverOverAMockedController(t *test
 		"async fn a_datagram_echo_comes_back_with_the_count_raised_by_one() {",
 		"let expected_request = Echo { payload: \"songe\".to_string(), count: 7 };",
 		"let controller_reply = Echo { payload: \"songe\".to_string(), count: 8 };",
-		"let mut hello_datagram_datagram_controller = MockHelloDatagramController::new();",
+		"let mut hello_datagram_controller = MockHelloDatagramController::new();",
 		"tokio::net::UdpSocket::bind(\"127.0.0.1:0\")",
-		"HelloDatagramUdpDriver::new(socket, std::sync::Arc::new(hello_datagram_datagram_controller))",
+		"HelloDatagramUdpDriver::new(socket, hello_datagram_controller)",
+		"eprintln!(\"serving HelloDatagramUdpDriver: {}\", error_chain(&error));",
 		"HelloDatagramUdpClient::new(format!(\"127.0.0.1:{port}\"), *b\"0123456789abcdef\")",
 		"assert_eq!(reply, Echo { payload: \"songe\".to_string(), count: 8 });",
 	} {

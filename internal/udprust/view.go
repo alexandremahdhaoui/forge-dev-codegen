@@ -182,17 +182,10 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options) (
 	}
 
 	seenTrait := map[string]bool{}
-	byHash := map[uint8]string{}
 
 	for _, r := range svc.Rpcs {
 		fullMethod := spec.Package + "." + svc.Name + "/" + r.Name
 		hash := FunctionHash(fullMethod)
-
-		if other, taken := byHash[hash]; taken {
-			return serviceView{}, fmt.Errorf("hashing the methods of service %q: %s and %s both fold to the function hash %d, rename one of them", svc.Name, other, fullMethod, hash)
-		}
-
-		byHash[hash] = fullMethod
 
 		sv.Rpcs = append(sv.Rpcs, rpcView{
 			Ident:      grpcrust.RustIdent(r.Name),

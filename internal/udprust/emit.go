@@ -106,10 +106,21 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		entries[layer] = append(entries[layer], entry)
 	}
 
+	methodByHash := map[uint8]string{}
+
 	for _, svc := range spec.Services {
 		v, err := buildServiceView(spec, svc, opts)
 		if err != nil {
 			return nil, err
+		}
+
+		for _, rpc := range v.Rpcs {
+			other, taken := methodByHash[rpc.Hash]
+			if taken {
+				return nil, fmt.Errorf("hashing the methods of package %q: %s and %s both fold to the function hash %d, rename one of them", spec.Package, other, rpc.FullMethod, rpc.Hash)
+			}
+
+			methodByHash[rpc.Hash] = rpc.FullMethod
 		}
 
 		steps := []func() error{
@@ -348,6 +359,12 @@ pub enum {{ .CodecError }} {
     Version { length: usize, got: u8 },
     #[error("reading a datagram of {length} bytes: function hash {hash} names no rpc of {{ .ServicePascal }}")]
     UnknownMethod { length: usize, hash: u8 },
+    #[error("reading a datagram of {length} bytes: it carries session id {got:?}, this caller opened session {expected:?}")]
+    UnknownSession {
+        length: usize,
+        expected: [u8; SESSION_ID_LEN],
+        got: [u8; SESSION_ID_LEN],
+    },
     #[error("decoding the {operation} payload of a datagram")]
     Payload {
         operation: &'static str,
@@ -455,20 +472,21 @@ fn seal<M: Message>(
     hash: u8,
     message: &M,
 ) -> Result<Vec<u8>, {{ .CodecError }}> {
-    let out = frame(session_id, hash, &message.encode_to_vec());
+    let payload = message.encode_to_vec();
 
-    if out.len() > MAX_DATAGRAM_LEN {
+    if payload.len() > MAX_PAYLOAD_LEN {
         return Err({{ .CodecError }}::Oversize {
             operation,
-            length: out.len(),
+            length: HEADER_LEN + payload.len(),
         });
     }
 
-    Ok(out)
+    Ok(frame(session_id, hash, &payload))
 }
 
 fn open<M: Message + Default>(
     operation: &'static str,
+    session_id: &[u8; SESSION_ID_LEN],
     expected: u8,
     datagram: &[u8],
 ) -> Result<M, {{ .CodecError }}> {
@@ -478,6 +496,14 @@ fn open<M: Message + Default>(
         return Err({{ .CodecError }}::Version {
             length: datagram.len(),
             got: framed.version,
+        });
+    }
+
+    if framed.session_id != *session_id {
+        return Err({{ .CodecError }}::UnknownSession {
+            length: datagram.len(),
+            expected: *session_id,
+            got: framed.session_id,
         });
     }
 
@@ -505,8 +531,11 @@ pub fn encode_{{ .Ident }}_reply(
     seal({{ .Upper }}_METHOD, session_id, {{ .Upper }}_HASH, reply)
 }
 
-pub fn decode_{{ .Ident }}_reply(datagram: &[u8]) -> Result<{{ .Reply }}, {{ $.CodecError }}> {
-    open({{ .Upper }}_METHOD, {{ .Upper }}_HASH, datagram)
+pub fn decode_{{ .Ident }}_reply(
+    session_id: &[u8; SESSION_ID_LEN],
+    datagram: &[u8],
+) -> Result<{{ .Reply }}, {{ $.CodecError }}> {
+    open({{ .Upper }}_METHOD, session_id, {{ .Upper }}_HASH, datagram)
 }
 {{ end -}}
 {{ end -}}
@@ -535,7 +564,6 @@ pub fn {{ .Ident }}(
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use {{ .CoreCrate }}::{{ .Cell }}::controller::{{ .ServiceSnake }}_codec as codec;
@@ -544,6 +572,7 @@ use {{ .CoreCrate }}::{{ .Cell }}::types::context::Context;
 
 const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);
 const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;
+const MAX_PEERS_TOLD_ABOUT_THE_VERSION: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
 #[error("receiving on the udp socket {address} failed {count} times in a row")]
@@ -554,13 +583,13 @@ pub struct {{ .DriverError }} {
     source: std::io::Error,
 }
 
-pub struct {{ .DriverStruct }} {
+pub struct {{ .DriverStruct }}<C: {{ .ControllerTrait }}> {
     socket: tokio::net::UdpSocket,
-    controller: Arc<dyn {{ .ControllerTrait }}>,
+    controller: C,
 }
 
-impl {{ .DriverStruct }} {
-    pub fn new(socket: tokio::net::UdpSocket, controller: Arc<dyn {{ .ControllerTrait }}>) -> Self {
+impl<C: {{ .ControllerTrait }}> {{ .DriverStruct }}<C> {
+    pub fn new(socket: tokio::net::UdpSocket, controller: C) -> Self {
         Self { socket, controller }
     }
 
@@ -583,7 +612,8 @@ impl {{ .DriverStruct }} {
 
         let mut buffer = [0u8; codec::MAX_DATAGRAM_LEN + 1];
         let mut consecutive_recv_errors = 0usize;
-        let mut peers_told_about_the_version: HashSet<SocketAddr> = HashSet::new();
+        let mut peers_told_about_the_version: HashSet<SocketAddr> =
+            HashSet::with_capacity(MAX_PEERS_TOLD_ABOUT_THE_VERSION);
 
         loop {
             let (read, peer) = match self.socket.recv_from(&mut buffer).await {
@@ -618,6 +648,10 @@ impl {{ .DriverStruct }} {
             let (session_id, request) = match codec::decode_request(datagram) {
                 Ok(decoded) => decoded,
                 Err(codec::{{ .CodecError }}::Version { got, .. }) => {
+                    if peers_told_about_the_version.len() >= MAX_PEERS_TOLD_ABOUT_THE_VERSION {
+                        peers_told_about_the_version.clear();
+                    }
+
                     if peers_told_about_the_version.insert(peer) {
                         eprintln!(
                             "dropping datagrams from {peer}: they speak schema version {got}, this build speaks {}",
@@ -644,9 +678,26 @@ impl {{ .DriverStruct }} {
 {{- if .Silent }}
                         Ok(_) => None,
 {{- else }}
-                        Ok(reply) => codec::encode_{{ .Ident }}_reply(&session_id, &reply).ok(),
+                        Ok(reply) => match codec::encode_{{ .Ident }}_reply(&session_id, &reply) {
+                            Ok(answer) => Some(answer),
+                            Err(error) => {
+                                eprintln!(
+                                    "dropping a reply to {peer}: encoding {{ .FullMethod }}: {}",
+                                    error_chain(&error)
+                                );
+
+                                None
+                            }
+                        },
 {{- end }}
-                        Err(_) => None,
+                        Err(error) => {
+                            eprintln!(
+                                "dropping a datagram from {peer}: running {{ .FullMethod }}: {}",
+                                error_chain(&error)
+                            );
+
+                            None
+                        }
                     }
                 }
 {{- end }}
@@ -665,6 +716,18 @@ async fn send(socket: &tokio::net::UdpSocket, answer: &[u8], peer: SocketAddr, a
     if let Err(source) = socket.send_to(answer, peer).await {
         eprintln!("sending a udp answer from {address} to {peer}: {source}");
     }
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        parts.push(current.to_string());
+        source = current.source();
+    }
+
+    parts.join(": ")
 }
 {{ end -}}
 
@@ -715,9 +778,11 @@ impl {{ .ClientTrait }} for {{ .ClientStruct }} {
             .map_err(failing_{{ .Ident }})?;
 
         socket
-            .send_to(&datagram, &self.address)
+            .connect(&self.address)
             .await
             .map_err(failing_{{ .Ident }})?;
+
+        socket.send(&datagram).await.map_err(failing_{{ .Ident }})?;
 {{ if .Silent }}
         Ok({{ .Reply }}::default())
 {{- else }}
@@ -728,7 +793,8 @@ impl {{ .ClientTrait }} for {{ .ClientStruct }} {
             .map_err(failing_{{ .Ident }})?
             .map_err(failing_{{ .Ident }})?;
 
-        codec::decode_{{ .Ident }}_reply(&buffer[..read]).map_err(failing_{{ .Ident }})
+        codec::decode_{{ .Ident }}_reply(&self.session_id, &buffer[..read])
+            .map_err(failing_{{ .Ident }})
 {{- end }}
     }
 {{ end -}}
