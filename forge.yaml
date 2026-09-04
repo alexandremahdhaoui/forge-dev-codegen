@@ -140,6 +140,33 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-no-comment-lint
+    src: ./cmd/no-comment-lint
+    engine: forge://forge-dev
+
+  - name: no-comment-lint
+    src: ./cmd/no-comment-lint
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-goldenpath-lint
+    src: ./cmd/goldenpath-lint
+    engine: forge://forge-dev
+
+  - name: goldenpath-lint
+    src: ./cmd/goldenpath-lint
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: gen-forge-lint
+    src: ./cmd/forge-lint
+    engine: forge://forge-dev
+
+  - name: forge-lint
+    src: ./cmd/forge-lint
+    dest: ./build/bin
+    engine: forge://go-build
+
   # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
   # through forge:// resolution, pinned by the unit stage against the built
   # binary. Same handlers file as the builtin cell: the swap is the point.
