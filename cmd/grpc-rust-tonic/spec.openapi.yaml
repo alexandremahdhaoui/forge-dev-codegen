@@ -35,11 +35,14 @@ components:
         surface:
           type: object
           additionalProperties: true
-          description: The kind's surface. coreDir and appDir may be given here instead of at the top level.
+          description: The kind's surface. side picks core or app. cell names the module directory and defaults to grpc.
         runtime:
           type: object
           additionalProperties: true
           description: The runnable inputs. Unused here.
+        openapiSpec:
+          type: string
+          description: Unused. This engine reads the proto document.
         protoSpec:
           type: string
           description: The raw proto3 document. Its package, messages and services decide everything emitted.
@@ -48,13 +51,13 @@ components:
           description: The source checksum forge-dev computed.
         srcDir:
           type: string
-          description: The engine source directory. Unused here.
+          description: The cell directory. Every emitted path is relative to it.
         coreDir:
           type: string
-          description: The root of the core crate, relative to the engine source directory. Absent means core.
+          description: Unused. A cell lives in the crate that mounts it.
         appDir:
           type: string
-          description: The root of the app crate, relative to the engine source directory. Absent means app.
+          description: Unused. A cell lives in the crate that mounts it.
       required:
         - name
         - kind
