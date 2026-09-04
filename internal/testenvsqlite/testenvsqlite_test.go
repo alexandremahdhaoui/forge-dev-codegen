@@ -103,8 +103,18 @@ func TestStoresRefusesADocumentThatIsNotYaml(t *testing.T) {
 	}
 }
 
+func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
+	doc := "components:\n  schemas:\n    \"Bad; DROP\":\n      x-store: true\n    \"9Lives\":\n      x-store: true\n"
+
+	for _, name := range []string{"Bad; DROP", "9Lives"} {
+		if _, err := Stores([]byte(doc), []string{name}); err == nil {
+			t.Errorf("%q must be refused as a table name", name)
+		}
+	}
+}
+
 func TestDDLMatchesTheSchemaTheHexagonalRustSqliteAdapterCreates(t *testing.T) {
-	want := "CREATE TABLE IF NOT EXISTS greeting (id TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
+	want := "CREATE TABLE IF NOT EXISTS \"greeting\" (id TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
 		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
 
 	if got := DDL("greeting"); got != want {
@@ -198,7 +208,7 @@ func TestSeedsRefusesABrokenVectorsFileAndANonObjectReply(t *testing.T) {
 func TestScriptQuotesEveryValueAndWritesOneAuditRowPerSeed(t *testing.T) {
 	script := Script("greeting", []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
 
-	if !strings.Contains(script, "INSERT OR REPLACE INTO greeting (id, body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
+	if !strings.Contains(script, "INSERT OR REPLACE INTO \"greeting\" (id, body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
 		t.Errorf("script:\n%s", script)
 	}
 

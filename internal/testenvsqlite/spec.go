@@ -16,11 +16,14 @@ package testenvsqlite
 
 import (
 	"fmt"
+	"regexp"
 
 	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 )
+
+var tableName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 type Store struct {
 	Name     string
@@ -56,9 +59,14 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 			return nil, fmt.Errorf("finding store %q: the schema is not marked x-store", name)
 		}
 
+		snake := hexrust.Snake(name)
+		if !tableName.MatchString(snake) {
+			return nil, fmt.Errorf("naming the table of store %q: %q is not a table name matching %s", name, snake, tableName)
+		}
+
 		stores = append(stores, Store{
 			Name:     name,
-			Snake:    hexrust.Snake(name),
+			Snake:    snake,
 			Upper:    hexrust.Upper(name),
 			Required: schema.Required,
 		})
