@@ -77,6 +77,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-grpc-rust-tonic
+    src: ./cmd/grpc-rust-tonic
+    engine: forge://forge-dev
+
+  - name: grpc-rust-tonic
+    src: ./cmd/grpc-rust-tonic
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-logging-gen
     src: ./cmd/logging-gen
     engine: forge://forge-dev
