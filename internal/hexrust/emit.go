@@ -274,10 +274,6 @@ type specDocument struct {
 	Components specComponents `json:"components"`
 }
 
-// describe never answers an empty string. The config generator writes the
-// description as a doc comment above the field, and clippy refuses an empty
-// one, so a field a manifest left undescribed would fail the lint gate of
-// the crate that generated it.
 func describe(key specKey, binary string) string {
 	if key.Description != "" {
 		return key.Description
@@ -286,10 +282,6 @@ func describe(key specKey, binary string) string {
 	return "The " + strings.ReplaceAll(key.Key, "_", " ") + " of " + binary
 }
 
-// EnvName and FlagName pin a config key to the binary that reads it. The
-// config generator derives both from the cell name, and a cell is named for
-// the crate, so without these a two binary crate would answer one env name
-// for both and the node would read the crate's name instead of its own.
 func EnvName(binary, key string) string {
 	return strings.ToUpper(rustname.Snake(binary)) + "_" + strings.ToUpper(rustname.Snake(key))
 }

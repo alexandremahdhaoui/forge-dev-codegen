@@ -99,11 +99,6 @@ type specKey struct {
 	Description string
 }
 
-// configKey joins the parts of a config key in snake case. The config
-// generator lowercases a key to spell the Rust field and never splits a
-// camel hump, so greetingStore would reach the loader as greetingstore
-// while the env name still split on the hump. Snake case spells the same
-// on both sides.
 func configKey(parts ...string) string {
 	out := make([]string, 0, len(parts))
 
