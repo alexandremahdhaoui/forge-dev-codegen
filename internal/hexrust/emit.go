@@ -28,6 +28,7 @@ type Options struct {
 	Service string
 	CoreDir string
 	AppDir  string
+	Side    string
 }
 
 type File struct {
@@ -49,6 +50,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		opts.AppDir = "app"
 	}
 
+	if opts.Side != "" && opts.Side != "core" && opts.Side != "app" {
+		return nil, fmt.Errorf("emitting the skeleton: side must be core, app or empty, got %q", opts.Side)
+	}
+
 	spec, err := Parse(doc)
 	if err != nil {
 		return nil, err
@@ -60,7 +65,11 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 	files := []File{}
 
-	add := func(p, name string, data any, writeOnce bool) error {
+	add := func(side, p, name string, data any, writeOnce bool) error {
+		if opts.Side != "" && opts.Side != side {
+			return nil
+		}
+
 		content, err := render(name, data)
 		if err != nil {
 			return err
@@ -72,23 +81,27 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	steps := []func() error{
-		func() error { return add(path.Join(core, "lib.rs"), "core_lib", v, false) },
-		func() error { return add(path.Join(core, "zz_generated_hand.rs"), "core_hand", v, false) },
-		func() error { return add(path.Join(core, "types", "zz_generated_mod.rs"), "types_mod", v, false) },
-		func() error { return add(path.Join(core, "port", "zz_generated_mod.rs"), "port_mod", v, false) },
-		func() error { return add(path.Join(core, "controller", "zz_generated_mod.rs"), "controller_mod", v, false) },
-		func() error { return add(path.Join(app, "lib.rs"), "app_lib", v, false) },
-		func() error { return add(path.Join(app, "adapter", "zz_generated_mod.rs"), "adapter_mod", v, false) },
-		func() error { return add(path.Join(app, "driver", "zz_generated_mod.rs"), "driver_mod", v, false) },
-		func() error { return add(path.Join(app, "driver", "zz_generated_wire.rs"), "wire", v, false) },
-		func() error { return add(path.Join(app, "driver", "zz_generated_http_driver.rs"), "http_driver", v, false) },
-		func() error { return add(path.Join(app, "bin", v.Service+"-server.rs"), "server_main", v, false) },
+		func() error { return add("core", path.Join(core, "lib.rs"), "core_lib", v, false) },
+		func() error { return add("core", path.Join(core, "zz_generated_hand.rs"), "core_hand", v, false) },
+		func() error { return add("core", path.Join(core, "types", "zz_generated_mod.rs"), "types_mod", v, false) },
+		func() error { return add("core", path.Join(core, "port", "zz_generated_mod.rs"), "port_mod", v, false) },
+		func() error {
+			return add("core", path.Join(core, "controller", "zz_generated_mod.rs"), "controller_mod", v, false)
+		},
+		func() error { return add("app", path.Join(app, "lib.rs"), "app_lib", v, false) },
+		func() error { return add("app", path.Join(app, "adapter", "zz_generated_mod.rs"), "adapter_mod", v, false) },
+		func() error { return add("app", path.Join(app, "driver", "zz_generated_mod.rs"), "driver_mod", v, false) },
+		func() error { return add("app", path.Join(app, "driver", "zz_generated_wire.rs"), "wire", v, false) },
+		func() error {
+			return add("app", path.Join(app, "driver", "zz_generated_http_driver.rs"), "http_driver", v, false)
+		},
+		func() error { return add("app", path.Join(app, "bin", v.Service+"-server.rs"), "server_main", v, false) },
 	}
 
 	for _, t := range v.Types {
 		t := t
 		steps = append(steps, func() error {
-			return add(path.Join(core, "types", "zz_generated_"+t.Snake+".rs"), "type", map[string]any{"Header": header, "Type": t}, false)
+			return add("core", path.Join(core, "types", "zz_generated_"+t.Snake+".rs"), "type", map[string]any{"Header": header, "Type": t}, false)
 		})
 	}
 
@@ -96,10 +109,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		s := s
 		steps = append(steps,
 			func() error {
-				return add(path.Join(core, "port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": header, "Store": s}, false)
+				return add("core", path.Join(core, "port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": header, "Store": s}, false)
 			},
 			func() error {
-				return add(path.Join(app, "adapter", "zz_generated_"+s.Snake+"_sqlite.rs"), "sqlite", map[string]any{"Header": header, "Store": s, "CoreCrate": v.CoreCrate}, false)
+				return add("app", path.Join(app, "adapter", "zz_generated_"+s.Snake+"_sqlite.rs"), "sqlite", map[string]any{"Header": header, "Store": s, "CoreCrate": v.CoreCrate}, false)
 			},
 		)
 	}
@@ -108,10 +121,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		c := c
 		steps = append(steps,
 			func() error {
-				return add(path.Join(core, "controller", "zz_generated_"+c.Snake+"_controller.rs"), "controller", map[string]any{"Header": header, "Controller": c}, false)
+				return add("core", path.Join(core, "controller", "zz_generated_"+c.Snake+"_controller.rs"), "controller", map[string]any{"Header": header, "Controller": c}, false)
 			},
 			func() error {
-				return add(path.Join(core, "hand", c.Snake+"_controller.rs"), "hand", map[string]any{"Controller": c}, true)
+				return add("core", path.Join(core, "hand", c.Snake+"_controller.rs"), "hand", map[string]any{"Controller": c}, true)
 			},
 		)
 	}

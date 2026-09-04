@@ -55,6 +55,9 @@ components:
         appDir:
           type: string
           description: The root of the app crate, relative to the engine source directory. Absent means app.
+        side:
+          type: string
+          description: Which crate to answer. core, app, or absent for both. A cell inside one crate names its own side.
       required:
         - name
         - kind

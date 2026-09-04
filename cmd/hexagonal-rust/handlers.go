@@ -38,6 +38,7 @@ func NewHandlers() Handlers {
 				Service: input.Name,
 				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
 				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
+				Side:    firstOf(input.Side, surfaceString(input.Surface, "side")),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)

@@ -309,6 +309,41 @@ func TestEveryGeneratedFileCarriesTheHeaderAndOnlyHandFilesAreWriteOnce(t *testi
 	}
 }
 
+func TestASideAnswersOneCrateAtItsOwnRoot(t *testing.T) {
+	tests := []struct {
+		side   string
+		opts   hexrust.Options
+		want   string
+		reject string
+	}{
+		{side: "core", opts: hexrust.Options{Service: "svc", Side: "core", CoreDir: "."}, want: "src/", reject: "app/"},
+		{side: "app", opts: hexrust.Options{Service: "svc", Side: "app", AppDir: "."}, want: "src/", reject: "core/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.side+" side stays inside its crate", func(t *testing.T) {
+			files, err := hexrust.Generate([]byte(oneStoreOneOperation), tt.opts)
+			if err != nil {
+				t.Fatalf("generating: %v", err)
+			}
+
+			if len(files) == 0 {
+				t.Fatal("no files")
+			}
+
+			for _, f := range files {
+				if !strings.HasPrefix(f.Path, tt.want) || strings.HasPrefix(f.Path, tt.reject) {
+					t.Errorf("%s leaks out of the %s side", f.Path, tt.side)
+				}
+			}
+		})
+	}
+
+	if _, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "svc", Side: "both"}); err == nil {
+		t.Error("an unknown side must be refused")
+	}
+}
+
 func TestTheOutputRootsPrefixEveryPath(t *testing.T) {
 	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
 		Service: "songe-hello",

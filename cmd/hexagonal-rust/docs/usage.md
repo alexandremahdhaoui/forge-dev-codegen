@@ -5,20 +5,28 @@ skeleton of one service. Two crates come out. `core` holds types, ports,
 controllers and the hand stubs. `app` holds the sqlite adapters, the axum
 driver and main.
 
+forge-dev never writes outside the engine directory. So each crate holds
+its own cell at its root and names its side.
+
 ```yaml
 name: songe-hello
 kind: hexagonal
 language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/hexagonal-rust
+openapi:
+  specPath: ./.forge/spec-cache/hello.v1.yaml
 surface:
-  coreDir: ../songe-hello-core
-  appDir: ../songe-hello-app
+  side: core
+  coreDir: .
 ```
+
+The app crate says `side: app` and `appDir: .`.
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
 service. `openapiSpec` is the document. `coreDir` and `appDir` are the
 crate roots relative to the engine directory and default to `core` and
-`app`. They may sit at the top level of the model or under `surface`.
+`app`. `side` is `core`, `app` or absent for both. The three may sit at
+the top level of the model or under `surface`.
 
 ## What the spec decides
 
