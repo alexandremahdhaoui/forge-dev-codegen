@@ -73,27 +73,28 @@ type importView struct {
 }
 
 type opView struct {
-	Ident            string
-	Method           string
-	MethodLower      string
-	Path             string
-	Params           []paramView
-	Body             string
-	Response         string
-	ControllerSnake  string
-	ControllerPascal string
-	Ports            []storeView
-	TraitArgs        string
-	ReturnType       string
-	HandGenerics     string
-	HandParams       string
-	HandCall         string
-	Unused           string
-	Extractors       string
-	ControllerCall   string
-	StatusExpr       string
-	HandlerReturn    string
-	OkExpr           string
+	Ident             string
+	Method            string
+	MethodLower       string
+	Path              string
+	Params            []paramView
+	Body              string
+	Response          string
+	ControllerSnake   string
+	ControllerPascal  string
+	Ports             []storeView
+	TraitArgs         string
+	ReturnType        string
+	HandGenerics      string
+	HandParams        string
+	HandCall          string
+	Unused            string
+	Extractors        string
+	ControllerCall    string
+	StatusExpr        string
+	InvalidStatusExpr string
+	HandlerReturn     string
+	OkExpr            string
 }
 
 type controllerView struct {
@@ -333,16 +334,17 @@ func genericArgs(ports []storeView) string {
 
 func buildOpView(op Operation, c Controller, storesByPort map[string]storeView) opView {
 	ov := opView{
-		Ident:            op.Ident,
-		Method:           op.Method,
-		MethodLower:      op.MethodLower,
-		Path:             op.Path,
-		Body:             op.Body,
-		Response:         op.Response,
-		ControllerSnake:  c.Snake,
-		ControllerPascal: c.Pascal,
-		ReturnType:       "()",
-		StatusExpr:       statusExpr(op.Status),
+		Ident:             op.Ident,
+		Method:            op.Method,
+		MethodLower:       op.MethodLower,
+		Path:              op.Path,
+		Body:              op.Body,
+		Response:          op.Response,
+		ControllerSnake:   c.Snake,
+		ControllerPascal:  c.Pascal,
+		ReturnType:        "()",
+		StatusExpr:        statusExpr(op.Status),
+		InvalidStatusExpr: statusExpr(op.InvalidStatus),
 	}
 
 	if op.Response != "" {
@@ -445,6 +447,12 @@ func statusExpr(status int) string {
 		return "StatusCode::ACCEPTED"
 	case 204:
 		return "StatusCode::NO_CONTENT"
+	case 400:
+		return "StatusCode::BAD_REQUEST"
+	case 404:
+		return "StatusCode::NOT_FOUND"
+	case 422:
+		return "StatusCode::UNPROCESSABLE_ENTITY"
 	default:
 		return fmt.Sprintf("StatusCode::from_u16(%d).unwrap_or(StatusCode::OK)", status)
 	}

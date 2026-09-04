@@ -116,18 +116,19 @@ type Param struct {
 }
 
 type Operation struct {
-	ID          string
-	Ident       string
-	Summary     string
-	Method      string
-	MethodLower string
-	Path        string
-	Params      []Param
-	Body        string
-	Response    string
-	Status      int
-	Controller  string
-	Ports       []string
+	ID            string
+	Ident         string
+	Summary       string
+	Method        string
+	MethodLower   string
+	Path          string
+	Params        []Param
+	Body          string
+	Response      string
+	Status        int
+	InvalidStatus int
+	Controller    string
+	Ports         []string
 }
 
 type Controller struct {
@@ -409,18 +410,19 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 	}
 
 	return Operation{
-		ID:          op.OperationID,
-		Ident:       Snake(op.OperationID),
-		Summary:     op.Summary,
-		Method:      strings.ToUpper(method),
-		MethodLower: method,
-		Path:        path,
-		Params:      params,
-		Body:        body,
-		Response:    response,
-		Status:      status,
-		Controller:  op.Controller,
-		Ports:       ports,
+		ID:            op.OperationID,
+		Ident:         Snake(op.OperationID),
+		Summary:       op.Summary,
+		Method:        strings.ToUpper(method),
+		MethodLower:   method,
+		Path:          path,
+		Params:        params,
+		Body:          body,
+		Response:      response,
+		Status:        status,
+		InvalidStatus: invalidStatus(op),
+		Controller:    op.Controller,
+		Ports:         ports,
 	}, nil
 }
 
@@ -503,6 +505,19 @@ func parseResponse(where string, op operation, schemas map[string]schema) (strin
 	}
 
 	return "", 0, fmt.Errorf("reading %s: a 2xx response is required", where)
+}
+
+func invalidStatus(op operation) int {
+	for _, candidate := range []struct {
+		code   string
+		status int
+	}{{"422", 422}, {"400", 400}} {
+		if _, ok := op.Responses[candidate.code]; ok {
+			return candidate.status
+		}
+	}
+
+	return 400
 }
 
 func groupControllers(ops []Operation) []Controller {

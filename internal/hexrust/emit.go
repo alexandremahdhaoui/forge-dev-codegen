@@ -582,7 +582,7 @@ impl HttpDriver {
     }
 }
 {{ range .Controllers }}{{ $c := . }}
-fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError) -> Rejection {
+fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusCode) -> Rejection {
     match error {
 {{- range $c.Ports }}
         {{ $c.Pascal }}ControllerError::{{ .Port }} { .. } => {
@@ -591,7 +591,7 @@ fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError) -> Rejection {
         }
 {{- end }}
         {{ $c.Pascal }}ControllerError::NotFound { .. } => reject(StatusCode::NOT_FOUND, "semantic", error.to_string()),
-        {{ $c.Pascal }}ControllerError::Invalid { .. } => reject(StatusCode::BAD_REQUEST, "validation", error.to_string()),
+        {{ $c.Pascal }}ControllerError::Invalid { .. } => reject(invalid, "validation", error.to_string()),
         {{ $c.Pascal }}ControllerError::NotImplemented { .. } => reject(StatusCode::NOT_IMPLEMENTED, "runtime", error.to_string()),
     }
 }
@@ -602,12 +602,12 @@ async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
     let out = driver
         .{{ .ControllerSnake }}_controller
         .{{ .Ident }}({{ .ControllerCall }})
-        .map_err(reject_{{ .ControllerSnake }})?;
+        .map_err(|error| reject_{{ .ControllerSnake }}(error, {{ .InvalidStatusExpr }}))?;
 {{- else }}
     driver
         .{{ .ControllerSnake }}_controller
         .{{ .Ident }}({{ .ControllerCall }})
-        .map_err(reject_{{ .ControllerSnake }})?;
+        .map_err(|error| reject_{{ .ControllerSnake }}(error, {{ .InvalidStatusExpr }}))?;
 {{- end }}
     Ok({{ .OkExpr }})
 }

@@ -562,6 +562,38 @@ func TestANameRustOrSQLCannotSpellIsRefusedBeforeItReachesTheOutput(t *testing.T
 	}
 }
 
+func TestTheDriverAnswersTheStatusTheSpecDeclaresForAnInvalidRequest(t *testing.T) {
+	with422 := strings.Replace(oneStoreOneOperation, "      responses:\n", "      responses:\n        \"422\":\n          description: refused\n", 1)
+	with400 := strings.Replace(oneStoreOneOperation, "      responses:\n", "      responses:\n        \"400\":\n          description: refused\n", 1)
+	withBoth := strings.Replace(with422, "      responses:\n", "      responses:\n        \"400\":\n          description: refused\n", 1)
+
+	tests := []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{"a declared 422 answers 422", with422, "reject_greeting(error, StatusCode::UNPROCESSABLE_ENTITY)"},
+		{"a declared 400 answers 400", with400, "reject_greeting(error, StatusCode::BAD_REQUEST)"},
+		{"422 wins when both are declared", withBoth, "reject_greeting(error, StatusCode::UNPROCESSABLE_ENTITY)"},
+		{"no declared 4xx falls back to 400", oneStoreOneOperation, "reject_greeting(error, StatusCode::BAD_REQUEST)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := hexrust.Generate([]byte(tt.doc), hexrust.Options{Service: "svc", Side: "app"})
+			if err != nil {
+				t.Fatalf("generating: %v", err)
+			}
+
+			for _, f := range files {
+				if strings.HasSuffix(f.Path, "zz_generated_http_driver.rs") && !strings.Contains(f.Content, tt.want) {
+					t.Errorf("the driver lacks %q\n%s", tt.want, f.Content)
+				}
+			}
+		})
+	}
+}
+
 func TestNamesFollowRustCasing(t *testing.T) {
 	tests := []struct {
 		in     string
