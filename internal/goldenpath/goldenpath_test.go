@@ -158,6 +158,65 @@ func TestAnAppCellHoldsAdapterAndDriverAndItsProtoDirectoryIsNotALayer(t *testin
 	}
 }
 
+func TestAnAppCellKeepsItsHandDirectoryLikeACoreCellDoes(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-app-cell-clean",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if hasRule(findings, "rust-cell-layout") {
+		t.Fatalf("an app cell hand directory must not be flagged, got %+v", findings)
+	}
+}
+
+func TestALayerModFileTheRootCellOwnsIsNotAHandWrittenFileOutsideHand(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-clean",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if hasRule(findings, "rust-hand-written-outside-hand") {
+		t.Fatalf("a layer mod file must not be flagged, got %+v", findings)
+	}
+}
+
+func TestCheckFlagsAPathAttributeInARustFileUnderSrc(t *testing.T) {
+	findings, err := goldenpath.Check(goldenpath.Options{
+		Layout:  goldenpath.LayoutRustCoreApp,
+		RootDir: "testdata/rust-core-path-attribute",
+	})
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if !hasRule(findings, "rust-no-path-attribute") {
+		t.Fatalf("expected a rust-no-path-attribute finding, got %+v", findings)
+	}
+}
+
+func TestACleanCrateCarriesNoPathAttributeFinding(t *testing.T) {
+	for _, root := range []string{
+		"testdata/rust-core-clean",
+		"testdata/rust-app-clean",
+		"testdata/rust-core-cell-clean",
+		"testdata/rust-app-cell-clean",
+	} {
+		findings, err := goldenpath.Check(goldenpath.Options{
+			Layout:  goldenpath.LayoutRustCoreApp,
+			RootDir: root,
+		})
+		if err != nil {
+			t.Fatalf("checking %s: %v", root, err)
+		}
+		if hasRule(findings, "rust-no-path-attribute") {
+			t.Fatalf("%s must carry no path attribute finding, got %+v", root, findings)
+		}
+	}
+}
+
 func TestACellThatHoldsRustOutsideItsLayersIsFlagged(t *testing.T) {
 	findings, err := goldenpath.Check(goldenpath.Options{
 		Layout:  goldenpath.LayoutRustCoreApp,

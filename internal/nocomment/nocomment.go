@@ -262,7 +262,7 @@ func extractComments(lang string, content string) []rawComment {
 				start := i
 				startLine := line
 				i += 2
-				for i+1 < n && !(runes[i] == '*' && runes[i+1] == '/') {
+				for i+1 < n && (runes[i] != '*' || runes[i+1] != '/') {
 					if runes[i] == '\n' {
 						line++
 					}

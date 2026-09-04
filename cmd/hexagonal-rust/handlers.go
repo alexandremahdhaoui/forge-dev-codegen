@@ -39,12 +39,18 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
+			hand, err := hexrust.HandFromSurface(input.Surface)
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := hexrust.Generate([]byte(input.OpenapiSpec), hexrust.Options{
 				Service: input.Name,
 				CoreDir: firstOf(input.CoreDir, surfaceString(input.Surface, "coreDir")),
 				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
 				Side:    firstOf(input.Side, surfaceString(input.Surface, "side")),
 				Cells:   cells,
+				Hand:    hand,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)

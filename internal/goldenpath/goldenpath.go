@@ -193,6 +193,57 @@ func checkRustCoreApp(rootDir string) ([]Finding, error) {
 	}
 	findings = append(findings, handFindings...)
 
+	pathFindings, err := checkPathAttribute(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, pathFindings...)
+
+	return findings, nil
+}
+
+func checkPathAttribute(rootDir string) ([]Finding, error) {
+	var findings []Finding
+
+	srcDir := filepath.Join(rootDir, "src")
+	if !dirExists(srcDir) {
+		return findings, nil
+	}
+
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".rs") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %q: %w", path, err)
+		}
+
+		if !strings.Contains(string(content), "#[path") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+
+		findings = append(findings, Finding{
+			Rule:    "rust-no-path-attribute",
+			Path:    filepath.ToSlash(rel),
+			Message: "a module is mounted with a path attribute, write a real mod.rs beside the files instead",
+		})
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking %q: %w", srcDir, err)
+	}
+
 	return findings, nil
 }
 
@@ -200,7 +251,7 @@ const cellMarker = "forge-dev.yaml"
 
 var coreCellLayers = []string{"port", "controller", "types", "hand"}
 
-var appCellLayers = []string{"adapter", "driver"}
+var appCellLayers = []string{"adapter", "driver", "hand"}
 
 func cellNames(rootDir string) ([]string, error) {
 	srcDir := filepath.Join(rootDir, "src")
@@ -289,6 +340,20 @@ func treeHasRust(dir string) (bool, error) {
 	}
 
 	return found, nil
+}
+
+func rootCellOwnsTheModFile(rel string) bool {
+	if filepath.Base(rel) != "mod.rs" {
+		return false
+	}
+
+	for _, layer := range append(append([]string{}, coreCellLayers...), appCellLayers...) {
+		if rel == layer+"/mod.rs" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func cellAllowsHandWritten(rel string, cells []string) bool {
@@ -409,14 +474,14 @@ func checkHandWrittenFiles(rootDir string, cells []string) ([]Finding, error) {
 		if strings.HasPrefix(filepath.Base(path), "zz_generated") {
 			return nil
 		}
-		if cellAllowsHandWritten(rel, cells) {
+		if rootCellOwnsTheModFile(rel) || cellAllowsHandWritten(rel, cells) {
 			return nil
 		}
 
 		findings = append(findings, Finding{
 			Rule:    "rust-hand-written-outside-hand",
 			Path:    filepath.Join("src", rel),
-			Message: "hand written Rust file must live under src/hand, be src/lib.rs, be under src/bin, or be a cell's mod.rs or hand file",
+			Message: "hand written Rust file must live under src/hand, be src/lib.rs, be under src/bin, or be a layer or cell mod.rs or hand file",
 		})
 		return nil
 	})

@@ -39,6 +39,25 @@ own `mod.rs`.
 A name Rust cannot spell as a module is refused. So is a name the
 skeleton already owns, and a name listed twice.
 
+## Extra hand modules
+
+`surface.hand` lists module names under `src/hand` that the author writes
+and the spec does not declare.
+
+```yaml
+surface:
+  side: core
+  coreDir: .
+  hand: [echo_controller, datagram]
+```
+
+`src/hand/mod.rs` gains one plain `pub mod <name>;` line each, beside the
+controller stubs. The modules are siblings, so one reaches another with
+`crate::hand::<name>`.
+
+A name Rust cannot spell as a module is refused. So is `mod`, a name
+listed twice, and a controller the spec already declares.
+
 ## What the spec decides
 
 | Spec | Emitted |
@@ -62,10 +81,12 @@ prints `LISTENING <port>` once bound.
 
 ## Files and names
 
-Every file except a hand stub is named `zz_generated_*` and starts with the
-generated header. `core/src/lib.rs`, `app/src/lib.rs` and the server
-binary keep the names cargo needs. Modules are mounted with `#[path]` so
-no file needs to be named `mod.rs`.
+Every file except a hand stub and a `mod.rs` is named `zz_generated_*`.
+Every generated file starts with the generated header. The root cell owns
+one real `mod.rs` per layer directory, so `lib.rs` is plain
+`pub mod <layer>;` lines and no file carries a `#[path]` attribute. A
+layer `mod.rs` names the generated file and aliases it, so
+`crate::types::greeting` reads the same as before.
 
 ## What the crates need
 

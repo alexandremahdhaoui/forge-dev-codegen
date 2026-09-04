@@ -92,10 +92,58 @@ func TestAHandFileThatExistsIsNeverAnsweredAgain(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
+	mounted := false
+
 	for _, f := range out.Files {
+		if f.Path == "core/src/hand/mod.rs" {
+			mounted = true
+
+			continue
+		}
+
 		if strings.Contains(f.Path, "/hand/") {
 			t.Errorf("%s was answered although it exists", f.Path)
 		}
+	}
+
+	if !mounted {
+		t.Error("the hand mount belongs to the generator and is always answered")
+	}
+}
+
+func TestTheSurfaceMountsEveryExtraHandModule(t *testing.T) {
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
+		Surface: map[string]interface{}{"hand": []interface{}{"echo_controller", "datagram"}},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range out.Files {
+		if f.Path != "core/src/hand/mod.rs" {
+			continue
+		}
+
+		for _, want := range []string{"pub mod datagram;", "pub mod echo_controller;"} {
+			if !strings.Contains(f.Content, want) {
+				t.Errorf("the hand mount lacks %q\n%s", want, f.Content)
+			}
+		}
+
+		return
+	}
+
+	t.Fatal("no hand mount was answered")
+}
+
+func TestASurfaceThatMalformsTheHandListIsRefused(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
+		Surface: map[string]interface{}{"hand": "datagram"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "it is a list of module names under src/hand") {
+		t.Fatalf("want a refused hand list, got %v", err)
 	}
 }
 

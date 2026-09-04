@@ -3,8 +3,6 @@ name: forge-dev-codegen
 artifactStorePath: .forge/artifact-store.yaml
 
 build:
-  # The engine: forge-dev generates its MCP surface, go-build makes the
-  # binary a generator: URI resolves to.
   - name: gen-cli-go-cobra
     src: ./cmd/cli-go-cobra
     engine: forge://forge-dev
@@ -176,9 +174,6 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
-  # The proof: a cli whose dispatcher is emitted by cli-go-cobra over real MCP
-  # through forge:// resolution, pinned by the unit stage against the built
-  # binary. Same handlers file as the builtin cell: the swap is the point.
   - name: gen-demo-cli-go-cobra
     src: ./cmd/demo-cli-go-cobra
     engine: forge://forge-dev

@@ -30,6 +30,21 @@ type Options struct {
 	AppDir  string
 	Side    string
 	Cells   []string
+	Hand    []string
+}
+
+var coreLayers = []string{"controller", "hand", "port", "types"}
+
+var appLayers = []string{"adapter", "driver"}
+
+func layerSide(layer string) string {
+	for _, name := range appLayers {
+		if name == layer {
+			return "app"
+		}
+	}
+
+	return "core"
 }
 
 var reservedCellNames = map[string]bool{
@@ -58,35 +73,75 @@ func checkCells(cells []string) error {
 	return nil
 }
 
+func checkHand(hand []string) error {
+	seen := map[string]bool{}
+
+	for _, module := range hand {
+		if module == "mod" {
+			return fmt.Errorf("mounting hand module %q: the hand mount already owns that file, name the module something else", module)
+		}
+
+		if !rustAndSQLIdent.MatchString(module) || rustKeywords[module] {
+			return fmt.Errorf("mounting hand module %q: it is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter", module)
+		}
+
+		if seen[module] {
+			return fmt.Errorf("mounting hand module %q: it is listed twice", module)
+		}
+
+		seen[module] = true
+	}
+
+	return nil
+}
+
 func CellsFromSurface(surface map[string]interface{}) ([]string, error) {
-	raw, ok := surface["cells"]
+	return namesFromSurface(surface, "cells", "module directory names under src")
+}
+
+func HandFromSurface(surface map[string]interface{}) ([]string, error) {
+	return namesFromSurface(surface, "hand", "module names under src/hand")
+}
+
+func namesFromSurface(surface map[string]interface{}, key, what string) ([]string, error) {
+	raw, ok := surface[key]
 	if !ok {
 		return nil, nil
 	}
 
 	entries, ok := raw.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("reading cells: it is a list of module directory names under src")
+		return nil, fmt.Errorf("reading %s: it is a list of %s", key, what)
 	}
 
-	cells := make([]string, 0, len(entries))
+	names := make([]string, 0, len(entries))
 
 	for i, entry := range entries {
 		name, ok := entry.(string)
 		if !ok || name == "" {
-			return nil, fmt.Errorf("reading cells entry %d: it is a name, not %v", i, entry)
+			return nil, fmt.Errorf("reading %s entry %d: it is a name, not %v", key, i, entry)
 		}
 
-		cells = append(cells, name)
+		names = append(names, name)
 	}
 
-	return cells, nil
+	return names, nil
 }
 
 type File struct {
 	Path      string
 	Content   string
 	WriteOnce bool
+}
+
+type modEntry struct {
+	Module string
+	Alias  string
+}
+
+type layerMod struct {
+	Header  string
+	Entries []modEntry
 }
 
 func Generate(doc []byte, opts Options) ([]File, error) {
@@ -111,6 +166,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	if err := checkCells(opts.Cells); err != nil {
+		return nil, fmt.Errorf("emitting the skeleton: %w", err)
+	}
+
+	if err := checkHand(opts.Hand); err != nil {
 		return nil, fmt.Errorf("emitting the skeleton: %w", err)
 	}
 
@@ -140,23 +199,44 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil
 	}
 
+	entries := map[string][]modEntry{
+		"driver": {
+			{Module: "zz_generated_wire", Alias: "wire"},
+			{Module: "zz_generated_http_driver", Alias: "http_driver"},
+		},
+	}
+
+	mount := func(layer string, entry modEntry) {
+		entries[layer] = append(entries[layer], entry)
+	}
+
+	for _, t := range v.Types {
+		mount("types", modEntry{Module: "zz_generated_" + t.Snake, Alias: t.Snake})
+	}
+
+	for _, s := range v.Stores {
+		mount("port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
+		mount("adapter", modEntry{Module: "zz_generated_" + s.Snake + "_sqlite", Alias: s.Snake + "_sqlite"})
+	}
+
+	for _, c := range v.Controllers {
+		mount("controller", modEntry{Module: "zz_generated_" + c.Snake + "_controller", Alias: c.Snake + "_controller"})
+		mount("hand", modEntry{Module: c.Snake + "_controller"})
+	}
+
+	for _, module := range opts.Hand {
+		for _, c := range v.Controllers {
+			if module == c.Snake+"_controller" {
+				return nil, fmt.Errorf("emitting the skeleton: mounting hand module %q: the spec already declares that controller, drop it from the hand list", module)
+			}
+		}
+
+		mount("hand", modEntry{Module: module})
+	}
+
 	steps := []func() error{
 		func() error { return add("core", path.Join(core, "lib.rs"), "core_lib", v, false) },
-		func() error { return add("core", path.Join(core, "zz_generated_hand.rs"), "core_hand", v, false) },
-		func() error {
-			return add("core", path.Join(core, "types", "zz_generated_mod.rs"), "types_mod", v, false)
-		},
-		func() error { return add("core", path.Join(core, "port", "zz_generated_mod.rs"), "port_mod", v, false) },
-		func() error {
-			return add("core", path.Join(core, "controller", "zz_generated_mod.rs"), "controller_mod", v, false)
-		},
 		func() error { return add("app", path.Join(app, "lib.rs"), "app_lib", v, false) },
-		func() error {
-			return add("app", path.Join(app, "adapter", "zz_generated_mod.rs"), "adapter_mod", v, false)
-		},
-		func() error {
-			return add("app", path.Join(app, "driver", "zz_generated_mod.rs"), "driver_mod", v, false)
-		},
 		func() error { return add("app", path.Join(app, "driver", "zz_generated_wire.rs"), "wire", v, false) },
 		func() error {
 			return add("app", path.Join(app, "driver", "zz_generated_http_driver.rs"), "http_driver", v, false)
@@ -197,6 +277,22 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		)
 	}
 
+	for _, layer := range append(append([]string{}, coreLayers...), appLayers...) {
+		layer := layer
+		root := core
+
+		if layerSide(layer) == "app" {
+			root = app
+		}
+
+		mod := layerMod{Header: header, Entries: entries[layer]}
+		sort.Slice(mod.Entries, func(i, j int) bool { return mod.Entries[i].Module < mod.Entries[j].Module })
+
+		steps = append(steps, func() error {
+			return add(layerSide(layer), path.Join(root, layer, "mod.rs"), "layer_mod", mod, false)
+		})
+	}
+
 	for _, step := range steps {
 		if err := step(); err != nil {
 			return nil, err
@@ -221,49 +317,24 @@ var templates = template.Must(template.New("hexrust").Parse(`
 {{- define "core_lib" -}}
 {{ .Header }}
 
-#[path = "types/zz_generated_mod.rs"]
-pub mod types;
-#[path = "port/zz_generated_mod.rs"]
-pub mod port;
-#[path = "controller/zz_generated_mod.rs"]
 pub mod controller;
-#[path = "zz_generated_hand.rs"]
 pub mod hand;
+pub mod port;
+pub mod types;
 {{ range .Cells }}
 pub mod {{ . }};
 {{- end }}
 {{ end -}}
 
-{{- define "core_hand" -}}
+{{- define "layer_mod" -}}
 {{ .Header }}
-{{ range .Controllers }}
-#[path = "hand/{{ .Snake }}_controller.rs"]
-pub mod {{ .Snake }}_controller;
-{{ end -}}
-{{ end -}}
+{{ range .Entries }}
+pub mod {{ .Module }};
+{{- end }}
+{{- range .Entries }}{{ if .Alias }}
 
-{{- define "types_mod" -}}
-{{ .Header }}
-{{ range .Types }}
-#[path = "zz_generated_{{ .Snake }}.rs"]
-pub mod {{ .Snake }};
-{{ end -}}
-{{ end -}}
-
-{{- define "port_mod" -}}
-{{ .Header }}
-{{ range .Stores }}
-#[path = "zz_generated_{{ .PortSnake }}.rs"]
-pub mod {{ .PortSnake }};
-{{ end -}}
-{{ end -}}
-
-{{- define "controller_mod" -}}
-{{ .Header }}
-{{ range .Controllers }}
-#[path = "zz_generated_{{ .Snake }}_controller.rs"]
-pub mod {{ .Snake }}_controller;
-{{ end -}}
+pub use {{ .Module }} as {{ .Alias }};
+{{- end }}{{ end }}
 {{ end -}}
 
 {{- define "type" -}}
@@ -400,30 +471,11 @@ pub fn {{ .Ident }}{{ .HandGenerics }}({{ .HandParams }}) -> Result<{{ .ReturnTy
 {{- define "app_lib" -}}
 {{ .Header }}
 
-#[path = "adapter/zz_generated_mod.rs"]
 pub mod adapter;
-#[path = "driver/zz_generated_mod.rs"]
 pub mod driver;
 {{ range .Cells }}
 pub mod {{ . }};
 {{- end }}
-{{ end -}}
-
-{{- define "adapter_mod" -}}
-{{ .Header }}
-{{ range .Stores }}
-#[path = "zz_generated_{{ .Snake }}_sqlite.rs"]
-pub mod {{ .Snake }}_sqlite;
-{{ end -}}
-{{ end -}}
-
-{{- define "driver_mod" -}}
-{{ .Header }}
-
-#[path = "zz_generated_wire.rs"]
-pub mod wire;
-#[path = "zz_generated_http_driver.rs"]
-pub mod http_driver;
 {{ end -}}
 
 {{- define "sqlite" -}}

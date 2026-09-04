@@ -215,12 +215,12 @@ func chooseArm(c VectorCase, op hexrust.Operation) (arm, error) {
 		return arm{kind: armKindOK}, nil
 	}
 
-	switch {
-	case c.ExpectedStatus == 404:
+	switch c.ExpectedStatus {
+	case 404:
 		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}, nil
-	case c.ExpectedStatus == op.InvalidStatus:
+	case op.InvalidStatus:
 		return arm{kind: armKindInvalid, id: c.ExpectedErrorSubstring}, nil
-	case c.ExpectedStatus == 501:
+	case 501:
 		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}, nil
 	default:
 		return arm{}, fmt.Errorf(

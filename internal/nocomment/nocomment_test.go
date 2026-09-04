@@ -6,15 +6,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/nocomment"
 )
 
-func findingLines(t *testing.T, findings []nocomment.Finding) []int {
-	t.Helper()
-	lines := make([]int, 0, len(findings))
-	for _, f := range findings {
-		lines = append(lines, f.Line)
-	}
-	return lines
-}
-
 func TestScanFindsALineCommentInAGoFile(t *testing.T) {
 	findings, err := nocomment.Scan(nocomment.Options{
 		RootDir:   "testdata/go",

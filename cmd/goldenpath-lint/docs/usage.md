@@ -23,12 +23,20 @@ A directory under `src` that holds a `forge-dev.yaml` is a cell. A second
 generator fills it. The layer rules apply one level down inside it.
 
 A cell of a `-core` crate holds `port`, `controller`, `types` and `hand`. A cell
-of an `-app` crate holds `adapter` and `driver`. A directory inside a cell that
-holds rust under another name is flagged.
+of an `-app` crate holds `adapter`, `driver` and `hand`. A directory inside a
+cell that holds rust under another name is flagged.
 
 A cell's `mod.rs` and everything under its `hand` directory are hand written
 files. Every other rust file inside a cell is generated and named
 `zz_generated*`.
+
+The root cell owns a `mod.rs` in each of its own layer directories.
+
+## Path attributes
+
+`rust-no-path-attribute` flags any `#[path` in a rust file under `src`,
+generated or hand written. A module directory carries a real `mod.rs` beside
+its files, so `lib.rs` reads as plain `pub mod <layer>;` lines.
 
 ## Output
 

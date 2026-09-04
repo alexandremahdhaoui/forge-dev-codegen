@@ -40,9 +40,6 @@ components:
           type: object
           additionalProperties: true
           description: The runnable inputs. Unused here.
-        openapiSpec:
-          type: string
-          description: Unused. This engine reads the proto document.
         protoSpec:
           type: string
           description: The raw proto3 document. Its package, messages and services decide everything emitted.
