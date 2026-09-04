@@ -1,0 +1,10 @@
+name: testenv-sqlite
+kind: mcp-server
+profile: testenv-subengine
+version: 0.1.0
+description: Creates one sqlite file per x-store schema of an OpenAPI document, with the schema the hexagonal-rust engine expects, seeded from the vectors file.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main

@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: testenv-sqlite Spec Schema
+  version: 0.1.0
+  description: Configuration schema for the testenv-sqlite test environment subengine
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: One sqlite file per named x-store schema of the OpenAPI document at specPath.
+      required: [specPath, stores]
+      properties:
+        specPath:
+          type: string
+          description: Path to the OpenAPI document whose components.schemas hold the x-store schemas. Relative paths resolve against the project root.
+        stores:
+          type: array
+          description: Names of the x-store schemas to create a database for. Each becomes <TmpDir>/<snake>.db.
+          items:
+            type: string
+        seed:
+          type: string
+          description: Path to a vectors file. Every case whose operation starts with create and carries a controllerReply is inserted into the store the reply belongs to.
+        keep:
+          type: boolean
+          description: Keep the database files after the test. They leave managedResources so the orchestrator never deletes them.
