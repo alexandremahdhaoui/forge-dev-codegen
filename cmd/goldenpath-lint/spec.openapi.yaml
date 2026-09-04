@@ -14,7 +14,7 @@ components:
       properties:
         layout:
           type: string
-          description: The golden path layout to check, either go or rust
+          description: The golden path layout to check, either go or rust. The older spelling rust-core-app still names the rust layout
         rootDir:
           type: string
           description: Root directory of the repo to check (default is current directory)

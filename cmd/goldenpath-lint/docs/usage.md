@@ -42,23 +42,50 @@ Inside a cell the only directories are the five layers `adapter`, `controller`,
 A cell that holds `zz_generated` files also holds a `zz_generated_cell.yaml`.
 A missing manifest is flagged as `rust-cell-manifest`.
 
+## Flat layers
+
+A layer directory holds files only. A subdirectory inside `adapter`, `config`,
+`controller`, `driver`, `port` or `types`, at the root and in every cell, is
+flagged as `rust-layer-not-flat` and the message names the subdirectory.
+
+`src/bin` is exempt from the flat rule. Cargo discovers a binary at
+`src/bin/<name>.rs` and at `src/bin/<name>/main.rs`, so a binary directory
+there is legal.
+
+A layer holds rust files and the known manifests `mod.rs`, `forge-dev.yaml`,
+`zz_generated_cell.yaml` and `zz_generated.runnable.yaml`. Any other file is
+flagged as `rust-layer-stray-file` and the message names the file. `src/bin` is
+checked by this rule like every other layer.
+
 ## Pure layers
 
 A file under `controller`, `port` or `types`, at the root and in every cell,
-never names an io crate on a use line. The banned names are `axum`, `hyper`,
-`reqwest`, `rusqlite`, `tokio`, `tonic`, `tower`, `std::fs`, `std::net`,
-`std::process` and `std::time::Instant`. The finding `rust-io-use` names the
-file, the line and the crate.
+never names an io crate on a use statement or on an attribute. The banned names
+are `axum`, `hyper`, `reqwest`, `rusqlite`, `tokio`, `tonic`, `tower`,
+`std::fs`, `std::net`, `std::process` and `std::time::Instant`. The finding
+`rust-io-use` names the file, the line and the crate.
+
+The scan reads a use statement whole. rustfmt spreads a grouped use over many
+lines, so the lines are joined up to the closing semicolon before matching. The
+finding reports the line the statement starts on. An attribute line such as a
+tokio test attribute is scanned the same way.
 
 Generated files are checked too. A generator that emits io into a controller is
 a bug.
 
 ## Mounted files
 
-A layer directory carries a generated `mod.rs`. Every rust file beside it that
-the generator did not write is reached by one `mod <name>;` line in that
-`mod.rs`. A file nothing reaches is flagged as `rust-file-not-mounted` and the
-message names the `mod.rs` that should reach it.
+A layer directory carries a generated `mod.rs`. A layer that holds a hand
+written rust file and carries no generated `mod.rs` is flagged once as
+`rust-layer-mod-rs`. No file inside that layer is flagged.
+
+Every rust file beside a generated `mod.rs` that the generator did not write is
+reached by one `mod <name>;` line in that `mod.rs`. A file nothing reaches is
+flagged as `rust-file-not-mounted` and the message names the `mod.rs` that
+should reach it.
+
+`src/bin` carries no `mod.rs`. Cargo discovers a binary by name, so no file
+there is ever flagged as unmounted.
 
 A file counts as generated when its name starts with `zz_generated` or its first
 line carries the generator header.

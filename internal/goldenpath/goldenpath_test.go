@@ -167,6 +167,12 @@ func TestEveryRuleFlagsTheTreeThatBreaksIt(t *testing.T) {
 			rootDir: "testdata/rust-layer-without-generated-mod",
 			rule:    "rust-layer-mod-rs",
 		},
+		{
+			name:    "a file inside a layer that is neither rust nor a manifest is flagged",
+			layout:  goldenpath.LayoutRust,
+			rootDir: "testdata/rust-layer-stray-file",
+			rule:    "rust-layer-stray-file",
+		},
 	}
 
 	for _, test := range tests {
@@ -254,6 +260,15 @@ func TestEveryNameInsideAGroupedUseLineIsMatched(t *testing.T) {
 	}
 }
 
+func TestAGroupedUseSpreadOverManyLinesIsMatchedAndReportedOnItsFirstLine(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
+	path := "src/controller/greeting_controller.rs"
+
+	if !hitsLine(findings, path, 19, "std::process") {
+		t.Fatalf("expected the rustfmt multi line use to be flagged on line 19, got %+v", findings)
+	}
+}
+
 func TestAPathThatOnlyStartsWithABannedPathIsNeverFlagged(t *testing.T) {
 	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
 
@@ -316,6 +331,47 @@ func TestALayerHoldsNoSubdirectoryAtTheRootAndInsideACell(t *testing.T) {
 				t.Fatalf("expected message %q, got %q", test.message, finding.Message)
 			}
 		})
+	}
+}
+
+func TestAStrayFileInALayerNamesTheFileAndTheLayer(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-layer-stray-file")
+
+	tests := []struct {
+		name    string
+		path    string
+		message string
+	}{
+		{
+			name:    "a stray file under a root layer is named",
+			path:    "src/controller/notes.txt",
+			message: `the layer src/controller holds the file "notes.txt" which is neither rust nor a known manifest`,
+		},
+		{
+			name:    "a stray file under src bin is named too",
+			path:    "src/bin/notes.txt",
+			message: `the layer src/bin holds the file "notes.txt" which is neither rust nor a known manifest`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			finding, ok := findingFor(findings, "rust-layer-stray-file", test.path)
+			if !ok {
+				t.Fatalf("expected a rust-layer-stray-file finding for %s, got %+v", test.path, findings)
+			}
+			if finding.Message != test.message {
+				t.Fatalf("expected message %q, got %q", test.message, finding.Message)
+			}
+		})
+	}
+}
+
+func TestABinaryDirectoryUnderSrcBinIsNeverFlaggedAsNotFlat(t *testing.T) {
+	findings := check(t, goldenpath.LayoutRust, "testdata/rust-clean")
+
+	if hasRule(findings, "rust-layer-not-flat") {
+		t.Fatalf("cargo discovers src/bin/<name>/main.rs, a binary directory is legal, got %+v", findings)
 	}
 }
 
@@ -382,5 +438,11 @@ func TestCheckReturnsAnErrorForAnUnknownLayout(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected an error for an unknown layout")
+	}
+
+	for _, layout := range []string{goldenpath.LayoutGo, goldenpath.LayoutRust, goldenpath.LayoutRustCoreApp} {
+		if !strings.Contains(err.Error(), layout) {
+			t.Fatalf("expected the error to name the %s layout, got %q", layout, err.Error())
+		}
 	}
 }

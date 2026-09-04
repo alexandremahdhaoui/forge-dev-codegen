@@ -343,18 +343,15 @@ func checkCellManifests(rootDir string, cells []string) ([]Finding, error) {
 	return findings, nil
 }
 
+var layerManifestFileNames = []string{cellMarker, cellManifestFileName, "zz_generated.runnable.yaml"}
+
 func checkLayersAreFlat(rootDir string, cells []string) ([]Finding, error) {
 	var findings []Finding
 
 	for _, dir := range flatLayerDirs(cells) {
-		fullDir := filepath.Join(rootDir, dir)
-		if !dirExists(fullDir) {
-			continue
-		}
-
-		entries, err := os.ReadDir(fullDir)
+		entries, err := layerEntries(rootDir, dir)
 		if err != nil {
-			return nil, fmt.Errorf("reading %q: %w", fullDir, err)
+			return nil, err
 		}
 
 		for _, e := range entries {
@@ -374,30 +371,72 @@ func checkLayersAreFlat(rootDir string, cells []string) ([]Finding, error) {
 		}
 	}
 
+	for _, dir := range everyLayerDir(cells) {
+		entries, err := layerEntries(rootDir, dir)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, e := range entries {
+			if e.IsDir() || isLayerFileName(e.Name()) {
+				continue
+			}
+
+			findings = append(findings, Finding{
+				Rule: "rust-layer-stray-file",
+				Path: filepath.ToSlash(filepath.Join(dir, e.Name())),
+				Message: fmt.Sprintf(
+					"the layer %s holds the file %q which is neither rust nor a known manifest",
+					filepath.ToSlash(dir),
+					e.Name(),
+				),
+			})
+		}
+	}
+
 	return findings, nil
+}
+
+func layerEntries(rootDir, dir string) ([]os.DirEntry, error) {
+	fullDir := filepath.Join(rootDir, dir)
+	if !dirExists(fullDir) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(fullDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", fullDir, err)
+	}
+
+	return entries, nil
+}
+
+func isLayerFileName(name string) bool {
+	if strings.HasSuffix(name, ".rs") {
+		return true
+	}
+
+	for _, manifest := range layerManifestFileNames {
+		if name == manifest {
+			return true
+		}
+	}
+
+	return false
 }
 
 var bannedCrates = []string{"axum", "hyper", "reqwest", "rusqlite", "tokio", "tonic", "tower"}
 
 var bannedPaths = []string{"std::fs", "std::net", "std::process", "std::time::Instant"}
 
-var bannedCratePatterns = compileCratePatterns(bannedCrates)
+var bannedNames = append(append([]string{}, bannedCrates...), bannedPaths...)
 
-var bannedPathPatterns = compilePathPatterns(bannedPaths)
+var bannedNamePatterns = compileNamePatterns(bannedNames)
 
-func compileCratePatterns(crates []string) map[string]*regexp.Regexp {
-	patterns := make(map[string]*regexp.Regexp, len(crates))
-	for _, crate := range crates {
-		patterns[crate] = regexp.MustCompile(`(^|[^A-Za-z0-9_:])` + crate + `(::|[;,}\s]|$)`)
-	}
-
-	return patterns
-}
-
-func compilePathPatterns(paths []string) map[string]*regexp.Regexp {
-	patterns := make(map[string]*regexp.Regexp, len(paths))
-	for _, path := range paths {
-		patterns[path] = regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(path) + `(::|[;,}\s]|$)`)
+func compileNamePatterns(names []string) map[string]*regexp.Regexp {
+	patterns := make(map[string]*regexp.Regexp, len(names))
+	for _, name := range names {
+		patterns[name] = regexp.MustCompile(`(^|[^A-Za-z0-9_:])` + regexp.QuoteMeta(name) + `(::|[;,}\s]|$)`)
 	}
 
 	return patterns
@@ -484,23 +523,48 @@ type useHit struct {
 func bannedUseHits(content string) []useHit {
 	var hits []useHit
 
-	for index, line := range strings.Split(content, "\n") {
-		if !isUseLine(line) && !isAttributeLine(line) {
+	lines := strings.Split(content, "\n")
+
+	for index := 0; index < len(lines); index++ {
+		if isUseLine(lines[index]) {
+			statement, last := joinUntilSemicolon(lines, index)
+			hits = append(hits, bannedNameHits(statement, index+1)...)
+			index = last
+
 			continue
 		}
 
-		flattened := flattenGroupedPaths(line)
-
-		for _, name := range bannedCrates {
-			if bannedCratePatterns[name].MatchString(flattened) {
-				hits = append(hits, useHit{line: index + 1, name: name})
-			}
+		if isAttributeLine(lines[index]) {
+			hits = append(hits, bannedNameHits(lines[index], index+1)...)
 		}
+	}
 
-		for _, name := range bannedPaths {
-			if bannedPathPatterns[name].MatchString(flattened) {
-				hits = append(hits, useHit{line: index + 1, name: name})
-			}
+	return hits
+}
+
+func joinUntilSemicolon(lines []string, start int) (string, int) {
+	var joined strings.Builder
+
+	for index := start; index < len(lines); index++ {
+		joined.WriteString(" ")
+		joined.WriteString(strings.TrimSpace(lines[index]))
+
+		if strings.Contains(lines[index], ";") {
+			return joined.String(), index
+		}
+	}
+
+	return joined.String(), len(lines) - 1
+}
+
+func bannedNameHits(statement string, line int) []useHit {
+	var hits []useHit
+
+	flattened := flattenGroupedPaths(statement)
+
+	for _, name := range bannedNames {
+		if bannedNamePatterns[name].MatchString(flattened) {
+			hits = append(hits, useHit{line: line, name: name})
 		}
 	}
 
@@ -558,6 +622,10 @@ func layerDirs(cells []string) []string {
 }
 
 func flatLayerDirs(cells []string) []string {
+	return dirsForLayers(mountedRootLayers, cells)
+}
+
+func everyLayerDir(cells []string) []string {
 	return dirsForLayers(rootLayers, cells)
 }
 
