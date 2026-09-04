@@ -17,22 +17,41 @@ components:
         name:
           type: string
           description: The service name. It names the core and app crates, songe_<name>_core and songe_<name>_app style, that the generated tests import.
+        version:
+          type: string
+          description: The service version. Unused here.
+        description:
+          type: string
+          description: The service description. Unused here.
         kind:
           type: string
           description: What the program is. This engine fills the vectors kind only.
         language:
           type: string
           description: The cell's language. This engine emits rust only.
+        packageName:
+          type: string
+          description: Unused here.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
         openapiSpec:
           type: string
           description: The raw OpenAPI document. Its paths, x-controller, x-ports and schemas decide which controller trait and types each test imports and mocks.
         vectors:
           type: string
-          description: The vectors document. A JSON object with one "cases" array, each case naming an operationId, an input, either a controllerReply or an expectedErrorSubstring, an expectedStatus and an optional expectedBody.
+          description: The vectors document, inline. A JSON object with one "cases" array, each case naming an operationId, an input, either a controllerReply or an expectedErrorSubstring, an expectedStatus and an optional expectedBody. Absent means the engine reads the file that surface.vectors names.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed. Unused here.
+        srcDir:
+          type: string
+          description: The engine source directory. The path in surface.vectors resolves against it.
         surface:
           type: object
           additionalProperties: true
-          description: The kind's surface. appDir may be given here instead of at the top level.
+          description: The kind's surface. appDir may be given here instead of at the top level, and vectors names the vectors document relative to srcDir.
         appDir:
           type: string
           description: The root of the app crate, relative to the engine source directory. Absent means app.
@@ -40,7 +59,6 @@ components:
         - name
         - kind
         - openapiSpec
-        - vectors
     GeneratedFile:
       type: object
       properties:

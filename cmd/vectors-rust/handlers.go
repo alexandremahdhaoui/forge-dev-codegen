@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
 )
@@ -32,7 +34,12 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: vectors-rust generates rust only", input.Language)
 			}
 
-			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), []byte(input.Vectors), vectorsrust.Options{
+			vectors, err := readVectors(input)
+			if err != nil {
+				return nil, err
+			}
+
+			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
 				Service: input.Name,
 				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
 			})
@@ -48,6 +55,24 @@ func NewHandlers() Handlers {
 			return &GenerateOutput{Files: out}, nil
 		},
 	}
+}
+
+func readVectors(input GenerateInput) ([]byte, error) {
+	if input.Vectors != "" {
+		return []byte(input.Vectors), nil
+	}
+
+	rel := surfaceString(input.Surface, "vectors")
+	if rel == "" {
+		return nil, fmt.Errorf("emitting the vectors of %q: the model carries no vectors document and surface.vectors names no file", input.Name)
+	}
+
+	doc, err := os.ReadFile(filepath.Join(input.SrcDir, rel))
+	if err != nil {
+		return nil, fmt.Errorf("reading the vectors document %s of %q: %w", rel, input.Name, err)
+	}
+
+	return doc, nil
 }
 
 func firstOf(values ...string) string {
