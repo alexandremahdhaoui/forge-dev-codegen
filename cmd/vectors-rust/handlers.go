@@ -42,6 +42,8 @@ func NewHandlers() Handlers {
 			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
 				Service: input.Name,
 				AppDir:  firstOf(input.AppDir, surfaceString(input.Surface, "appDir")),
+				Cell:    surfaceString(input.Surface, "cell"),
+				Proto:   []byte(input.ProtoSpec),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)

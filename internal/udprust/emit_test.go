@@ -142,36 +142,70 @@ func TestTheAppSideHoldsOnlyTheDriverTheClientAndTheirMountPoints(t *testing.T) 
 	}
 }
 
-func TestTheEnvelopeCarriesOneOneofVariantPerRpcRequestInDeclarationOrder(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+func TestNoOneofEnvelopeIsEmittedAnywhere(t *testing.T) {
+	for _, side := range []string{"core", "app"} {
+		files := generate(t, udprust.Options{Service: "songe-hello", Side: side})
 
-	types := files["types/zz_generated_hello_datagram_messages.rs"].Content
-
-	for _, want := range []string{
-		"pub enum HelloDatagramEnvelopeKind {",
-		"#[prost(message, tag = \"1\")]\n    Echo(Echo),",
-		"#[prost(message, tag = \"2\")]\n    Note(Note),",
-		"#[prost(oneof = \"HelloDatagramEnvelopeKind\", tags = \"1, 2\")]",
-		"pub kind: Option<HelloDatagramEnvelopeKind>,",
-	} {
-		if !strings.Contains(types, want) {
-			t.Fatalf("the emitted types never carried %q:\n%s", want, types)
+		for path, file := range files {
+			if strings.Contains(file.Content, "Envelope") || strings.Contains(file.Content, "oneof") {
+				t.Fatalf("the %s side reached for an envelope in %s:\n%s", side, path, file.Content)
+			}
 		}
 	}
 }
 
-func TestTheEnvelopeIsNeverTheWireFormat(t *testing.T) {
+func TestTheSchemaVersionIsTheNumberInThePackageVersionSuffix(t *testing.T) {
 	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
 
 	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
-	if strings.Contains(codec, "Envelope") {
-		t.Fatalf("the codec reached for the envelope:\n%s", codec)
+	if !strings.Contains(codec, "pub const SCHEMA_VERSION: u8 = 1;") {
+		t.Fatalf("the codec never read the version out of the package:\n%s", codec)
+	}
+}
+
+func TestAPackageWithNoVersionSuffixIsRefused(t *testing.T) {
+	const unversioned = `syntax = "proto3";
+
+package songe.hello.udp;
+
+service HelloDatagram {
+  rpc Echo(Echo) returns (Echo);
+}
+
+message Echo {
+  string payload = 1;
+}
+`
+
+	_, err := udprust.Generate([]byte(unversioned), udprust.Options{Service: "songe-hello"})
+	if err == nil {
+		t.Fatal("a package with no version suffix was accepted")
 	}
 
+	if !strings.Contains(err.Error(), "the last segment must be a version like v1") {
+		t.Fatalf("generating reported %q", err)
+	}
+}
+
+func TestTheFunctionHashIsFnv1aOverTheFullMethodNameFoldedToEightBits(t *testing.T) {
+	if got := udprust.FunctionHash("songe.hello.udp.v1.HelloDatagram/Echo"); got != 223 {
+		t.Fatalf("the echo method folds to %d, want 223", got)
+	}
+
+	if got := udprust.FunctionHash("songe.hello.udp.v1.HelloDatagram/Note"); got != 128 {
+		t.Fatalf("the note method folds to %d, want 128", got)
+	}
+
+	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+
+	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
+
 	for _, want := range []string{
-		"pub fn encode_tag(kind: HelloDatagramKind) -> [u8; TAG_LEN] {",
-		"pub fn decode_tag(tag: [u8; TAG_LEN]) -> Option<HelloDatagramKind> {",
+		"pub const ECHO_METHOD: &str = \"songe.hello.udp.v1.HelloDatagram/Echo\";",
+		"pub const ECHO_HASH: u8 = 223;",
+		"pub const NOTE_METHOD: &str = \"songe.hello.udp.v1.HelloDatagram/Note\";",
+		"pub const NOTE_HASH: u8 = 128;",
 	} {
 		if !strings.Contains(codec, want) {
 			t.Fatalf("the codec never carried %q:\n%s", want, codec)
@@ -179,34 +213,41 @@ func TestTheEnvelopeIsNeverTheWireFormat(t *testing.T) {
 	}
 }
 
-func TestTheTagOfAnRpcIsItsIndexInDeclarationOrder(t *testing.T) {
-	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
+func TestTwoMethodsThatFoldToTheSameFunctionHashAreRefusedByName(t *testing.T) {
+	const first = "songe.collision.v1.Service/Alpha"
+	const collides = "Baqt"
 
-	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
+	if udprust.FunctionHash(first) != udprust.FunctionHash("songe.collision.v1.Service/"+collides) {
+		t.Fatalf("%s and %s no longer fold to the same byte", first, collides)
+	}
 
-	for _, want := range []string{
-		"HelloDatagramKind::Echo => [0],",
-		"HelloDatagramKind::Note => [1],",
-		"[0] => Some(HelloDatagramKind::Echo),",
-		"[1] => Some(HelloDatagramKind::Note),",
-	} {
-		if !strings.Contains(codec, want) {
-			t.Fatalf("the codec never carried %q:\n%s", want, codec)
+	doc := "syntax = \"proto3\";\n\npackage songe.collision.v1;\n\nservice Service {\n  rpc Alpha(Ping) returns (Ping);\n  rpc " + collides + "(Ping) returns (Ping);\n}\n\nmessage Ping {\n  string text = 1;\n}\n"
+
+	_, err := udprust.Generate([]byte(doc), udprust.Options{Service: "songe-hello"})
+	if err == nil {
+		t.Fatal("two colliding methods were accepted")
+	}
+
+	for _, want := range []string{"songe.collision.v1.Service/Alpha", "songe.collision.v1.Service/" + collides, "fold to the function hash"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal %q never named %q", err, want)
 		}
 	}
 }
 
-func TestTheCodecRefusesAMissingMagicAShortDatagramAnOversizeOneAndAnUnknownVariant(t *testing.T) {
+func TestTheCodecRefusesAMissingMagicAShortDatagramAnOversizeOneAWrongVersionAndAnUnknownMethod(t *testing.T) {
 	files := generate(t, udprust.Options{Service: "songe-hello", Side: "core"})
 
 	codec := files["controller/zz_generated_hello_datagram_codec.rs"].Content
 
 	for _, want := range []string{
 		"it does not open with the udplb magic",
-		"a datagram opens with a magic, a session id and a tag",
+		"a datagram opens with a magic, a session id, a schema version and a function hash",
 		"a datagram carries at most {MAX_DATAGRAM_LEN} bytes",
-		"names no rpc of HelloDatagram",
+		"it speaks schema version {got}, this build speaks {SCHEMA_VERSION}",
+		"function hash {hash} names no rpc of HelloDatagram",
 		"pub const MAX_DATAGRAM_LEN: usize = 508;",
+		"pub const MAX_PAYLOAD_LEN: usize = MAX_DATAGRAM_LEN - HEADER_LEN;",
 	} {
 		if !strings.Contains(codec, want) {
 			t.Fatalf("the codec never carried %q:\n%s", want, codec)
@@ -275,6 +316,8 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 		"const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);",
 		"const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;",
 		"println!(\"LISTENING_UDP {}\", self.local_port()?);",
+		"if peers_told_about_the_version.insert(peer) {",
+		"dropping a datagram from {peer}: function hash {hash} names no rpc",
 	} {
 		if !strings.Contains(driver, want) {
 			t.Fatalf("the driver never carried %q:\n%s", want, driver)

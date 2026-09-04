@@ -499,3 +499,157 @@ func TestParsingVectorsRejectsAMalformedDocument(t *testing.T) {
 		})
 	}
 }
+
+const datagramProto = `syntax = "proto3";
+
+package songe.hello.udp.v1;
+
+service HelloDatagram {
+  rpc Echo(Echo) returns (Echo);
+}
+
+message Echo {
+  string payload = 1;
+  uint64 count = 2;
+}
+`
+
+const datagramCases = `{
+  "cases": [
+    {
+      "case": "a_datagram_echo_comes_back_with_the_count_raised_by_one",
+      "operation": "udp_echo",
+      "input": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 7 },
+      "controllerReply": { "payload": "songe", "count": 8 },
+      "expectedBody": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 8 }
+    }
+  ]
+}`
+
+func generateWithDatagrams(t *testing.T, cases string) string {
+	t.Helper()
+
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(cases), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(datagramProto),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("the engine emitted %d files, want 1", len(files))
+	}
+
+	return files[0].Content
+}
+
+func TestADatagramVectorDrivesTheGeneratedUdpDriverOverAMockedController(t *testing.T) {
+	content := generateWithDatagrams(t, datagramCases)
+
+	for _, want := range []string{
+		"async fn a_datagram_echo_comes_back_with_the_count_raised_by_one() {",
+		"let expected_request = Echo { payload: \"songe\".to_string(), count: 7 };",
+		"let controller_reply = Echo { payload: \"songe\".to_string(), count: 8 };",
+		"let mut hello_datagram_datagram_controller = MockHelloDatagramController::new();",
+		"tokio::net::UdpSocket::bind(\"127.0.0.1:0\")",
+		"HelloDatagramUdpDriver::new(socket, std::sync::Arc::new(hello_datagram_datagram_controller))",
+		"HelloDatagramUdpClient::new(format!(\"127.0.0.1:{port}\"), *b\"0123456789abcdef\")",
+		"assert_eq!(reply, Echo { payload: \"songe\".to_string(), count: 8 });",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("the emitted file never carried %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestADatagramVectorMocksTheDatagramControllerTraitByFullPath(t *testing.T) {
+	content := generateWithDatagrams(t, datagramCases)
+
+	for _, want := range []string{
+		"impl songe_hello_core::udp::controller::hello_datagram_controller::HelloDatagramController for HelloDatagramController {",
+		"fn echo(&self, request: Echo, context: &Context) -> Result<Echo, HelloDatagramControllerError>;",
+		"use songe_hello_core::udp::types::context::Context;",
+		"use songe_hello_core::udp::types::hello_datagram_messages::{Echo};",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("the emitted file never carried %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestADatagramVectorWithNoSessionIdIsRefused(t *testing.T) {
+	const missing = `{
+  "cases": [
+    {
+      "case": "no_session",
+      "operation": "udp_echo",
+      "input": { "payload": "songe", "count": 7 },
+      "controllerReply": { "payload": "songe", "count": 8 },
+      "expectedBody": { "payload": "songe", "count": 8 }
+    }
+  ]
+}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(missing), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(datagramProto),
+	})
+	if err == nil || !strings.Contains(err.Error(), "input needs a sessionId") {
+		t.Fatalf("want a refusal naming sessionId, got %v", err)
+	}
+}
+
+func TestADatagramVectorWithASessionIdThatIsNotSixteenBytesIsRefused(t *testing.T) {
+	const short = `{
+  "cases": [
+    {
+      "case": "short_session",
+      "operation": "udp_echo",
+      "input": { "sessionId": "short", "payload": "songe", "count": 7 },
+      "controllerReply": { "payload": "songe", "count": 8 },
+      "expectedBody": { "payload": "songe", "count": 8 }
+    }
+  ]
+}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(short), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(datagramProto),
+	})
+	if err == nil || !strings.Contains(err.Error(), "sessionId must be 16 bytes, got 5") {
+		t.Fatalf("want a refusal naming the session id length, got %v", err)
+	}
+}
+
+func TestADatagramVectorWithoutAControllerReplyIsRefused(t *testing.T) {
+	const noReply = `{
+  "cases": [
+    {
+      "case": "no_reply",
+      "operation": "udp_echo",
+      "input": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 7 },
+      "expectedBody": { "payload": "songe", "count": 8 }
+    }
+  ]
+}`
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(noReply), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(datagramProto),
+	})
+	if err == nil || !strings.Contains(err.Error(), "a datagram case needs controllerReply") {
+		t.Fatalf("want a refusal naming controllerReply, got %v", err)
+	}
+}
+
+func TestWithoutAProtoADatagramVectorIsSkippedLikeAnyOtherTransport(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(datagramCases+""), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if strings.Contains(files[0].Content, "UdpDriver") {
+		t.Fatalf("a datagram test was emitted with no proto:\n%s", files[0].Content)
+	}
+}

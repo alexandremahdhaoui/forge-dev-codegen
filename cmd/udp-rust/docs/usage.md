@@ -46,9 +46,9 @@ For every `service` in the file:
 
 | Emitted, under the cell | Holds |
 |---|---|
-| `types/zz_generated_<service>_messages.rs` | one prost message per message reachable from the service's rpcs, plus the envelope |
+| `types/zz_generated_<service>_messages.rs` | one prost message per message reachable from the service's rpcs |
 | `types/zz_generated_context.rs` | `Context`, the session id and the peer address a handler receives |
-| `controller/zz_generated_<service>_codec.rs` | the frame, the tag and the prost encode and decode of every rpc |
+| `controller/zz_generated_<service>_codec.rs` | the frame, the schema version, the function hash of every rpc and the prost encode and decode |
 | `controller/zz_generated_<service>_controller.rs` | trait `<Service>Controller` and the impl that calls the hand body |
 | `port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one async method per rpc, and its error enum |
 | `hand/<service>_controller.rs` | the body, written once and never again |
@@ -67,23 +67,26 @@ A datagram is the udplb frame.
 |---|---|
 | 0-3 | magic `0x55554944` big endian |
 | 4-19 | session id, 16 bytes |
-| 20 | tag, the rpc this datagram carries |
-| 21-N | payload, one prost message |
+| 20 | schema version |
+| 21 | function hash |
+| 22-N | payload, one prost message |
 
-A datagram carries at most 508 bytes, the magic counted. A reply
-repeats the session id and the tag of the request it answers.
+A datagram carries at most 508 bytes, the magic counted, so a payload
+holds at most 486. A reply repeats the session id, the version and the
+function hash of the request it answers.
 
-The tag is one function pair, `encode_tag` and `decode_tag`. It is the
-only place that decides how a datagram says which rpc it carries, so
-another encoding drops in there and nowhere else. Today it is the one
-byte index of the rpc in declaration order.
+The schema version is the number in the version segment of the proto
+package. `songe.hello.v1` gives 1.
 
-The emitted `<Service>Envelope` is a prost message with one oneof
-variant per rpc request, in declaration order. It is a type the cell
-offers. It is not the wire format.
+The function hash is FNV-1a 32 over the full method name in the form
+`package.Service/Method`, folded to 8 bits by the xor of its four
+bytes. The engine computes every hash at generate time and emits
+`<RPC>_METHOD` and `<RPC>_HASH` in the codec. Two methods that fold to
+the same byte end the generation with an error naming both.
 
 The codec refuses a datagram with no magic, one shorter than a header,
-one over 508 bytes, and one whose tag names no rpc.
+one over 508 bytes, one that speaks another schema version, and one
+whose function hash names no rpc.
 
 ## The driver
 
@@ -93,6 +96,10 @@ when a caller asks for it.
 
 A datagram whose session id is 16 zero bytes is the udplb health probe.
 The driver answers it verbatim before it decodes anything.
+
+A datagram that speaks another schema version is dropped and logged
+once per peer. A datagram whose function hash names no rpc is dropped
+and logged.
 
 A recv error pauses 50 milliseconds. A hundred in a row ends `serve`
 with the address and the count.

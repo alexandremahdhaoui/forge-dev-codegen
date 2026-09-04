@@ -64,6 +64,47 @@ to `app`. It may sit at the top level of the model or under `surface`.
 
 A case needs `controllerReply` or `expectedErrorSubstring`, never neither.
 
+## Datagram cases
+
+A cell that also declares `proto:` reads the datagram service block. A case
+whose `operation` is `udp_<rpc>` becomes a test that binds the generated
+`<Service>UdpDriver` on `127.0.0.1:0` over a mocked `<Service>Controller`
+and round trips one datagram with the generated `<Service>UdpClient`.
+
+```yaml
+openapi:
+  specPath: ./.forge/spec-cache/hello.v1.yaml
+proto:
+  specPath: ./.forge/spec-cache/udp/hello.v1.proto
+surface:
+  appDir: .
+  cell: udp
+  vectors: ./.forge/spec-cache/cases.json
+```
+
+```json
+{
+  "case": "udp_echo_returns_the_payload",
+  "operation": "udp_echo",
+  "input": { "sessionId": "0123456789abcdef", "payload": "songe" },
+  "controllerReply": { "payload": "songe" },
+  "expectedBody": { "sessionId": "0123456789abcdef", "payload": "songe" }
+}
+```
+
+`input` carries the request message fields plus a `sessionId` of exactly 16
+bytes, the one the client stamps on every datagram. `controllerReply` is
+what the mocked controller answers. `expectedBody` is what the client reads
+back. A key neither message declares is ignored, so `sessionId` may sit in
+both.
+
+The engine folds every method name the way udp-rust does and refuses two
+rpcs that fold to one byte. A datagram vector reads strings, numbers and
+booleans only.
+
+Without a `proto:` a `udp_` case is skipped with a log line, like any other
+transport.
+
 An error case is armed by matching `expectedStatus` against the operation's
 declared shape: 404 arms `NotFound`, the operation's declared invalid status
 (422 or 400) arms `Invalid`, 501 arms `NotImplemented`, and anything else

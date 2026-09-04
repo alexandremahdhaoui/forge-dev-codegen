@@ -22,8 +22,25 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
 )
+
+const cargoUdpProto = `syntax = "proto3";
+
+package songe.hello.udp.v1;
+
+service HelloDatagram {
+  rpc Echo(Echo) returns (Echo);
+}
+
+message Echo {
+  string payload = 1;
+  uint64 count = 2;
+}
+
+message Nothing {}
+`
 
 const cargoWorkspaceManifest = `[workspace]
 resolver = "2"
@@ -36,6 +53,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -53,6 +71,7 @@ edition = "2021"
 songe-hello-core = { path = "../core" }
 anyhow = "1"
 axum = "0.8"
+prost = "0.14"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -158,6 +177,13 @@ const cargoVectors = `{
       "input": { "id": "missing" },
       "expectedStatus": 404,
       "expectedErrorSubstring": "not found"
+    },
+    {
+      "case": "a_datagram_echo_comes_back_with_the_count_raised_by_one",
+      "operation": "udp_echo",
+      "input": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 7 },
+      "controllerReply": { "payload": "songe", "count": 8 },
+      "expectedBody": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 8 }
     }
   ]
 }`
@@ -172,12 +198,25 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		t.Skip("cargo is not on PATH")
 	}
 
-	hexFiles, err := hexrust.Generate([]byte(cargoSpec), hexrust.Options{Service: "songe-hello"})
+	hexFiles, err := hexrust.Generate([]byte(cargoSpec), hexrust.Options{Service: "songe-hello", Cells: []string{"udp"}})
 	if err != nil {
 		t.Fatalf("generating the hexagonal skeleton: %v", err)
 	}
 
-	vectorFiles, err := vectorsrust.Generate([]byte(cargoSpec), []byte(cargoVectors), vectorsrust.Options{Service: "songe-hello"})
+	udpCoreFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello", Side: "core"})
+	if err != nil {
+		t.Fatalf("generating the udp core cell: %v", err)
+	}
+
+	udpAppFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello", Side: "app"})
+	if err != nil {
+		t.Fatalf("generating the udp app cell: %v", err)
+	}
+
+	vectorFiles, err := vectorsrust.Generate([]byte(cargoSpec), []byte(cargoVectors), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(cargoUdpProto),
+	})
 	if err != nil {
 		t.Fatalf("generating the vectors: %v", err)
 	}
@@ -208,6 +247,14 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		}
 
 		write(f.Path, content)
+	}
+
+	for _, f := range udpCoreFiles {
+		write(filepath.Join("core", "src", "udp", f.Path), f.Content)
+	}
+
+	for _, f := range udpAppFiles {
+		write(filepath.Join("app", "src", "udp", f.Path), f.Content)
 	}
 
 	for _, f := range vectorFiles {

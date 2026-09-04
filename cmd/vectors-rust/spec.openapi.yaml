@@ -39,6 +39,9 @@ components:
         openapiSpec:
           type: string
           description: The raw OpenAPI document. Its paths, x-controller, x-ports and schemas decide which controller trait and types each test imports and mocks.
+        protoSpec:
+          type: string
+          description: The raw proto3 document of the datagram service. Absent means the vectors carry no datagram case. Its service block names every rpc a udp_<rpc> case may exercise.
         vectors:
           type: string
           description: The vectors document, inline. A JSON object with one "cases" array, each case naming an operationId, an input, either a controllerReply or an expectedErrorSubstring, an expectedStatus and an optional expectedBody. Absent means the engine reads the file that surface.vectors names.
@@ -51,7 +54,7 @@ components:
         surface:
           type: object
           additionalProperties: true
-          description: The kind's surface. appDir may be given here instead of at the top level, and vectors names the vectors document relative to srcDir.
+          description: The kind's surface. appDir may be given here instead of at the top level, vectors names the vectors document relative to srcDir, and cell names the udp module directory, which defaults to udp.
         appDir:
           type: string
           description: The root of the app crate, relative to the engine source directory. Absent means app.

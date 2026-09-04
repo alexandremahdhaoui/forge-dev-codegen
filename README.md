@@ -40,7 +40,7 @@ it fills, then the library that fills it.
 | hexagonal-rust | hexagonal x rust | axum, rusqlite, thiserror, mockall |
 | grpc-rust-tonic | grpc x rust | tonic, prost, protox |
 | udp-rust | udp x rust | prost, tokio |
-| vectors-rust | vectors x rust | mockall, tower, http-body-util |
+| vectors-rust | vectors x rust | mockall, tower, http-body-util, tokio |
 
 `cmd/demo-cli-go-cobra` consumes cli-go-cobra and pins its behavior
 against the built binary; the other cells' demos live in the matching

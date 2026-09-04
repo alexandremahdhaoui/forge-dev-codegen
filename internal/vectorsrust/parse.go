@@ -22,7 +22,8 @@ import (
 )
 
 type VectorsFile struct {
-	Cases []VectorCase `json:"cases"`
+	Cases    []VectorCase `json:"cases"`
+	UdpCases []VectorCase `json:"-"`
 }
 
 type VectorCase struct {
@@ -37,7 +38,7 @@ type VectorCase struct {
 
 var rustTestIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-func parseVectors(doc []byte, declaresOperation func(string) bool) (*VectorsFile, error) {
+func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) bool) (*VectorsFile, error) {
 	var v VectorsFile
 	if err := json.Unmarshal(doc, &v); err != nil {
 		return nil, fmt.Errorf("parsing the vectors document: %w", err)
@@ -49,6 +50,7 @@ func parseVectors(doc []byte, declaresOperation func(string) bool) (*VectorsFile
 
 	seen := map[string]bool{}
 	kept := make([]VectorCase, 0, len(v.Cases))
+	datagrams := []VectorCase{}
 
 	for i, c := range v.Cases {
 		if c.Case == "" {
@@ -69,8 +71,22 @@ func parseVectors(doc []byte, declaresOperation func(string) bool) (*VectorsFile
 			return nil, fmt.Errorf("reading vector %q: operation is required, it names the operationId the vector exercises", c.Case)
 		}
 
+		if declaresDatagram(c.Operation) {
+			if len(c.ControllerReply) == 0 {
+				return nil, fmt.Errorf("reading vector %q: a datagram case needs controllerReply, the reply the mocked controller answers", c.Case)
+			}
+
+			if len(c.ExpectedBody) == 0 {
+				return nil, fmt.Errorf("reading vector %q: a datagram case needs expectedBody, the reply the client reads back", c.Case)
+			}
+
+			datagrams = append(datagrams, c)
+
+			continue
+		}
+
 		if !declaresOperation(c.Operation) {
-			log.Printf("vectors-rust: skipping vector %q: operation %q is not an OpenAPI operation, it belongs to another transport", c.Case, c.Operation)
+			log.Printf("vectors-rust: skipping vector %q: operation %q is neither an OpenAPI operation nor a datagram rpc, it belongs to another transport", c.Case, c.Operation)
 
 			continue
 		}
@@ -87,6 +103,7 @@ func parseVectors(doc []byte, declaresOperation func(string) bool) (*VectorsFile
 	}
 
 	v.Cases = kept
+	v.UdpCases = datagrams
 
 	return &v, nil
 }

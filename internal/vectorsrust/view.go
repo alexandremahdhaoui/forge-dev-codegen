@@ -33,6 +33,9 @@ type view struct {
 	TypeImports      []importView
 	Tests            []testView
 	NeedsBodyMatcher bool
+	HasDatagrams     bool
+	Datagram         datagramServiceView
+	DatagramTests    []datagramTestView
 }
 
 type importView struct {
@@ -123,7 +126,7 @@ func paramArgType(kind string) string {
 	return "i64"
 }
 
-func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, error) {
+func buildView(spec *hexrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
 	v := view{
 		Header:    header,
 		CoreCrate: hexrust.Snake(opts.Service) + "_core",
@@ -179,6 +182,20 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, er
 
 		if v.Tests[i].HasExpectedBody {
 			v.NeedsBodyMatcher = true
+		}
+	}
+
+	if datagrams != nil && len(vectors.UdpCases) > 0 {
+		v.HasDatagrams = true
+		v.Datagram = buildDatagramServiceView(datagrams)
+
+		for _, c := range vectors.UdpCases {
+			tv, err := buildDatagramTest(c, datagrams)
+			if err != nil {
+				return view{}, err
+			}
+
+			v.DatagramTests = append(v.DatagramTests, tv)
 		}
 	}
 

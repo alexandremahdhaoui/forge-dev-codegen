@@ -133,16 +133,51 @@ fn a_datagram_over_five_hundred_and_eight_bytes_is_refused() {
 }
 
 #[test]
-fn a_datagram_whose_tag_names_no_rpc_is_refused() {
+fn a_datagram_whose_function_hash_names_no_rpc_is_refused() {
     let mut datagram = codec::encode_echo_request(&SESSION, &echo()).expect("a datagram");
-    datagram[codec::MAGIC_LEN + codec::SESSION_ID_LEN] = 0xff;
+    datagram[codec::MAGIC_LEN + codec::SESSION_ID_LEN + codec::VERSION_LEN] = 0x01;
 
     let error = codec::decode_request(&datagram).expect_err("a refusal");
 
     assert!(matches!(
         error,
-        codec::HelloDatagramCodecError::UnknownVariant { .. }
+        codec::HelloDatagramCodecError::UnknownMethod { .. }
     ));
+}
+
+#[test]
+fn a_datagram_that_speaks_another_schema_version_is_refused() {
+    let mut datagram = codec::encode_echo_request(&SESSION, &echo()).expect("a datagram");
+    datagram[codec::MAGIC_LEN + codec::SESSION_ID_LEN] = codec::SCHEMA_VERSION + 1;
+
+    let error = codec::decode_request(&datagram).expect_err("a refusal");
+
+    assert!(matches!(
+        error,
+        codec::HelloDatagramCodecError::Version { .. }
+    ));
+}
+
+#[test]
+fn a_datagram_carries_the_magic_the_session_id_the_schema_version_and_the_function_hash_in_that_order(
+) {
+    let datagram = codec::encode_echo_request(&SESSION, &echo()).expect("a datagram");
+
+    assert_eq!(&datagram[..codec::MAGIC_LEN], &codec::MAGIC);
+    assert_eq!(
+        &datagram[codec::MAGIC_LEN..codec::MAGIC_LEN + codec::SESSION_ID_LEN],
+        &SESSION
+    );
+    assert_eq!(
+        datagram[codec::MAGIC_LEN + codec::SESSION_ID_LEN],
+        codec::SCHEMA_VERSION
+    );
+    assert_eq!(
+        datagram[codec::MAGIC_LEN + codec::SESSION_ID_LEN + codec::VERSION_LEN],
+        codec::ECHO_HASH
+    );
+    assert_eq!(codec::HEADER_LEN, 22);
+    assert_eq!(codec::MAX_PAYLOAD_LEN, 486);
 }
 
 #[test]
@@ -162,7 +197,7 @@ fn a_payload_that_would_push_a_datagram_over_five_hundred_and_eight_bytes_is_ref
 
 #[test]
 fn a_datagram_whose_session_id_is_sixteen_zero_bytes_is_the_udplb_health_probe() {
-    let probe = codec::frame(&[0u8; codec::SESSION_ID_LEN], [0], &[]);
+    let probe = codec::frame(&[0u8; codec::SESSION_ID_LEN], codec::ECHO_HASH, &[]);
 
     assert!(codec::is_health_probe(&probe));
     assert!(!codec::is_health_probe(
@@ -217,7 +252,7 @@ async fn the_driver_answers_the_health_probe_with_the_zeroed_session_id_it_recei
         let _ = driver.serve().await;
     });
 
-    let probe = codec::frame(&[0u8; codec::SESSION_ID_LEN], [0], &[]);
+    let probe = codec::frame(&[0u8; codec::SESSION_ID_LEN], codec::ECHO_HASH, &[]);
 
     let prober = tokio::net::UdpSocket::bind("127.0.0.1:0")
         .await
