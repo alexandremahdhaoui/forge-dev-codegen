@@ -183,7 +183,7 @@ async fn create_valid_name() {
     let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");
     let want: serde_json::Value = serde_json::from_str("{\"id\":\"6ba7b810-9dad-11d1-80b4-00c04fd430c8\",\"name\":\"Songe\",\"count\":0}").expect("expectedBody is valid JSON");
-    assert_eq!(got, want);
+    assert!(body_matches(&want, &got), "body {got} does not match {want}");
 }`
 
 func TestTheEmittedFileHasOneEntryUnderAppTests(t *testing.T) {
@@ -367,6 +367,70 @@ func TestTheMockAssertsTheDecodedBodyAndPathParameterAgainstTheVectorInput(t *te
 		if !strings.Contains(content, line) {
 			t.Errorf("the file lacks %q\n%s", line, content)
 		}
+	}
+}
+
+const errorOnlyCases = `{
+  "cases": [
+    {
+      "case": "create_empty_name_refused",
+      "operation": "createGreeting",
+      "input": { "name": "" },
+      "expectedStatus": 422,
+      "expectedErrorSubstring": "name"
+    }
+  ]
+}`
+
+func TestTheGeneratedBodyAssertionIsASubsetMatchSoAResponseKeyTheVectorOmitsIsIgnored(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	if !strings.Contains(content, `assert!(body_matches(&want, &got), "body {got} does not match {want}");`) {
+		t.Fatalf("the generated body assertion is not a subset match:\n%s", content)
+	}
+
+	if strings.Contains(content, "assert_eq!(got, want);") {
+		t.Fatalf("the generated file still asserts a whole body equality:\n%s", content)
+	}
+}
+
+func TestTheGeneratedHelperReadsAUuidPlaceholderOnATopLevelIdAsAnyUuidV4(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	want := []string{
+		`const UUID_PLACEHOLDER: &str = "<uuid>";`,
+		`const ID_KEY: &str = "id";`,
+		"fn body_matches(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {",
+		"if key == ID_KEY && expected.as_str() == Some(UUID_PLACEHOLDER) {",
+		"return actual.as_str().is_some_and(is_uuid_v4);",
+		"fn is_uuid_v4(value: &str) -> bool {",
+	}
+
+	for _, line := range want {
+		if !strings.Contains(content, line) {
+			t.Fatalf("the generated file lacks %q:\n%s", line, content)
+		}
+	}
+}
+
+func TestVectorsThatExpectNoBodyEmitNoBodyMatcher(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(errorOnlyCases), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if strings.Contains(files[0].Content, "fn body_matches(") {
+		t.Fatalf("the generated file carries a body matcher no test calls:\n%s", files[0].Content)
 	}
 }
 

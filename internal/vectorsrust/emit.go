@@ -104,6 +104,55 @@ use {{ $.CoreCrate }}::controller::{{ .Snake }}_controller::{{ .Pascal }}Control
 {{ range .TypeImports -}}
 use {{ $.CoreCrate }}::types::{{ .Snake }}::{{ .Name }};
 {{ end }}
+{{- if .NeedsBodyMatcher }}
+const UUID_PLACEHOLDER: &str = "<uuid>";
+const ID_KEY: &str = "id";
+
+fn body_matches(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {
+    let (Some(expected_fields), Some(actual_fields)) = (expected.as_object(), actual.as_object())
+    else {
+        return expected == actual;
+    };
+
+    expected_fields
+        .iter()
+        .all(|(key, value)| field_matches(key, value, actual_fields.get(key)))
+}
+
+fn field_matches(
+    key: &str,
+    expected: &serde_json::Value,
+    actual: Option<&serde_json::Value>,
+) -> bool {
+    let Some(actual) = actual else {
+        return false;
+    };
+
+    if key == ID_KEY && expected.as_str() == Some(UUID_PLACEHOLDER) {
+        return actual.as_str().is_some_and(is_uuid_v4);
+    }
+
+    expected == actual
+}
+
+fn is_uuid_v4(value: &str) -> bool {
+    let bytes = value.as_bytes();
+
+    if bytes.len() != 36 {
+        return false;
+    }
+
+    let shaped = bytes.iter().enumerate().all(|(index, byte)| {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            *byte == b'-'
+        } else {
+            byte.is_ascii_hexdigit()
+        }
+    });
+
+    shaped && bytes[14] == b'4' && matches!(bytes[19], b'8' | b'9' | b'a' | b'A' | b'b' | b'B')
+}
+{{ end }}
 {{ range .Controllers }}{{ $c := . }}
 mockall::mock! {
     pub {{ $c.Pascal }}Controller {}
@@ -147,7 +196,7 @@ async fn {{ .Name }}() {
 {{- if .HasExpectedBody }}
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");
     let want: serde_json::Value = serde_json::from_str({{ .ExpectedBodyLiteral }}).expect("expectedBody is valid JSON");
-    assert_eq!(got, want);
+    assert!(body_matches(&want, &got), "body {got} does not match {want}");
 {{- end }}
 {{- if .HasExpectedSubstring }}
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");

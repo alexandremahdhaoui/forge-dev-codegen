@@ -26,12 +26,13 @@ import (
 )
 
 type view struct {
-	Header      string
-	CoreCrate   string
-	AppCrate    string
-	Controllers []controllerView
-	TypeImports []importView
-	Tests       []testView
+	Header           string
+	CoreCrate        string
+	AppCrate         string
+	Controllers      []controllerView
+	TypeImports      []importView
+	Tests            []testView
+	NeedsBodyMatcher bool
 }
 
 type importView struct {
@@ -175,6 +176,10 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, opts Options) (view, er
 
 	for i := range v.Tests {
 		v.Tests[i].DriverArgs = driverArgs(v.Controllers, v.Tests[i].ArmController, v.Tests[i].ArmVar)
+
+		if v.Tests[i].HasExpectedBody {
+			v.NeedsBodyMatcher = true
+		}
 	}
 
 	return v, nil
