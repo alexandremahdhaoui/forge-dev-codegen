@@ -99,13 +99,23 @@ type specKey struct {
 	Description string
 }
 
-func camel(snake string) string {
-	pascal := rustname.Pascal(snake)
-	if pascal == "" {
-		return pascal
+// configKey joins the parts of a config key in snake case. The config
+// generator lowercases a key to spell the Rust field and never splits a
+// camel hump, so greetingStore would reach the loader as greetingstore
+// while the env name still split on the hump. Snake case spells the same
+// on both sides.
+func configKey(parts ...string) string {
+	out := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		out = append(out, rustname.Snake(part))
 	}
 
-	return strings.ToLower(pascal[:1]) + pascal[1:]
+	return strings.Join(out, "_")
 }
 
 func rustType(fieldType string) string {
@@ -159,7 +169,7 @@ func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, e
 		Crate:       rustname.Snake(opts.Service),
 		Binary:      wiring.Binary,
 		BinaryIdent: rustname.Snake(wiring.Binary),
-		ConfigType:  rustname.Pascal(wiring.Binary) + "Config",
+		ConfigType:  rustname.Pascal(opts.Service) + "Config",
 	}
 
 	p.Cells = append(p.Cells, opts.Cells...)
@@ -234,11 +244,11 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 
 		for _, field := range sortedFieldNames(entry.Driver.Config) {
 			declared := entry.Driver.Config[field]
-			key := camel(name) + rustname.Pascal(field)
+			key := configKey(name, field)
 
 			dp.Fields = append(dp.Fields, fieldPlan{
 				Name: field,
-				Expr: readExpr(rustname.Snake(key), declared.Type),
+				Expr: readExpr(key, declared.Type),
 			})
 
 			p.Keys = append(p.Keys, specKey{
@@ -254,7 +264,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 		}
 
 		p.Keys = append(p.Keys, specKey{
-			Key:         "driver" + rustname.Pascal(name),
+			Key:         "driver_" + rustname.Snake(name),
 			Type:        "boolean",
 			Default:     wiring.Drivers[name].Enabled,
 			Description: "Whether the " + name + " driver starts",
@@ -342,7 +352,7 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 		pp := portPlan{
 			Trait:     trait,
 			Var:       rustname.Snake(trait),
-			ConfigVar: rustname.Snake(camel(rustname.Snake(trait))),
+			ConfigVar: configKey(trait),
 			Names:     list(candidateNames(block)),
 		}
 
@@ -358,7 +368,7 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 		}
 
 		p.Keys = append(p.Keys, specKey{
-			Key:         camel(rustname.Snake(trait)),
+			Key:         configKey(trait),
 			Type:        "string",
 			Default:     block.Default,
 			Description: "Which " + trait + " adapter to build, one of " + pp.Names,
@@ -377,7 +387,7 @@ func planCandidate(
 	byName map[string]cellmanifest.AdapterEntry,
 	imports map[string]bool,
 ) (candidatePlan, error) {
-	portKey := camel(rustname.Snake(trait))
+	portKey := configKey(trait)
 
 	if candidate.Type == "" {
 		entry, provided := byName[name]
@@ -406,11 +416,11 @@ func planCandidate(
 
 		for _, field := range sortedFieldNames(entry.Adapter.Config) {
 			declared := entry.Adapter.Config[field]
-			key := portKey + rustname.Pascal(name) + rustname.Pascal(field)
+			key := configKey(portKey, name, field)
 
 			cp.Fields = append(cp.Fields, fieldPlan{
 				Name: field,
-				Expr: readExpr(rustname.Snake(key), declared.Type),
+				Expr: readExpr(key, declared.Type),
 			})
 
 			p.Keys = append(p.Keys, specKey{
@@ -455,11 +465,11 @@ func planCandidate(
 			return candidatePlan{}, err
 		}
 
-		key := portKey + rustname.Pascal(name) + rustname.Pascal(field)
+		key := configKey(portKey, name, field)
 
 		cp.Fields = append(cp.Fields, fieldPlan{
 			Name: field,
-			Expr: readExpr(rustname.Snake(key), declared.Type),
+			Expr: readExpr(key, declared.Type),
 		})
 
 		hand.Fields = append(hand.Fields, specField{Ident: field, RustType: rustType(declared.Type)})

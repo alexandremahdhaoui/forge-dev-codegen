@@ -191,7 +191,7 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-pub struct SongeHelloNodeConfig {
+pub struct SongeHelloConfig {
     pub greeting_store: String,
     pub greeting_store_memory_capacity: i64,
     pub greeting_store_sqlite_path: String,
@@ -203,7 +203,7 @@ pub struct SongeHelloNodeConfig {
     pub udp_addr: String,
 }
 
-impl Default for SongeHelloNodeConfig {
+impl Default for SongeHelloConfig {
     fn default() -> Self {
         Self {
             greeting_store: "sqlite".to_string(),
@@ -219,7 +219,7 @@ impl Default for SongeHelloNodeConfig {
     }
 }
 
-impl SongeHelloNodeConfig {
+impl SongeHelloConfig {
     pub fn load(args: &[String]) -> Result<Self, ConfigError> {
         let mut config = Self::default();
 

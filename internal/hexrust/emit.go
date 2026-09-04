@@ -21,6 +21,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/template"
 
 	"sigs.k8s.io/yaml"
@@ -249,6 +250,8 @@ type specProperty struct {
 	Type        string `json:"type"`
 	Default     *any   `json:"default,omitempty"`
 	Description string `json:"description,omitempty"`
+	Env         string `json:"x-env,omitempty"`
+	Flag        string `json:"x-flag,omitempty"`
 }
 
 type specSchema struct {
@@ -271,11 +274,40 @@ type specDocument struct {
 	Components specComponents `json:"components"`
 }
 
+// describe never answers an empty string. The config generator writes the
+// description as a doc comment above the field, and clippy refuses an empty
+// one, so a field a manifest left undescribed would fail the lint gate of
+// the crate that generated it.
+func describe(key specKey, binary string) string {
+	if key.Description != "" {
+		return key.Description
+	}
+
+	return "The " + strings.ReplaceAll(key.Key, "_", " ") + " of " + binary
+}
+
+// EnvName and FlagName pin a config key to the binary that reads it. The
+// config generator derives both from the cell name, and a cell is named for
+// the crate, so without these a two binary crate would answer one env name
+// for both and the node would read the crate's name instead of its own.
+func EnvName(binary, key string) string {
+	return strings.ToUpper(rustname.Snake(binary)) + "_" + strings.ToUpper(rustname.Snake(key))
+}
+
+func FlagName(key string) string {
+	return strings.ReplaceAll(rustname.Snake(key), "_", "-")
+}
+
 func ConfigSpec(p plan) (string, error) {
 	properties := map[string]specProperty{}
 
 	for _, key := range p.Keys {
-		property := specProperty{Type: key.Type, Description: key.Description}
+		property := specProperty{
+			Type:        key.Type,
+			Description: describe(key, p.Binary),
+			Env:         EnvName(p.Binary, key.Key),
+			Flag:        FlagName(key.Key),
+		}
 
 		if key.Default != nil {
 			value := key.Default
