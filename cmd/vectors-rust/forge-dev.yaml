@@ -1,0 +1,15 @@
+name: vectors-rust
+kind: mcp-server
+version: 0.1.0
+description: Emits rust integration tests from OpenAPI declared vectors - one tokio test per case, driving the generated axum driver with a mocked controller.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+surface:
+  tools:
+    - name: generate
+      description: Answer the app crate's generated vector tests from an OpenAPI spec and a vectors document.
+      input: GenerateInput
+      output: GenerateOutput
