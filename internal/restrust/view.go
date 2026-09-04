@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 type view struct {
@@ -113,11 +115,6 @@ func buildView(spec *Spec, opts Options) view {
 	cratePath := "crate::" + opts.Cell + "::"
 	modulePrefix := opts.Cell + "::"
 
-	if opts.Root {
-		cratePath = "crate::"
-		modulePrefix = ""
-	}
-
 	v := view{
 		Header:           header,
 		Service:          opts.Service,
@@ -144,7 +141,7 @@ func buildView(spec *Spec, opts Options) view {
 		sv := storeView{
 			Name:         s.Name,
 			Snake:        s.Snake,
-			Upper:        Upper(s.Name),
+			Upper:        rustname.Upper(s.Name),
 			Port:         s.Name + "Store",
 			PortSnake:    s.Snake + "_store",
 			Struct:       s.Name + "SqliteStore",
@@ -229,7 +226,7 @@ func buildTypeView(t TypeDef) typeView {
 func coreType(ft fieldType) string {
 	switch ft.Kind {
 	case "ref":
-		return "super::" + Snake(ft.Ref) + "::" + ft.Ref
+		return "super::" + rustname.Snake(ft.Ref) + "::" + ft.Ref
 	case "array":
 		return "Vec<" + coreType(*ft.Item) + ">"
 	default:
@@ -318,7 +315,7 @@ func buildControllerView(c Controller, storesByPort map[string]storeView) contro
 	}
 
 	for _, name := range sortedKeys(imports) {
-		cv.TypeImports = append(cv.TypeImports, importView{Snake: Snake(name), Name: name})
+		cv.TypeImports = append(cv.TypeImports, importView{Snake: rustname.Snake(name), Name: name})
 	}
 
 	return cv

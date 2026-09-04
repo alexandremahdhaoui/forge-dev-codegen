@@ -195,17 +195,15 @@ protox = "0.9"
 tonic-prost-build = "0.14"
 `
 
-const bothEnginesCrateLib = `pub mod adapter;
-pub mod controller;
-pub mod driver;
-pub mod grpc;
-pub mod port;
-pub mod types;
+const bothEnginesCrateLib = `pub mod grpc;
+pub mod rest;
 `
 
-const bothEnginesGreetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
-use crate::port::greeting_store::GreetingStore;
-use crate::types::greeting::Greeting;
+const bothEnginesGreetingControllerImpl = `use crate::rest::controller::{
+    GreetingController, GreetingControllerError, GreetingControllerImpl,
+};
+use crate::rest::port::greeting_store::GreetingStore;
+use crate::rest::types::greeting::Greeting;
 
 impl GreetingController for GreetingControllerImpl {
     fn create_greeting(&self, body: Greeting) -> Result<Greeting, GreetingControllerError> {
@@ -227,12 +225,9 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 		t.Skip("cargo is not on PATH")
 	}
 
-	restFiles, err := restrust.Generate([]byte(bothEnginesOpenapi), restrust.Options{
-		Service: "songe-hello",
-		Root:    true,
-	})
+	restFiles, err := restrust.Generate([]byte(bothEnginesOpenapi), restrust.Options{Service: "songe-hello"})
 	if err != nil {
-		t.Fatalf("generating the root layers: %v", err)
+		t.Fatalf("generating the rest cell: %v", err)
 	}
 
 	cellFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
@@ -265,7 +260,7 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 			continue
 		}
 
-		write(f.Path, f.Content)
+		write(filepath.Join("src", "rest", f.Path), f.Content)
 	}
 
 	for _, f := range cellFiles {
@@ -276,7 +271,7 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 		write(filepath.Join("src", "grpc", f.Path), f.Content)
 	}
 
-	write("src/controller/greeting_controller.rs", bothEnginesGreetingControllerImpl)
+	write("src/rest/controller/greeting_controller.rs", bothEnginesGreetingControllerImpl)
 	write("src/grpc/controller/hello_controller.rs", helloControllerImpl)
 
 	runCargoCheck(t, cargo, root)

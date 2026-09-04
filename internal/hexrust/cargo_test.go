@@ -430,6 +430,42 @@ fn unused(request: Echo, context: &Context) -> Result<Echo, HelloDatagramControl
 	}
 }
 
+func TestAUserFileWithNoImplBlockFailsTheBuildNamingTheTrait(t *testing.T) {
+	cargo, root := standUpTheNodeCrate(t)
+
+	empty := `use crate::rest::controller::{
+    GreetingController, GreetingControllerError, GreetingControllerImpl,
+};
+use crate::rest::port::greeting_store::GreetingStore;
+use crate::rest::types::greeting::Greeting;
+
+fn unused(
+    controller: &GreetingControllerImpl,
+    store: &dyn GreetingStore,
+    body: Greeting,
+) -> Result<Greeting, GreetingControllerError> {
+    let _ = (controller, store);
+
+    Ok(body)
+}
+`
+
+	writeUnder(t, root)("src/rest/controller/greeting_controller.rs", empty)
+
+	out, err := runCargo(t, cargo, root, "check", "--workspace")
+	if err == nil {
+		t.Fatalf("the build passed with no impl block at all\n%s", out)
+	}
+
+	skipOnNetwork(t, out, err)
+
+	for _, want := range []string{"E0277", "GreetingController"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the build never named %q\n%s", want, out)
+		}
+	}
+}
+
 func nodeBinary(t *testing.T, cargo, root string) string {
 	t.Helper()
 

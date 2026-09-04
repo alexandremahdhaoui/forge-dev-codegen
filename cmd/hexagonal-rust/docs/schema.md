@@ -1,6 +1,6 @@
 # hexagonal-rust Configuration
 
-Emits the hexagonal rust skeleton of one service from its OpenAPI spec - types, ports, controllers and hand stubs in core, sqlite adapters, an axum driver and main in app.
+Reads layout.cells, the wiring and the cell manifests of one service. Answers the crate root, the root layer modules, the config module, the config schema and main.
 
 > Full OpenAPI specification: [spec.openapi.yaml](../spec.openapi.yaml)
 

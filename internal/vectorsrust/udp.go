@@ -23,6 +23,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 const datagramOperationPrefix = "udp_"
@@ -125,19 +126,19 @@ func readDatagramService(proto []byte, cell string) (*datagramService, error) {
 			return nil, err
 		}
 
-		rpcs[datagramOperationPrefix+grpcrust.Snake(r.Name)] = datagramRpc{
-			Ident:   grpcrust.RustIdent(r.Name),
-			Pascal:  grpcrust.Pascal(r.Name),
+		rpcs[datagramOperationPrefix+rustname.Snake(r.Name)] = datagramRpc{
+			Ident:   rustname.RustIdent(r.Name),
+			Pascal:  rustname.Pascal(r.Name),
 			Request: request,
 			Reply:   reply,
 		}
 	}
 
 	return &datagramService{
-		Pascal:      grpcrust.Pascal(svc.Name),
-		Snake:       grpcrust.Snake(svc.Name),
+		Pascal:      rustname.Pascal(svc.Name),
+		Snake:       rustname.Snake(svc.Name),
 		Cell:        cell,
-		ClientTrait: grpcrust.Pascal(svc.Name) + "Client",
+		ClientTrait: rustname.Pascal(svc.Name) + "Client",
 		Rpcs:        rpcs,
 	}, nil
 }
@@ -170,12 +171,12 @@ func buildDatagramServiceView(svc *datagramService) datagramServiceView {
 
 		view.Ops = append(view.Ops, datagramMockOp{
 			Ident:   rpc.Ident,
-			Request: grpcrust.Pascal(rpc.Request.Name),
-			Reply:   grpcrust.Pascal(rpc.Reply.Name),
+			Request: rustname.Pascal(rpc.Request.Name),
+			Reply:   rustname.Pascal(rpc.Reply.Name),
 		})
 
-		types[grpcrust.Pascal(rpc.Request.Name)] = true
-		types[grpcrust.Pascal(rpc.Reply.Name)] = true
+		types[rustname.Pascal(rpc.Request.Name)] = true
+		types[rustname.Pascal(rpc.Reply.Name)] = true
 	}
 
 	view.TypeImports = sortedStrings(types)
@@ -269,14 +270,14 @@ func messageLiteral(m grpcrust.Message, raw json.RawMessage) (string, error) {
 			return "", err
 		}
 
-		parts = append(parts, grpcrust.RustIdent(f.Name)+": "+literal)
+		parts = append(parts, rustname.RustIdent(f.Name)+": "+literal)
 	}
 
 	if len(parts) == 0 {
-		return grpcrust.Pascal(m.Name) + " {}", nil
+		return rustname.Pascal(m.Name) + " {}", nil
 	}
 
-	return grpcrust.Pascal(m.Name) + " { " + strings.Join(parts, ", ") + " }", nil
+	return rustname.Pascal(m.Name) + " { " + strings.Join(parts, ", ") + " }", nil
 }
 
 func scalarLiteral(f grpcrust.Field, raw json.RawMessage) (string, error) {

@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 type document struct {
@@ -150,14 +152,12 @@ var methods = []string{"get", "put", "post", "delete", "options", "head", "patch
 
 const forgeDevSpecSchema = "Spec"
 
-var rustAndSQLIdent = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
 func checkName(what, name string) error {
-	if rustAndSQLIdent.MatchString(Snake(name)) {
+	if rustname.IsSnakeIdent(rustname.Snake(name)) {
 		return nil
 	}
 
-	return fmt.Errorf("reading %s %q: its snake form %q is not a name Rust or SQL can spell, use letters, digits and underscores and start with a letter", what, name, Snake(name))
+	return fmt.Errorf("reading %s %q: its snake form %q is not a name Rust or SQL can spell, use letters, digits and underscores and start with a letter", what, name, rustname.Snake(name))
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
@@ -221,7 +221,7 @@ func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
 			return nil, fmt.Errorf("reading schema %q: an x-store schema needs a required string property named id", name)
 		}
 
-		types = append(types, TypeDef{Name: name, Snake: Snake(name), Store: s.Store, Fields: fields})
+		types = append(types, TypeDef{Name: name, Snake: rustname.Snake(name), Store: s.Store, Fields: fields})
 	}
 
 	return types, nil
@@ -256,10 +256,7 @@ func parseFields(typeName string, s schema, schemas map[string]schema) ([]Field,
 			return nil, fmt.Errorf("reading property %q of schema %q: %w", name, typeName, err)
 		}
 
-		ident := Snake(name)
-		if rustKeywords[ident] {
-			ident = "r#" + ident
-		}
+		ident := rustname.RustIdent(name)
 
 		fields = append(fields, Field{
 			Name:     name,
@@ -411,7 +408,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 
 	return Operation{
 		ID:            op.OperationID,
-		Ident:         Snake(op.OperationID),
+		Ident:         rustname.Snake(op.OperationID),
 		Summary:       op.Summary,
 		Method:        strings.ToUpper(method),
 		MethodLower:   method,
@@ -443,7 +440,7 @@ func parseParams(where, path string, op operation) ([]Param, error) {
 			return nil, fmt.Errorf("reading %s: %w", where, err)
 		}
 
-		declared[p.Name] = Param{Name: p.Name, Ident: Snake(p.Name), Kind: kind}
+		declared[p.Name] = Param{Name: p.Name, Ident: rustname.Snake(p.Name), Kind: kind}
 	}
 
 	params := []Param{}
@@ -526,7 +523,7 @@ func groupControllers(ops []Operation) []Controller {
 	for _, op := range ops {
 		c, ok := byName[op.Controller]
 		if !ok {
-			c = &Controller{Name: op.Controller, Snake: Snake(op.Controller), Pascal: Pascal(op.Controller)}
+			c = &Controller{Name: op.Controller, Snake: rustname.Snake(op.Controller), Pascal: rustname.Pascal(op.Controller)}
 			byName[op.Controller] = c
 		}
 
@@ -569,12 +566,4 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 
 	return keys
-}
-
-var rustKeywords = map[string]bool{
-	"as": true, "break": true, "const": true, "continue": true, "crate": true, "else": true, "enum": true,
-	"extern": true, "false": true, "fn": true, "for": true, "if": true, "impl": true, "in": true, "let": true,
-	"loop": true, "match": true, "mod": true, "move": true, "mut": true, "pub": true, "ref": true, "return": true,
-	"self": true, "static": true, "struct": true, "super": true, "trait": true, "true": true, "type": true,
-	"unsafe": true, "use": true, "where": true, "while": true, "async": true, "await": true, "dyn": true,
 }

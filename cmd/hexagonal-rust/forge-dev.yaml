@@ -1,7 +1,7 @@
 name: hexagonal-rust
 kind: mcp-server
 version: 0.1.0
-description: Emits the hexagonal rust skeleton of one service from its OpenAPI spec - types, ports, controllers and hand stubs in core, sqlite adapters, an axum driver and main in app.
+description: Reads layout.cells, the wiring and the cell manifests of one service. Answers the crate root, the root layer modules, the config module, the config schema and main.
 openapi:
   specPath: ./spec.openapi.yaml
 generate:
@@ -10,6 +10,6 @@ generate:
 layout:
   tools:
     - name: generate
-      description: Answer the core and app crates of one service from the normalized forge-dev model.
+      description: Read layout.cells, the wiring and the cell manifests, and answer the crate root, the root layer modules, the config module, the config schema and main.
       input: GenerateInput
       output: GenerateOutput

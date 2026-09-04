@@ -43,6 +43,7 @@ func NewHandlers() Handlers {
 				Service:  input.Name,
 				CrateDir: layoutString(input.Layout, "crateDir"),
 				Cell:     layoutString(input.Layout, "cell"),
+				RestCell: layoutString(input.Layout, "restCell"),
 				Proto:    []byte(input.ProtoSpec),
 			})
 			if err != nil {

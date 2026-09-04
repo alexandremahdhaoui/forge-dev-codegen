@@ -503,6 +503,21 @@ drivers:
 `,
 			want: `wiring port "GreetingStore": candidate "memory" has module "rest::adapter::greeting_memory", a hand written adapter lives under the adapter layer`,
 		},
+		{
+			name: "a candidate that implements another port",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: grpc_client
+    adapters:
+      grpc_client: {}
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+`,
+			want: `wiring port "GreetingStore": candidate "grpc_client" implements "HelloClient" and the wiring names it under "GreetingStore"`,
+		},
 	}
 
 	root := standUpCells(t, "grpc", "rest", "udp")
@@ -519,6 +534,85 @@ drivers:
 				t.Fatalf("generating reported %v, want it to name %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAHandWrittenCandidateTheWiringCallsFallibleGetsAContextAndAQuestionMark(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	fallible := `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: memory
+    adapters:
+      sqlite: {}
+      memory:
+        type: GreetingMemoryStore
+        module: adapter::greeting_memory
+        fallible: true
+        config:
+          capacity: { type: integer, default: 100 }
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`
+
+	main := generateHello(t, root, fallible)["src/bin/zz_generated_songe_hello_node.rs"]
+
+	want := `.context("building the memory adapter of songe-hello-node")?,`
+	if !strings.Contains(main, want) {
+		t.Errorf("main lacks %q\n%s", want, main)
+	}
+}
+
+func TestAHandWrittenCandidateTheWiringLeavesInfallibleGetsNoQuestionMark(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	main := generateHello(t, root, helloWiring)["src/bin/zz_generated_songe_hello_node.rs"]
+
+	if strings.Contains(main, `.context("building the memory adapter of songe-hello-node")?`) {
+		t.Errorf("main asks a question mark of an adapter that never fails\n%s", main)
+	}
+}
+
+func TestAPortACellRequiresAndNoCellDeclaresIsRefused(t *testing.T) {
+	root := standUpCells(t, "rest")
+
+	manifest := cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Requires:  cellmanifest.Requires{Ports: []string{"Clock"}},
+	}
+
+	body, err := cellmanifest.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshalling the manifest: %v", err)
+	}
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), string(body))
+
+	_, err = hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+`),
+	})
+
+	want := `wiring the ports: cell "ws" requires port "Clock" and no cell manifest declares that port trait`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
 	}
 }
 

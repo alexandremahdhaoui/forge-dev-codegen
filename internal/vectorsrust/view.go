@@ -23,11 +23,13 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 type view struct {
 	Header           string
 	Crate            string
+	RestCell         string
 	Controllers      []controllerView
 	TypeImports      []importView
 	Tests            []testView
@@ -127,8 +129,9 @@ func paramArgType(kind string) string {
 
 func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
 	v := view{
-		Header: header,
-		Crate:  restrust.Snake(opts.Service),
+		Header:   header,
+		Crate:    rustname.Snake(opts.Service),
+		RestCell: opts.RestCell,
 	}
 
 	opsByID := map[string]restrust.Operation{}
@@ -156,7 +159,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 	}
 
 	for _, name := range sortedStrings(usedTypes) {
-		v.TypeImports = append(v.TypeImports, importView{Snake: restrust.Snake(name), Name: name})
+		v.TypeImports = append(v.TypeImports, importView{Snake: rustname.Snake(name), Name: name})
 	}
 
 	for _, c := range vectors.Cases {

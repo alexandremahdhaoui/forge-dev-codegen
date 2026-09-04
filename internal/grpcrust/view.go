@@ -17,6 +17,8 @@ package grpcrust
 import (
 	"fmt"
 	"sort"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 type fieldView struct {
@@ -101,10 +103,10 @@ func ScalarRustType(kind string) string {
 }
 
 func buildMessageView(m Message) messageView {
-	mv := messageView{Name: Pascal(m.Name)}
+	mv := messageView{Name: rustname.Pascal(m.Name)}
 
 	for _, f := range m.Fields {
-		ident := RustIdent(f.Name)
+		ident := rustname.RustIdent(f.Name)
 
 		var core, pb string
 
@@ -113,8 +115,8 @@ func buildMessageView(m Message) messageView {
 			t := ScalarRustType(f.Scalar)
 			core, pb = t, t
 		case FieldMessage:
-			t := "Option<" + Pascal(f.Message) + ">"
-			pbT := "Option<pb::" + Pascal(f.Message) + ">"
+			t := "Option<" + rustname.Pascal(f.Message) + ">"
+			pbT := "Option<pb::" + rustname.Pascal(f.Message) + ">"
 			core, pb = t, pbT
 		}
 
@@ -204,8 +206,8 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 	clientName := opts.Cell + "_client"
 
 	if !only {
-		driverName = opts.Cell + "_" + Snake(svc.Name)
-		clientName = opts.Cell + "_" + Snake(svc.Name) + "_client"
+		driverName = opts.Cell + "_" + rustname.Snake(svc.Name)
+		clientName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_client"
 	}
 
 	sv := serviceView{
@@ -214,48 +216,48 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		Cell:             opts.Cell,
 		CratePath:        "crate::" + opts.Cell + "::",
 		ModulePrefix:     opts.Cell + "::",
-		ServicePascal:    Pascal(svc.Name),
-		ServiceSnake:     Snake(svc.Name),
-		ClientTrait:      Pascal(svc.Name) + "Client",
-		ClientError:      Pascal(svc.Name) + "ClientError",
-		ClientStruct:     Pascal(svc.Name) + "GrpcClient",
-		ClientConfig:     Pascal(svc.Name) + "GrpcClientConfig",
-		ClientSetupError: Pascal(svc.Name) + "GrpcClientError",
-		ClientModule:     Snake(svc.Name) + "_grpc_client",
+		ServicePascal:    rustname.Pascal(svc.Name),
+		ServiceSnake:     rustname.Snake(svc.Name),
+		ClientTrait:      rustname.Pascal(svc.Name) + "Client",
+		ClientError:      rustname.Pascal(svc.Name) + "ClientError",
+		ClientStruct:     rustname.Pascal(svc.Name) + "GrpcClient",
+		ClientConfig:     rustname.Pascal(svc.Name) + "GrpcClientConfig",
+		ClientSetupError: rustname.Pascal(svc.Name) + "GrpcClientError",
+		ClientModule:     rustname.Snake(svc.Name) + "_grpc_client",
 		ClientName:       clientName,
-		DriverStruct:     Pascal(svc.Name) + "GrpcDriver",
-		DriverConfig:     Pascal(svc.Name) + "GrpcDriverConfig",
-		DriverError:      Pascal(svc.Name) + "GrpcDriverError",
-		DriverService:    Pascal(svc.Name) + "GrpcService",
-		DriverModule:     Snake(svc.Name) + "_grpc_driver",
+		DriverStruct:     rustname.Pascal(svc.Name) + "GrpcDriver",
+		DriverConfig:     rustname.Pascal(svc.Name) + "GrpcDriverConfig",
+		DriverError:      rustname.Pascal(svc.Name) + "GrpcDriverError",
+		DriverService:    rustname.Pascal(svc.Name) + "GrpcService",
+		DriverModule:     rustname.Snake(svc.Name) + "_grpc_driver",
 		DriverName:       driverName,
 		DefaultAddress:   DefaultAddress,
 		DefaultEndpoint:  DefaultEndpoint,
-		ControllerSnake:  Snake(svc.Name),
-		ControllerTrait:  Pascal(svc.Name) + "Controller",
-		ControllerError:  Pascal(svc.Name) + "ControllerError",
-		PbClientMod:      Snake(svc.Name) + "_client",
-		PbServerMod:      Snake(svc.Name) + "_server",
+		ControllerSnake:  rustname.Snake(svc.Name),
+		ControllerTrait:  rustname.Pascal(svc.Name) + "Controller",
+		ControllerError:  rustname.Pascal(svc.Name) + "ControllerError",
+		PbClientMod:      rustname.Snake(svc.Name) + "_client",
+		PbServerMod:      rustname.Snake(svc.Name) + "_server",
 	}
 
 	for _, m := range messages {
 		sv.Messages = append(sv.Messages, buildMessageView(m))
-		sv.AllTypes = append(sv.AllTypes, Pascal(m.Name))
+		sv.AllTypes = append(sv.AllTypes, rustname.Pascal(m.Name))
 	}
 
 	seenTrait := map[string]bool{}
 
 	for _, r := range svc.Rpcs {
 		sv.Rpcs = append(sv.Rpcs, rpcView{
-			Ident:      Snake(r.Name),
-			Pascal:     Pascal(r.Name),
-			Request:    Pascal(r.Request),
-			Response:   Pascal(r.Response),
-			PbRequest:  "pb::" + Pascal(r.Request),
-			PbResponse: "pb::" + Pascal(r.Response),
+			Ident:      rustname.Snake(r.Name),
+			Pascal:     rustname.Pascal(r.Name),
+			Request:    rustname.Pascal(r.Request),
+			Response:   rustname.Pascal(r.Response),
+			PbRequest:  "pb::" + rustname.Pascal(r.Request),
+			PbResponse: "pb::" + rustname.Pascal(r.Response),
 		})
 
-		for _, t := range []string{Pascal(r.Request), Pascal(r.Response)} {
+		for _, t := range []string{rustname.Pascal(r.Request), rustname.Pascal(r.Response)} {
 			if !seenTrait[t] {
 				seenTrait[t] = true
 

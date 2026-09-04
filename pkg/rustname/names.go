@@ -12,12 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package grpcrust
+package rustname
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 )
+
+var snakeIdent = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+var keywords = map[string]bool{
+	"as": true, "break": true, "const": true, "continue": true, "crate": true, "else": true, "enum": true,
+	"extern": true, "false": true, "fn": true, "for": true, "if": true, "impl": true, "in": true, "let": true,
+	"loop": true, "match": true, "mod": true, "move": true, "mut": true, "pub": true, "ref": true, "return": true,
+	"self": true, "static": true, "struct": true, "super": true, "trait": true, "true": true, "type": true,
+	"unsafe": true, "use": true, "where": true, "while": true, "async": true, "await": true, "dyn": true,
+}
 
 func Snake(s string) string {
 	var b strings.Builder
@@ -69,21 +80,21 @@ func Upper(s string) string {
 	return strings.ToUpper(Snake(s))
 }
 
-var rustKeywords = map[string]bool{
-	"as": true, "break": true, "const": true, "continue": true, "crate": true, "else": true, "enum": true,
-	"extern": true, "false": true, "fn": true, "for": true, "if": true, "impl": true, "in": true, "let": true,
-	"loop": true, "match": true, "mod": true, "move": true, "mut": true, "pub": true, "ref": true, "return": true,
-	"self": true, "static": true, "struct": true, "super": true, "trait": true, "true": true, "type": true,
-	"unsafe": true, "use": true, "where": true, "while": true, "async": true, "await": true, "dyn": true,
+func IsSnakeIdent(name string) bool {
+	return snakeIdent.MatchString(name)
 }
 
 func IsRustKeyword(name string) bool {
-	return rustKeywords[name]
+	return keywords[name]
+}
+
+func IsModuleName(name string) bool {
+	return snakeIdent.MatchString(name) && !keywords[name]
 }
 
 func RustIdent(name string) string {
 	ident := Snake(name)
-	if rustKeywords[ident] {
+	if keywords[ident] {
 		return "r#" + ident
 	}
 

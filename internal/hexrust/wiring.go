@@ -20,8 +20,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 type Wiring struct {
@@ -36,9 +36,10 @@ type WiringPort struct {
 }
 
 type WiringCandidate struct {
-	Type   string                             `json:"type,omitempty"`
-	Module string                             `json:"module,omitempty"`
-	Config map[string]cellmanifest.ConfigField `json:"config,omitempty"`
+	Type     string                              `json:"type,omitempty"`
+	Module   string                              `json:"module,omitempty"`
+	Fallible bool                                `json:"fallible,omitempty"`
+	Config   map[string]cellmanifest.ConfigField `json:"config,omitempty"`
 }
 
 type WiringDriver struct {
@@ -64,7 +65,7 @@ func (w Wiring) validate() error {
 		return fmt.Errorf("binary is empty, it names the binary main lands in")
 	}
 
-	if !restrust.IsModuleName(restrust.Snake(w.Binary)) {
+	if !rustname.IsModuleName(rustname.Snake(w.Binary)) {
 		return fmt.Errorf("binary %q is not a name Rust can spell as a module", w.Binary)
 	}
 

@@ -11,7 +11,12 @@ type Merged struct {
 	Controllers   map[string]ControllerEntry
 	Ports         map[string]PortEntry
 	Adapters      []AdapterEntry
-	RequiredPorts []string
+	RequiredPorts []RequiredPort
+}
+
+type RequiredPort struct {
+	Trait string
+	Cell  string
 }
 
 type DriverEntry struct {
@@ -43,7 +48,7 @@ func Merge(manifests []Manifest) (Merged, error) {
 		Adapters:    []AdapterEntry{},
 	}
 
-	required := map[string]bool{}
+	requiredBy := map[string]string{}
 	cellOfAdapter := map[string]string{}
 	seenCell := map[string]bool{}
 
@@ -77,11 +82,15 @@ func Merge(manifests []Manifest) (Merged, error) {
 		}
 
 		for _, trait := range m.Requires.Ports {
-			required[trait] = true
+			if _, taken := requiredBy[trait]; !taken {
+				requiredBy[trait] = m.Cell
+			}
 		}
 	}
 
-	merged.RequiredPorts = sortedKeys(required)
+	for _, trait := range sortedKeys(requiredBy) {
+		merged.RequiredPorts = append(merged.RequiredPorts, RequiredPort{Trait: trait, Cell: requiredBy[trait]})
+	}
 
 	return merged, nil
 }
@@ -158,7 +167,7 @@ func providedBy(first, second string) string {
 	return fmt.Sprintf("provided by cell %q and by cell %q", first, second)
 }
 
-func sortedKeys(set map[string]bool) []string {
+func sortedKeys[V any](set map[string]V) []string {
 	keys := make([]string, 0, len(set))
 	for key := range set {
 		keys = append(keys, key)

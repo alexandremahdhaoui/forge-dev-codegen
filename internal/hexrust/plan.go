@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 const handAdapterLayer = "adapter::"
@@ -100,7 +100,7 @@ type specKey struct {
 }
 
 func camel(snake string) string {
-	pascal := restrust.Pascal(snake)
+	pascal := rustname.Pascal(snake)
 	if pascal == "" {
 		return pascal
 	}
@@ -156,14 +156,18 @@ func list(values []string) string {
 func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, error) {
 	p := plan{
 		Header:      header,
-		Crate:       restrust.Snake(opts.Service),
+		Crate:       rustname.Snake(opts.Service),
 		Binary:      wiring.Binary,
-		BinaryIdent: restrust.Snake(wiring.Binary),
-		ConfigType:  restrust.Pascal(wiring.Binary) + "Config",
+		BinaryIdent: rustname.Snake(wiring.Binary),
+		ConfigType:  rustname.Pascal(wiring.Binary) + "Config",
 	}
 
 	p.Cells = append(p.Cells, opts.Cells...)
 	sort.Strings(p.Cells)
+
+	if err := checkRequiredPorts(merged); err != nil {
+		return plan{}, err
+	}
 
 	imports := map[string]bool{}
 
@@ -184,6 +188,19 @@ func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, e
 	sort.Slice(p.Keys, func(i, j int) bool { return p.Keys[i].Key < p.Keys[j].Key })
 
 	return p, nil
+}
+
+func checkRequiredPorts(merged cellmanifest.Merged) error {
+	for _, required := range merged.RequiredPorts {
+		if _, provided := merged.Ports[required.Trait]; !provided {
+			return fmt.Errorf(
+				"wiring the ports: cell %q requires port %q and no cell manifest declares that port trait",
+				required.Cell, required.Trait,
+			)
+		}
+	}
+
+	return nil
 }
 
 func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[string]bool) error {
@@ -209,19 +226,19 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 
 		dp := driverPlan{
 			Name:       name,
-			Var:        restrust.Snake(name) + "_driver",
+			Var:        rustname.Snake(name) + "_driver",
 			Type:       entry.Driver.Type,
 			ConfigType: entry.Driver.Type + "Config",
-			EnabledVar: "driver_" + restrust.Snake(name),
+			EnabledVar: "driver_" + rustname.Snake(name),
 		}
 
 		for _, field := range sortedFieldNames(entry.Driver.Config) {
 			declared := entry.Driver.Config[field]
-			key := camel(name) + restrust.Pascal(field)
+			key := camel(name) + rustname.Pascal(field)
 
 			dp.Fields = append(dp.Fields, fieldPlan{
 				Name: field,
-				Expr: readExpr(restrust.Snake(key), declared.Type),
+				Expr: readExpr(rustname.Snake(key), declared.Type),
 			})
 
 			p.Keys = append(p.Keys, specKey{
@@ -233,11 +250,11 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 		}
 
 		for _, trait := range entry.Driver.Requires {
-			dp.Controllers = append(dp.Controllers, restrust.Snake(trait))
+			dp.Controllers = append(dp.Controllers, rustname.Snake(trait))
 		}
 
 		p.Keys = append(p.Keys, specKey{
-			Key:         "driver" + restrust.Pascal(name),
+			Key:         "driver" + rustname.Pascal(name),
 			Type:        "boolean",
 			Default:     wiring.Drivers[name].Enabled,
 			Description: "Whether the " + name + " driver starts",
@@ -275,12 +292,12 @@ func planControllers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports
 		cp := controllerPlan{
 			Trait: trait,
 			Impl:  entry.Controller.Impl,
-			Var:   restrust.Snake(trait),
+			Var:   rustname.Snake(trait),
 			Ports: entry.Controller.Ports,
 		}
 
 		for _, port := range entry.Controller.Ports {
-			cp.PortVars = append(cp.PortVars, restrust.Snake(port))
+			cp.PortVars = append(cp.PortVars, rustname.Snake(port))
 		}
 
 		imports[p.Crate+"::"+entry.Controller.Module+"::{"+trait+", "+entry.Controller.Impl+"}"] = true
@@ -324,8 +341,8 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 
 		pp := portPlan{
 			Trait:     trait,
-			Var:       restrust.Snake(trait),
-			ConfigVar: restrust.Snake(camel(restrust.Snake(trait))),
+			Var:       rustname.Snake(trait),
+			ConfigVar: rustname.Snake(camel(rustname.Snake(trait))),
 			Names:     list(candidateNames(block)),
 		}
 
@@ -341,7 +358,7 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 		}
 
 		p.Keys = append(p.Keys, specKey{
-			Key:         camel(restrust.Snake(trait)),
+			Key:         camel(rustname.Snake(trait)),
 			Type:        "string",
 			Default:     block.Default,
 			Description: "Which " + trait + " adapter to build, one of " + pp.Names,
@@ -360,7 +377,7 @@ func planCandidate(
 	byName map[string]cellmanifest.AdapterEntry,
 	imports map[string]bool,
 ) (candidatePlan, error) {
-	portKey := camel(restrust.Snake(trait))
+	portKey := camel(rustname.Snake(trait))
 
 	if candidate.Type == "" {
 		entry, provided := byName[name]
@@ -373,8 +390,8 @@ func planCandidate(
 
 		if entry.Adapter.Implements != trait {
 			return candidatePlan{}, fmt.Errorf(
-				"wiring port %q: candidate %q implements %q",
-				trait, name, entry.Adapter.Implements,
+				"wiring port %q: candidate %q implements %q and the wiring names it under %q",
+				trait, name, entry.Adapter.Implements, trait,
 			)
 		}
 
@@ -389,11 +406,11 @@ func planCandidate(
 
 		for _, field := range sortedFieldNames(entry.Adapter.Config) {
 			declared := entry.Adapter.Config[field]
-			key := portKey + restrust.Pascal(name) + restrust.Pascal(field)
+			key := portKey + rustname.Pascal(name) + rustname.Pascal(field)
 
 			cp.Fields = append(cp.Fields, fieldPlan{
 				Name: field,
-				Expr: readExpr(restrust.Snake(key), declared.Type),
+				Expr: readExpr(rustname.Snake(key), declared.Type),
 			})
 
 			p.Keys = append(p.Keys, specKey{
@@ -415,7 +432,7 @@ func planCandidate(
 	}
 
 	module := strings.TrimPrefix(candidate.Module, handAdapterLayer)
-	if !restrust.IsModuleName(module) {
+	if !rustname.IsModuleName(module) {
 		return candidatePlan{}, fmt.Errorf(
 			"wiring port %q: candidate %q has module %q, which is not a name Rust can spell as a module",
 			trait, name, candidate.Module,
@@ -426,6 +443,7 @@ func planCandidate(
 		Name:       name,
 		Type:       candidate.Type,
 		ConfigType: candidate.Type + "Config",
+		Fallible:   candidate.Fallible,
 	}
 
 	hand := handConfigPlan{Module: module, Adapter: cp.Type, Type: cp.ConfigType}
@@ -437,11 +455,11 @@ func planCandidate(
 			return candidatePlan{}, err
 		}
 
-		key := portKey + restrust.Pascal(name) + restrust.Pascal(field)
+		key := portKey + rustname.Pascal(name) + rustname.Pascal(field)
 
 		cp.Fields = append(cp.Fields, fieldPlan{
 			Name: field,
-			Expr: readExpr(restrust.Snake(key), declared.Type),
+			Expr: readExpr(rustname.Snake(key), declared.Type),
 		})
 
 		hand.Fields = append(hand.Fields, specField{Ident: field, RustType: rustType(declared.Type)})

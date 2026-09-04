@@ -47,6 +47,15 @@ func port(trait, module string) cellmanifest.Port {
 	return cellmanifest.Port{Trait: trait, Module: module}
 }
 
+func joinRequiredPorts(ports []cellmanifest.RequiredPort) string {
+	traits := make([]string, 0, len(ports))
+	for _, p := range ports {
+		traits = append(traits, p.Trait)
+	}
+
+	return strings.Join(traits, ",")
+}
+
 func TestMergeGathersWhatEveryCellProvides(t *testing.T) {
 	t.Parallel()
 
@@ -84,7 +93,11 @@ func TestMergeGathersWhatEveryCellProvides(t *testing.T) {
 		{"both ports are gathered", len(merged.Ports), 2},
 		{"the greeting store port belongs to the rest cell", merged.Ports["GreetingStore"].Cell, "rest"},
 		{"the required ports are sorted and deduplicated",
-			strings.Join(merged.RequiredPorts, ","), "Clock,Random"},
+			joinRequiredPorts(merged.RequiredPorts), "Clock,Random"},
+		{"a required port names the first cell that requires it",
+			merged.RequiredPorts[0].Cell, "rest"},
+		{"a port only the second cell requires names that cell",
+			merged.RequiredPorts[1].Cell, "grpc"},
 	}
 
 	for _, tc := range cases {

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 const NothingMessage = "Nothing"
@@ -84,36 +85,36 @@ type rpcView struct {
 }
 
 type serviceView struct {
-	Header             string
-	Package            string
-	Cell               string
-	CratePath          string
-	ModulePrefix       string
-	SchemaVersion      int
-	ServicePascal      string
-	ServiceSnake       string
-	ClientTrait        string
-	ClientError        string
-	ClientStruct       string
-	ClientConfig       string
-	ClientModule       string
-	ClientName         string
-	DriverStruct       string
-	DriverConfig       string
-	DriverError        string
-	DriverModule       string
-	DriverName         string
-	DefaultAddress     string
-	DefaultEndpoint    string
-	DefaultTimeoutMs   int
-	CodecError         string
-	RequestEnum        string
-	ControllerSnake    string
-	ControllerTrait    string
-	ControllerError    string
-	Messages           []messageView
-	Rpcs               []rpcView
-	TraitTypes         []string
+	Header           string
+	Package          string
+	Cell             string
+	CratePath        string
+	ModulePrefix     string
+	SchemaVersion    int
+	ServicePascal    string
+	ServiceSnake     string
+	ClientTrait      string
+	ClientError      string
+	ClientStruct     string
+	ClientConfig     string
+	ClientModule     string
+	ClientName       string
+	DriverStruct     string
+	DriverConfig     string
+	DriverError      string
+	DriverModule     string
+	DriverName       string
+	DefaultAddress   string
+	DefaultEndpoint  string
+	DefaultTimeoutMs int
+	CodecError       string
+	RequestEnum      string
+	ControllerSnake  string
+	ControllerTrait  string
+	ControllerError  string
+	Messages         []messageView
+	Rpcs             []rpcView
+	TraitTypes       []string
 }
 
 func prostAttribute(f grpcrust.Field) string {
@@ -131,16 +132,16 @@ func prostAttribute(f grpcrust.Field) string {
 }
 
 func buildMessageView(m grpcrust.Message) messageView {
-	mv := messageView{Name: grpcrust.Pascal(m.Name)}
+	mv := messageView{Name: rustname.Pascal(m.Name)}
 
 	for _, f := range m.Fields {
 		rustType := grpcrust.ScalarRustType(f.Scalar)
 		if f.Kind == grpcrust.FieldMessage {
-			rustType = "Option<" + grpcrust.Pascal(f.Message) + ">"
+			rustType = "Option<" + rustname.Pascal(f.Message) + ">"
 		}
 
 		mv.Fields = append(mv.Fields, fieldView{
-			Ident:    grpcrust.RustIdent(f.Name),
+			Ident:    rustname.RustIdent(f.Name),
 			RustType: rustType,
 			Prost:    prostAttribute(f),
 		})
@@ -171,8 +172,8 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 	clientName := opts.Cell + "_client"
 
 	if !only {
-		driverName = opts.Cell + "_" + grpcrust.Snake(svc.Name)
-		clientName = opts.Cell + "_" + grpcrust.Snake(svc.Name) + "_client"
+		driverName = opts.Cell + "_" + rustname.Snake(svc.Name)
+		clientName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_client"
 	}
 
 	sv := serviceView{
@@ -182,27 +183,27 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		CratePath:        "crate::" + opts.Cell + "::",
 		ModulePrefix:     opts.Cell + "::",
 		SchemaVersion:    version,
-		ServicePascal:    grpcrust.Pascal(svc.Name),
-		ServiceSnake:     grpcrust.Snake(svc.Name),
-		ClientTrait:      grpcrust.Pascal(svc.Name) + "Client",
-		ClientError:      grpcrust.Pascal(svc.Name) + "ClientError",
-		ClientStruct:     grpcrust.Pascal(svc.Name) + "UdpClient",
-		ClientConfig:     grpcrust.Pascal(svc.Name) + "UdpClientConfig",
-		ClientModule:     grpcrust.Snake(svc.Name) + "_udp_client",
+		ServicePascal:    rustname.Pascal(svc.Name),
+		ServiceSnake:     rustname.Snake(svc.Name),
+		ClientTrait:      rustname.Pascal(svc.Name) + "Client",
+		ClientError:      rustname.Pascal(svc.Name) + "ClientError",
+		ClientStruct:     rustname.Pascal(svc.Name) + "UdpClient",
+		ClientConfig:     rustname.Pascal(svc.Name) + "UdpClientConfig",
+		ClientModule:     rustname.Snake(svc.Name) + "_udp_client",
 		ClientName:       clientName,
-		DriverStruct:     grpcrust.Pascal(svc.Name) + "UdpDriver",
-		DriverConfig:     grpcrust.Pascal(svc.Name) + "UdpDriverConfig",
-		DriverError:      grpcrust.Pascal(svc.Name) + "UdpDriverError",
-		DriverModule:     grpcrust.Snake(svc.Name) + "_udp_driver",
+		DriverStruct:     rustname.Pascal(svc.Name) + "UdpDriver",
+		DriverConfig:     rustname.Pascal(svc.Name) + "UdpDriverConfig",
+		DriverError:      rustname.Pascal(svc.Name) + "UdpDriverError",
+		DriverModule:     rustname.Snake(svc.Name) + "_udp_driver",
 		DriverName:       driverName,
 		DefaultAddress:   DefaultAddress,
 		DefaultEndpoint:  DefaultEndpoint,
 		DefaultTimeoutMs: DefaultTimeoutMs,
-		CodecError:       grpcrust.Pascal(svc.Name) + "CodecError",
-		RequestEnum:      grpcrust.Pascal(svc.Name) + "Request",
-		ControllerSnake:  grpcrust.Snake(svc.Name),
-		ControllerTrait:  grpcrust.Pascal(svc.Name) + "Controller",
-		ControllerError:  grpcrust.Pascal(svc.Name) + "ControllerError",
+		CodecError:       rustname.Pascal(svc.Name) + "CodecError",
+		RequestEnum:      rustname.Pascal(svc.Name) + "Request",
+		ControllerSnake:  rustname.Snake(svc.Name),
+		ControllerTrait:  rustname.Pascal(svc.Name) + "Controller",
+		ControllerError:  rustname.Pascal(svc.Name) + "ControllerError",
 	}
 
 	for _, m := range messages {
@@ -216,17 +217,17 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		hash := FunctionHash(fullMethod)
 
 		sv.Rpcs = append(sv.Rpcs, rpcView{
-			Ident:      grpcrust.RustIdent(r.Name),
-			Pascal:     grpcrust.Pascal(r.Name),
-			Upper:      grpcrust.Upper(r.Name),
-			Request:    grpcrust.Pascal(r.Request),
-			Reply:      grpcrust.Pascal(r.Response),
+			Ident:      rustname.RustIdent(r.Name),
+			Pascal:     rustname.Pascal(r.Name),
+			Upper:      rustname.Upper(r.Name),
+			Request:    rustname.Pascal(r.Request),
+			Reply:      rustname.Pascal(r.Response),
 			FullMethod: fullMethod,
 			Hash:       hash,
-			Silent:     grpcrust.Pascal(r.Response) == NothingMessage,
+			Silent:     rustname.Pascal(r.Response) == NothingMessage,
 		})
 
-		for _, t := range []string{grpcrust.Pascal(r.Request), grpcrust.Pascal(r.Response)} {
+		for _, t := range []string{rustname.Pascal(r.Request), rustname.Pascal(r.Response)} {
 			if !seenTrait[t] {
 				seenTrait[t] = true
 

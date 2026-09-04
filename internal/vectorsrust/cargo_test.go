@@ -63,18 +63,16 @@ tower = "0.5"
 http-body-util = "0.1"
 `
 
-const cargoCrateLib = `pub mod adapter;
-pub mod controller;
-pub mod driver;
-pub mod port;
-pub mod types;
+const cargoCrateLib = `pub mod rest;
 pub mod udp;
 `
 
-const cargoGreetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
-use crate::port::greeting_store::GreetingStore;
-use crate::types::create_greeting_request::CreateGreetingRequest;
-use crate::types::greeting::Greeting;
+const cargoGreetingControllerImpl = `use crate::rest::controller::{
+    GreetingController, GreetingControllerError, GreetingControllerImpl,
+};
+use crate::rest::port::greeting_store::GreetingStore;
+use crate::rest::types::create_greeting_request::CreateGreetingRequest;
+use crate::rest::types::greeting::Greeting;
 
 impl GreetingController for GreetingControllerImpl {
     fn create_greeting(
@@ -241,9 +239,9 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		t.Skip("cargo is not on PATH")
 	}
 
-	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello", Root: true})
+	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
-		t.Fatalf("generating the root layers: %v", err)
+		t.Fatalf("generating the rest cell: %v", err)
 	}
 
 	udpFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello"})
@@ -283,11 +281,11 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		}
 
 		content := f.Content
-		if f.Path == "src/driver/zz_generated_wire.rs" && mangleWire != nil {
+		if f.Path == "driver/zz_generated_wire.rs" && mangleWire != nil {
 			content = mangleWire(content)
 		}
 
-		write(f.Path, content)
+		write(filepath.Join("src", "rest", f.Path), content)
 	}
 
 	for _, f := range udpFiles {
@@ -302,7 +300,7 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		write(f.Path, f.Content)
 	}
 
-	write("src/controller/greeting_controller.rs", cargoGreetingControllerImpl)
+	write("src/rest/controller/greeting_controller.rs", cargoGreetingControllerImpl)
 	write("src/udp/controller/hello_datagram_controller.rs", cargoDatagramControllerImpl)
 
 	return root, cargo

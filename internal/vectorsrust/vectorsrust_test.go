@@ -250,10 +250,10 @@ func TestTheGeneratedFileMocksTheControllerTraitByFullPathToAvoidNameCollision(t
 	content := files[0].Content
 
 	want := []string{
-		"use songe_hello::controller::GreetingControllerError;",
+		"use songe_hello::rest::controller::GreetingControllerError;",
 		"mockall::mock! {",
 		"    pub GreetingController {}",
-		"    impl songe_hello::controller::GreetingController for GreetingController {",
+		"    impl songe_hello::rest::controller::GreetingController for GreetingController {",
 		"        fn create_greeting(&self, body: CreateGreetingRequest) -> Result<Greeting, GreetingControllerError>;",
 		"        fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError>;",
 	}
@@ -264,7 +264,7 @@ func TestTheGeneratedFileMocksTheControllerTraitByFullPathToAvoidNameCollision(t
 		}
 	}
 
-	if strings.Contains(content, "use songe_hello::controller::GreetingController;") {
+	if strings.Contains(content, "use songe_hello::rest::controller::GreetingController;") {
 		t.Error("importing the trait under its own name collides with the mock struct sharing that name")
 	}
 }

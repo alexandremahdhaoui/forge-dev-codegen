@@ -165,27 +165,6 @@ func TestANamedCellRenamesEveryModulePath(t *testing.T) {
 	}
 }
 
-func TestTheRootModePutsEveryFileUnderSrcAndMountsNoCell(t *testing.T) {
-	files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello", Root: true})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if f.Path == "mod.rs" {
-			t.Error("the root mode emitted a cell mod file")
-		}
-
-		if strings.HasSuffix(f.Path, ".rs") && !strings.HasPrefix(f.Path, "src/") {
-			t.Errorf("%s is outside src", f.Path)
-		}
-
-		if strings.Contains(f.Content, "crate::rest::") {
-			t.Errorf("%s reaches through a cell name the root mode has none of", f.Path)
-		}
-	}
-}
-
 func TestTheCellManifestNamesTheCellAndItsModules(t *testing.T) {
 	files := generate(t, restrust.Options{Service: "songe-hello"})
 
@@ -220,37 +199,6 @@ func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
 		if _, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello", Cell: cell}); err == nil {
 			t.Errorf("cell %q was accepted", cell)
 		}
-	}
-}
-
-func TestNamesFollowRustCasing(t *testing.T) {
-	tests := []struct {
-		in     string
-		snake  string
-		pascal string
-		upper  string
-	}{
-		{"createGreeting", "create_greeting", "CreateGreeting", "CREATE_GREETING"},
-		{"GreetingStore", "greeting_store", "GreetingStore", "GREETING_STORE"},
-		{"player-session", "player_session", "PlayerSession", "PLAYER_SESSION"},
-		{"songe-hello", "songe_hello", "SongeHello", "SONGE_HELLO"},
-		{"HTTPServer", "httpserver", "HTTPServer", "HTTPSERVER"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			if got := restrust.Snake(tt.in); got != tt.snake {
-				t.Errorf("Snake(%q) = %q, want %q", tt.in, got, tt.snake)
-			}
-
-			if got := restrust.Pascal(tt.in); got != tt.pascal {
-				t.Errorf("Pascal(%q) = %q, want %q", tt.in, got, tt.pascal)
-			}
-
-			if got := restrust.Upper(tt.in); got != tt.upper {
-				t.Errorf("Upper(%q) = %q, want %q", tt.in, got, tt.upper)
-			}
-		})
 	}
 }
 
