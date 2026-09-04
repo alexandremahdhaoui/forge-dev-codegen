@@ -16,17 +16,19 @@ package hexrust_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
-const oneStoreOneOperation = `
+const helloSpec = `
 openapi: 3.1.0
 info:
   title: Hello API
@@ -62,447 +64,510 @@ components:
           type: string
 `
 
-const twoOperationsAndAPathParam = `
-openapi: 3.1.0
-info:
-  title: Hello API
-  version: 1.0.0
-paths:
-  /greetings:
-    post:
-      operationId: createGreeting
-      x-controller: greeting
-      x-ports: [GreetingStore]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateGreetingRequest"
-      responses:
-        "201":
-          description: The created greeting
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Greeting"
-  /greetings/{id}:
-    get:
-      operationId: getGreeting
-      x-controller: greeting
-      x-ports: [GreetingStore]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The greeting
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Greeting"
-    delete:
-      operationId: deleteGreeting
-      x-controller: greeting
-      x-ports: [GreetingStore]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Gone
-components:
-  schemas:
-    CreateGreetingRequest:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-        tags:
-          type: array
-          items:
-            $ref: "#/components/schemas/Tag"
-    Tag:
-      type: object
-      required: [label]
-      properties:
-        label:
-          type: string
-        weight:
-          type: number
-    Greeting:
-      type: object
-      x-store: true
-      required: [id, name, count]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        count:
-          type: integer
-        type:
-          type: string
-        tags:
-          type: array
-          items:
-            $ref: "#/components/schemas/Tag"
+const helloGrpcProto = `syntax = "proto3";
+
+package songe.hello.v1;
+
+service Hello {
+  rpc Ping(PingRequest) returns (PingReply);
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingReply {
+  string message = 1;
+}
 `
 
-func TestOneStoreAndOneOperationEmitOneCrateWorthOfLayers(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
+const helloUdpProto = `syntax = "proto3";
+
+package songe.hello.udp.v1;
+
+service HelloDatagram {
+  rpc Echo(Echo) returns (Echo);
+}
+
+message Echo {
+  string payload = 1;
+  uint64 count = 2;
+}
+`
+
+const helloWiring = `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+      memory:
+        type: GreetingMemoryStore
+        module: adapter::greeting_memory
+        config:
+          capacity: { type: integer, default: 100 }
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`
+
+func writeUnder(t *testing.T, root string) func(rel, content string) {
+	t.Helper()
+
+	return func(rel, content string) {
+		t.Helper()
+
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("making %s: %v", filepath.Dir(p), err)
+		}
+
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", p, err)
+		}
 	}
+}
 
-	wantPaths := []string{
-		"src/adapter/mod.rs",
-		"src/adapter/zz_generated_greeting_sqlite.rs",
-		"src/controller/mod.rs",
-		"src/controller/zz_generated_greeting_controller.rs",
-		"src/driver/mod.rs",
-		"src/driver/zz_generated_http_driver.rs",
-		"src/driver/zz_generated_wire.rs",
-		"src/lib.rs",
-		"src/port/mod.rs",
-		"src/port/zz_generated_greeting_store.rs",
-		"src/types/mod.rs",
-		"src/types/zz_generated_greeting.rs",
-		"zz_generated_cell.yaml",
-	}
+func standUpCells(t *testing.T, cells ...string) string {
+	t.Helper()
 
-	gotPaths := []string{}
-	byPath := map[string]hexrust.File{}
+	root := t.TempDir()
+	write := writeUnder(t, root)
 
-	for _, f := range files {
-		gotPaths = append(gotPaths, f.Path)
-		byPath[f.Path] = f
-	}
+	for _, cell := range cells {
+		write(filepath.Join("src", cell, hexrust.CellConfigFile), "name: songe-hello\nkind: "+cell+"\n")
 
-	if !reflect.DeepEqual(gotPaths, wantPaths) {
-		t.Fatalf("emitted paths\n got %q\nwant %q", gotPaths, wantPaths)
-	}
-
-	tests := []struct {
-		name string
-		path string
-		want []string
-	}{
-		{
-			name: "the type is a plain serde struct",
-			path: "src/types/zz_generated_greeting.rs",
-			want: []string{
-				"#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]",
-				"pub struct Greeting {",
-				"    pub id: String,",
-			},
-		},
-		{
-			name: "the port is a mockable trait with put and get",
-			path: "src/port/zz_generated_greeting_store.rs",
-			want: []string{
-				"#[cfg_attr(test, mockall::automock)]",
-				"pub trait GreetingStore: Send + Sync {",
-				"    fn put(&self, v: Greeting) -> Result<(), GreetingStoreError>;",
-				"    fn get(&self, id: &str) -> Result<Option<Greeting>, GreetingStoreError>;",
-			},
-		},
-		{
-			name: "the controller emits the trait, the struct holding boxed ports and new",
-			path: "src/controller/zz_generated_greeting_controller.rs",
-			want: []string{
-				"pub enum GreetingControllerError {",
-				"        #[source]",
-				"        source: GreetingStoreError,",
-				"pub trait GreetingController: Send + Sync {",
-				"    fn create_greeting(&self, body: Greeting) -> Result<Greeting, GreetingControllerError>;",
-				"pub struct GreetingControllerImpl {",
-				"    pub(crate) greeting_store: Arc<dyn GreetingStore + Send + Sync>,",
-				"    pub fn new(greeting_store: Arc<dyn GreetingStore + Send + Sync>) -> Self {",
-			},
-		},
-		{
-			name: "the controller layer mounts the user impl file and re exports the trait and the struct",
-			path: "src/controller/mod.rs",
-			want: []string{
-				"pub mod zz_generated_greeting_controller;",
-				"mod greeting_controller;",
-				"pub use zz_generated_greeting_controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};",
-			},
-		},
-		{
-			name: "the sqlite adapter takes a config and owns the table and the audit table",
-			path: "src/adapter/zz_generated_greeting_sqlite.rs",
-			want: []string{
-				"pub struct GreetingSqliteStoreConfig {",
-				"    pub path: String,",
-				"pub struct GreetingSqliteStore {",
-				"    pub fn new(config: GreetingSqliteStoreConfig) -> Result<Self, GreetingSqliteError> {",
-				"CREATE TABLE IF NOT EXISTS greeting (id TEXT PRIMARY KEY, body TEXT NOT NULL);",
-				"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);",
-				"impl GreetingStore for GreetingSqliteStore {",
-			},
-		},
-		{
-			name: "the driver takes a config, binds, announces and serves",
-			path: "src/driver/zz_generated_http_driver.rs",
-			want: []string{
-				"    pub(crate) greeting_controller: Arc<dyn GreetingController + Send + Sync>,",
-				`            .route("/greetings", routing::post(create_greeting))`,
-				"        .create_greeting(body.into())",
-				"    Ok((StatusCode::CREATED, Json(out.into())))",
-				"    pub async fn bind(&mut self) -> Result<(), HttpDriverError> {",
-				`        println!("LISTENING {}", self.local_port()?);`,
-				"    pub async fn serve(self) -> Result<(), HttpDriverError> {",
-			},
-		},
-		{
-			name: "the adapter and the driver layers allow the io lint table",
-			path: "src/adapter/mod.rs",
-			want: []string{
-				"#![allow(clippy::disallowed_methods, clippy::disallowed_types)]",
-			},
-		},
-		{
-			name: "lib mounts every layer as a plain module directory",
-			path: "src/lib.rs",
-			want: []string{
-				"pub mod adapter;",
-				"pub mod controller;",
-				"pub mod driver;",
-				"pub mod port;",
-				"pub mod types;",
-			},
-		},
-		{
-			name: "a layer mod file names the generated file and aliases it to the layer name",
-			path: "src/types/mod.rs",
-			want: []string{
-				"pub mod zz_generated_greeting;",
-				"pub use zz_generated_greeting as greeting;",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content := byPath[tt.path].Content
-
-			for _, line := range tt.want {
-				if !strings.Contains(content, line) {
-					t.Errorf("%s lacks %q\n%s", tt.path, line, content)
-				}
+		for _, f := range cellFiles(t, cell) {
+			if f.Path != cellmanifest.FileName {
+				continue
 			}
-		})
-	}
-}
 
-func TestTheCellManifestNamesEveryDriverAdapterControllerAndPort(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	var body string
-
-	for _, f := range files {
-		if f.Path == cellmanifest.FileName {
-			body = f.Content
+			write(filepath.Join("src", cell, f.Path), f.Content)
 		}
 	}
 
-	if body == "" {
-		t.Fatal("no cell manifest was emitted")
-	}
-
-	m, err := cellmanifest.Parse([]byte(body))
-	if err != nil {
-		t.Fatalf("parsing the manifest: %v\n%s", err, body)
-	}
-
-	if m.Cell != "rest" {
-		t.Errorf("cell = %q, want rest", m.Cell)
-	}
-
-	if len(m.Provides.Drivers) != 1 || m.Provides.Drivers[0].Name != "rest" {
-		t.Fatalf("drivers = %+v", m.Provides.Drivers)
-	}
-
-	driver := m.Provides.Drivers[0]
-	if driver.Type != "HttpDriver" || driver.Module != "driver::http_driver" {
-		t.Errorf("driver = %+v", driver)
-	}
-
-	if !reflect.DeepEqual(driver.Requires, []string{"GreetingController"}) {
-		t.Errorf("driver requires = %+v", driver.Requires)
-	}
-
-	if driver.Config["addr"].Type != cellmanifest.FieldTypeString {
-		t.Errorf("driver config = %+v", driver.Config)
-	}
-
-	if len(m.Provides.Adapters) != 1 || m.Provides.Adapters[0].Name != "sqlite" {
-		t.Fatalf("adapters = %+v", m.Provides.Adapters)
-	}
-
-	adapter := m.Provides.Adapters[0]
-	if adapter.Implements != "GreetingStore" || adapter.Type != "GreetingSqliteStore" {
-		t.Errorf("adapter = %+v", adapter)
-	}
-
-	if adapter.Config["path"].Default != ":memory:" {
-		t.Errorf("adapter config = %+v", adapter.Config)
-	}
-
-	if len(m.Provides.Controllers) != 1 {
-		t.Fatalf("controllers = %+v", m.Provides.Controllers)
-	}
-
-	controller := m.Provides.Controllers[0]
-	if controller.Trait != "GreetingController" || controller.Impl != "GreetingControllerImpl" || controller.Module != "controller" {
-		t.Errorf("controller = %+v", controller)
-	}
-
-	if !reflect.DeepEqual(controller.Ports, []string{"GreetingStore"}) {
-		t.Errorf("controller ports = %+v", controller.Ports)
-	}
-
-	if len(m.Provides.Ports) != 1 || m.Provides.Ports[0].Trait != "GreetingStore" {
-		t.Errorf("ports = %+v", m.Provides.Ports)
-	}
+	return root
 }
 
-func TestTwoStoresNameTheirOwnSqliteAdapterSoOneMergeNeverCollides(t *testing.T) {
-	doc := strings.Replace(twoOperationsAndAPathParam, `    Tag:
-      type: object
-      required: [label]`, `    Tag:
-      type: object
-      x-store: true
-      required: [id, label]`, 1)
-	doc = strings.Replace(doc, `      properties:
-        label:
-          type: string`, `      properties:
-        id:
-          type: string
-        label:
-          type: string`, 1)
+type emitted struct {
+	Path    string
+	Content string
+}
 
-	files, err := hexrust.Generate([]byte(doc), hexrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
+func cellFiles(t *testing.T, cell string) []emitted {
+	t.Helper()
 
-	for _, f := range files {
-		if f.Path != cellmanifest.FileName {
-			continue
-		}
+	out := []emitted{}
 
-		m, err := cellmanifest.Parse([]byte(f.Content))
+	switch cell {
+	case "rest":
+		files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello"})
 		if err != nil {
-			t.Fatalf("parsing the manifest: %v\n%s", err, f.Content)
+			t.Fatalf("generating the rest cell: %v", err)
 		}
 
-		names := []string{}
-		for _, a := range m.Provides.Adapters {
-			names = append(names, a.Name)
+		for _, f := range files {
+			out = append(out, emitted{Path: f.Path, Content: f.Content})
+		}
+	case "grpc":
+		files, err := grpcrust.Generate([]byte(helloGrpcProto), grpcrust.Options{Service: "songe-hello"})
+		if err != nil {
+			t.Fatalf("generating the grpc cell: %v", err)
 		}
 
-		if !reflect.DeepEqual(names, []string{"greeting_sqlite", "tag_sqlite"}) {
-			t.Fatalf("adapter names = %+v", names)
+		for _, f := range files {
+			out = append(out, emitted{Path: f.Path, Content: f.Content})
+		}
+	case "udp":
+		files, err := udprust.Generate([]byte(helloUdpProto), udprust.Options{Service: "songe-hello"})
+		if err != nil {
+			t.Fatalf("generating the udp cell: %v", err)
 		}
 
-		return
+		for _, f := range files {
+			out = append(out, emitted{Path: f.Path, Content: f.Content})
+		}
 	}
 
-	t.Fatal("no cell manifest was emitted")
+	return out
 }
 
-func TestTheSpecSchemaBelongsToForgeDevAndNeverBecomesAType(t *testing.T) {
-	doc := oneStoreOneOperation + `    Spec:
-      type: object
-      properties:
-        note:
-          type: string
-`
+func generateHello(t *testing.T, root, wiring string) map[string]string {
+	t.Helper()
 
-	files, err := hexrust.Generate([]byte(doc), hexrust.Options{Service: "svc"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if strings.HasSuffix(f.Path, "zz_generated_spec.rs") {
-			t.Errorf("%s was emitted for the forge-dev Spec schema", f.Path)
-		}
-	}
-}
-
-func TestEveryEmittedRustFileCarriesTheGeneratedHeader(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	const header = "// Code generated by hexagonal-rust (forge-dev-codegen). DO NOT EDIT.\n"
-
-	for _, f := range files {
-		if !strings.HasSuffix(f.Path, ".rs") {
-			continue
-		}
-
-		if !strings.HasPrefix(f.Content, header) {
-			t.Errorf("%s does not open with the generated header", f.Path)
-		}
-	}
-}
-
-func TestNoEmittedFileIsAHandFileOrAWriteOnceFile(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if strings.Contains(f.Path, "hand") {
-			t.Errorf("%s belongs to a hand directory, which is gone", f.Path)
-		}
-	}
-}
-
-func TestLibRsMountsEveryCellAsAPlainModuleDirectoryUnderSrc(t *testing.T) {
-	files, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+	files, err := hexrust.Generate(hexrust.Options{
 		Service: "songe-hello",
-		Cells:   []string{"udp", "grpc"},
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp"},
+		Wiring:  []byte(wiring),
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
+	byPath := map[string]string{}
 	for _, f := range files {
-		if f.Path != "src/lib.rs" {
-			continue
-		}
-
-		for _, want := range []string{"pub mod grpc;", "pub mod udp;"} {
-			if !strings.Contains(f.Content, want) {
-				t.Errorf("src/lib.rs lacks %q\n%s", want, f.Content)
-			}
-		}
-
-		if strings.Contains(f.Content, `#[path = "grpc`) {
-			t.Errorf("src/lib.rs mounts a cell with a path attribute\n%s", f.Content)
-		}
-
-		return
+		byPath[f.Path] = f.Content
 	}
 
-	t.Fatal("no src/lib.rs was emitted")
+	return byPath
+}
+
+func TestTheSkeletonEmitsTheCrateRootTheRootLayersTheConfigModuleAndMain(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp"},
+		Wiring:  []byte(helloWiring),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	got := []string{}
+	for _, f := range files {
+		got = append(got, f.Path)
+	}
+
+	want := []string{
+		"src/adapter/mod.rs",
+		"src/adapter/zz_generated_greeting_memory_config.rs",
+		"src/bin/zz_generated_songe_hello_node.rs",
+		"src/config/mod.rs",
+		"src/controller/mod.rs",
+		"src/driver/mod.rs",
+		"src/lib.rs",
+		"src/port/mod.rs",
+		"src/types/mod.rs",
+		"zz_generated_config_spec.yaml",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("emitted paths\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestTheCrateRootMountsEveryRootLayerTheConfigModuleAndEveryCell(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	for _, want := range []string{
+		"pub mod adapter;",
+		"pub mod config;",
+		"pub mod controller;",
+		"pub mod driver;",
+		"pub mod port;",
+		"pub mod types;",
+		"pub mod grpc;",
+		"pub mod rest;",
+		"pub mod udp;",
+	} {
+		if !strings.Contains(files["src/lib.rs"], want) {
+			t.Errorf("src/lib.rs lacks %q\n%s", want, files["src/lib.rs"])
+		}
+	}
+
+	if !strings.Contains(files["src/config/mod.rs"], "pub mod zz_generated_config;") ||
+		!strings.Contains(files["src/config/mod.rs"], "pub use zz_generated_config::*;") {
+		t.Errorf("the config module does not mount the generated loader\n%s", files["src/config/mod.rs"])
+	}
+}
+
+func TestAHandWrittenCandidateGetsAModLineAndAConfigStruct(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	for _, want := range []string{
+		"#![allow(clippy::disallowed_methods, clippy::disallowed_types)]",
+		"pub mod zz_generated_greeting_memory_config;",
+		"mod greeting_memory;",
+		"pub use zz_generated_greeting_memory_config::GreetingMemoryStoreConfig;",
+	} {
+		if !strings.Contains(files["src/adapter/mod.rs"], want) {
+			t.Errorf("src/adapter/mod.rs lacks %q\n%s", want, files["src/adapter/mod.rs"])
+		}
+	}
+
+	for _, want := range []string{
+		"pub struct GreetingMemoryStoreConfig {",
+		"    pub capacity: i64,",
+	} {
+		if !strings.Contains(files["src/adapter/zz_generated_greeting_memory_config.rs"], want) {
+			t.Errorf("the hand candidate config lacks %q\n%s", want, files["src/adapter/zz_generated_greeting_memory_config.rs"])
+		}
+	}
+}
+
+func TestMainMatchesEachPortBuildsEachControllerAndGuardsEachDriver(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	main := files["src/bin/zz_generated_songe_hello_node.rs"]
+
+	for _, want := range []string{
+		"use songe_hello::config::SongeHelloNodeConfig;",
+		"let config = SongeHelloNodeConfig::load(&args).context(\"loading the configuration\")?;",
+		"let greeting_store: Arc<dyn GreetingStore + Send + Sync> = match config.greeting_store.as_str() {",
+		`"memory" => Arc::new(`,
+		"GreetingMemoryStore::new(GreetingMemoryStoreConfig {",
+		"capacity: config.greeting_store_memory_capacity,",
+		`"sqlite" => Arc::new(`,
+		"path: config.greeting_store_sqlite_path.clone(),",
+		`.context("building the sqlite adapter of songe-hello-node")?,`,
+		"other => bail!(",
+		`"building GreetingStore: {other:?} names no adapter, the adapters are memory, sqlite"`,
+		"let greeting_controller: Arc<dyn GreetingController + Send + Sync> =",
+		"Arc::new(GreetingControllerImpl::new(greeting_store.clone()));",
+		"if config.driver_rest {",
+		"if config.driver_grpc {",
+		"if config.driver_udp {",
+		".bind()",
+		".announce()",
+		"handles.push(tokio::spawn(async move {",
+		"chain(&error)",
+		"if handles.is_empty() {",
+		"enable at least one of grpc, rest, udp",
+		"for handle in handles {",
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main lacks %q\n%s", want, main)
+		}
+	}
+}
+
+func TestTheConfigSpecHoldsOneKeyPerChoicePerAdapterFieldPerDriverAndPerDriverField(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	spec := files["zz_generated_config_spec.yaml"]
+
+	for _, want := range []string{
+		"# Code generated by hexagonal-rust (forge-dev-codegen). DO NOT EDIT.",
+		"greetingStore:",
+		"default: sqlite",
+		"greetingStoreMemoryCapacity:",
+		"greetingStoreSqlitePath:",
+		"driverGrpc:",
+		"driverRest:",
+		"driverUdp:",
+		"grpcAddr:",
+		"restAddr:",
+		"udpAddr:",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("the config spec lacks %q\n%s", want, spec)
+		}
+	}
+
+	if strings.Contains(spec, "paths:") {
+		t.Errorf("the config spec holds more than components.schemas.Spec\n%s", spec)
+	}
+}
+
+func TestAListedCellThatOwnsNoGeneratorIsRefused(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest")
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp"},
+		Wiring:  []byte(helloWiring),
+	})
+
+	want := `mounting cell "udp": src/udp/forge-dev.yaml is missing, a listed cell owns its own generator`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestAListedCellWithNoManifestIsRefused(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	if err := os.Remove(filepath.Join(root, "src", "udp", cellmanifest.FileName)); err != nil {
+		t.Fatalf("removing the manifest: %v", err)
+	}
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp"},
+		Wiring:  []byte(helloWiring),
+	})
+
+	want := `mounting cell "udp": src/udp/zz_generated_cell.yaml is missing, build the cell before the skeleton`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestTheWiringIsRefusedWhenItFightsTheManifests(t *testing.T) {
+	tests := []struct {
+		name   string
+		wiring string
+		want   string
+	}{
+		{
+			name: "a port a controller consumes with no candidate",
+			wiring: `binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+`,
+			want: `wiring the ports: controller "GreetingController" consumes port "GreetingStore" and the wiring names no candidate for it`,
+		},
+		{
+			name: "a candidate no manifest provides",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: postgres
+    adapters:
+      postgres: {}
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+`,
+			want: `wiring port "GreetingStore": candidate "postgres" declares no type and no cell manifest provides an adapter named "postgres"`,
+		},
+		{
+			name: "a driver no manifest provides",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+  websocket: { enabled: true }
+`,
+			want: `wiring driver "websocket": no cell manifest provides a driver with that name, the cells provide grpc, rest, udp`,
+		},
+		{
+			name: "a driver the wiring never names",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+`,
+			want: `wiring the drivers: cell "udp" provides driver "udp" and the wiring never names it`,
+		},
+		{
+			name: "an unknown key",
+			wiring: `binary: songe-hello-node
+portz:
+  GreetingStore:
+    default: sqlite
+`,
+			want: `unknown field "portz"`,
+		},
+		{
+			name: "a default naming no candidate",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: postgres
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+`,
+			want: `port "GreetingStore" has default "postgres", which names no candidate, the candidates are sqlite`,
+		},
+		{
+			name: "a hand written candidate outside the adapter layer",
+			wiring: `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: memory
+    adapters:
+      memory:
+        type: GreetingMemoryStore
+        module: rest::adapter::greeting_memory
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+`,
+			want: `wiring port "GreetingStore": candidate "memory" has module "rest::adapter::greeting_memory", a hand written adapter lives under the adapter layer`,
+		},
+	}
+
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := hexrust.Generate(hexrust.Options{
+				Service: "songe-hello",
+				SrcDir:  root,
+				Cells:   []string{"grpc", "rest", "udp"},
+				Wiring:  []byte(tt.wiring),
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("generating reported %v, want it to name %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestADriverRequiringAControllerNoManifestProvidesIsRefused(t *testing.T) {
+	root := standUpCells(t, "rest")
+
+	manifest := cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Drivers: []cellmanifest.Driver{{
+				Name:     "ws",
+				Type:     "WsDriver",
+				Module:   "ws::driver::ws_driver",
+				Requires: []string{"NobodyController"},
+			}},
+		},
+	}
+
+	body, err := cellmanifest.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshalling the manifest: %v", err)
+	}
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), string(body))
+
+	_, err = hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+  ws: { enabled: true }
+`),
+	})
+
+	want := `wiring driver "ws": it requires controller "NobodyController" and no cell manifest provides it`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
 }
 
 func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
@@ -545,14 +610,31 @@ func TestACellNameRustCannotSpellIsRefused(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := hexrust.Generate([]byte(oneStoreOneOperation), hexrust.Options{
+			_, err := hexrust.Generate(hexrust.Options{
 				Service: "songe-hello",
 				Cells:   tt.cells,
+				Wiring:  []byte(helloWiring),
 			})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("want an error containing %q, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestASkeletonWithNoWiringIsRefused(t *testing.T) {
+	_, err := hexrust.Generate(hexrust.Options{Service: "songe-hello"})
+
+	want := "emitting the skeleton: the cell names no wiring file, add wiring.specPath beside openapi"
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestASkeletonWithNoServiceNameIsRefused(t *testing.T) {
+	_, err := hexrust.Generate(hexrust.Options{Wiring: []byte(helloWiring)})
+	if err == nil || !strings.Contains(err.Error(), "the service name is required") {
+		t.Fatalf("generating reported %v", err)
 	}
 }
 
@@ -597,22 +679,6 @@ func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	}
 }
 
-func TestNoGeneratedFileCarriesAPathAttribute(t *testing.T) {
-	files, err := hexrust.Generate([]byte(twoOperationsAndAPathParam), hexrust.Options{
-		Service: "songe-hello",
-		Cells:   []string{"grpc"},
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	for _, f := range files {
-		if strings.Contains(f.Content, "#[path") {
-			t.Errorf("%s mounts a module with a path attribute\n%s", f.Path, f.Content)
-		}
-	}
-}
-
 func TestALayoutWithNoCellsMountsNothingExtra(t *testing.T) {
 	got, err := hexrust.CellsFromLayout(map[string]interface{}{})
 	if err != nil {
@@ -624,340 +690,13 @@ func TestALayoutWithNoCellsMountsNothingExtra(t *testing.T) {
 	}
 }
 
-func TestASpecThatBreaksTheMappingIsRefused(t *testing.T) {
-	tests := []struct {
-		name string
-		doc  string
-		want string
-	}{
-		{
-			name: "an operation without x-controller has no home",
-			doc: `
-paths:
-  /a:
-    get:
-      operationId: a
-      responses:
-        "200":
-          description: ok
-components:
-  schemas: {}
-`,
-			want: "x-controller is required",
-		},
-		{
-			name: "a port must name an x-store schema",
-			doc: `
-paths:
-  /a:
-    get:
-      operationId: a
-      x-controller: a
-      x-ports: [NopeStore]
-      responses:
-        "200":
-          description: ok
-components:
-  schemas: {}
-`,
-			want: `x-ports names "NopeStore"`,
-		},
-		{
-			name: "a store needs a string id",
-			doc: `
-paths:
-  /a:
-    get:
-      operationId: a
-      x-controller: a
-      responses:
-        "200":
-          description: ok
-components:
-  schemas:
-    Thing:
-      type: object
-      x-store: true
-      properties:
-        name:
-          type: string
-`,
-			want: "required string property named id",
-		},
-		{
-			name: "a path parameter must be declared",
-			doc: `
-paths:
-  /a/{id}:
-    get:
-      operationId: a
-      x-controller: a
-      responses:
-        "200":
-          description: ok
-components:
-  schemas: {}
-`,
-			want: `path parameter "id" is not declared`,
-		},
-		{
-			name: "a 2xx response is required",
-			doc: `
-paths:
-  /a:
-    get:
-      operationId: a
-      x-controller: a
-      responses:
-        "500":
-          description: boom
-components:
-  schemas: {}
-`,
-			want: "a 2xx response is required",
-		},
-		{
-			name: "the service name is required",
-			doc:  oneStoreOneOperation,
-			want: "the service name is required",
-		},
-	}
+func TestNoGeneratedFileCarriesAPathAttribute(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			opts := hexrust.Options{Service: "svc"}
-			if tt.want == "the service name is required" {
-				opts.Service = ""
-			}
-
-			_, err := hexrust.Generate([]byte(tt.doc), opts)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("want an error containing %q, got %v", tt.want, err)
-			}
-		})
-	}
-}
-
-func TestANameRustOrSQLCannotSpellIsRefusedBeforeItReachesTheOutput(t *testing.T) {
-	withParam := func(name string) string {
-		doc := strings.ReplaceAll(twoOperationsAndAPathParam, "{id}", "{"+name+"}")
-
-		return strings.ReplaceAll(doc, "- name: id\n", "- name: "+name+"\n")
-	}
-
-	tests := []struct {
-		name string
-		doc  string
-		opts hexrust.Options
-		want string
-	}{
-		{
-			name: "a service name with a quote never reaches main or the crate name",
-			doc:  oneStoreOneOperation,
-			opts: hexrust.Options{Service: `svc"; DROP TABLE greeting; --`},
-			want: `reading service "svc\"; DROP TABLE greeting; --"`,
-		},
-		{
-			name: "a schema name with a semicolon cannot be a struct or a table",
-			doc:  strings.ReplaceAll(oneStoreOneOperation, "Greeting", "Greet;ing"),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading schema "Greet;ing"`,
-		},
-		{
-			name: "a schema name starting with a digit cannot be a struct",
-			doc:  strings.ReplaceAll(oneStoreOneOperation, "Greeting", "1Greeting"),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading schema "1Greeting"`,
-		},
-		{
-			name: "a property name with a quote cannot be a field",
-			doc:  strings.Replace(oneStoreOneOperation, "        name:\n", "        \"na'me\":\n", 1),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading property "na'me"`,
-		},
-		{
-			name: "an operationId with a semicolon cannot be a method",
-			doc:  strings.Replace(oneStoreOneOperation, "createGreeting", "create;Greeting", 1),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading operationId "create;Greeting"`,
-		},
-		{
-			name: "an x-controller with a slash cannot be a module",
-			doc:  strings.Replace(oneStoreOneOperation, "x-controller: greeting", "x-controller: greet/ing", 1),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading x-controller "greet/ing"`,
-		},
-		{
-			name: "a path parameter with a parenthesis cannot be an extractor binding",
-			doc:  withParam("i(d)"),
-			opts: hexrust.Options{Service: "svc"},
-			want: `reading path parameter "i(d)"`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := hexrust.Generate([]byte(tt.doc), tt.opts)
-			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "Rust or SQL can spell") {
-				t.Fatalf("want an error naming %s, got %v", tt.want, err)
-			}
-		})
-	}
-}
-
-func TestTheDriverAnswersTheStatusTheSpecDeclaresForAnInvalidRequest(t *testing.T) {
-	with422 := strings.Replace(oneStoreOneOperation, "      responses:\n", "      responses:\n        \"422\":\n          description: refused\n", 1)
-	with400 := strings.Replace(oneStoreOneOperation, "      responses:\n", "      responses:\n        \"400\":\n          description: refused\n", 1)
-	withBoth := strings.Replace(with422, "      responses:\n", "      responses:\n        \"400\":\n          description: refused\n", 1)
-
-	tests := []struct {
-		name string
-		doc  string
-		want string
-	}{
-		{"a declared 422 answers 422", with422, "reject_greeting(error, StatusCode::UNPROCESSABLE_ENTITY)"},
-		{"a declared 400 answers 400", with400, "reject_greeting(error, StatusCode::BAD_REQUEST)"},
-		{"422 wins when both are declared", withBoth, "reject_greeting(error, StatusCode::UNPROCESSABLE_ENTITY)"},
-		{"no declared 4xx falls back to 400", oneStoreOneOperation, "reject_greeting(error, StatusCode::BAD_REQUEST)"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			files, err := hexrust.Generate([]byte(tt.doc), hexrust.Options{Service: "svc"})
-			if err != nil {
-				t.Fatalf("generating: %v", err)
-			}
-
-			for _, f := range files {
-				if strings.HasSuffix(f.Path, "zz_generated_http_driver.rs") && !strings.Contains(f.Content, tt.want) {
-					t.Errorf("the driver lacks %q\n%s", tt.want, f.Content)
-				}
-			}
-		})
-	}
-}
-
-const crateManifest = `[package]
-name = "songe-hello"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-anyhow = "1"
-axum = "0.8"
-rusqlite = { version = "0.40", features = ["bundled"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-
-[dev-dependencies]
-mockall = "0.15"
-`
-
-const greetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
-use crate::port::greeting_store::GreetingStore;
-use crate::types::create_greeting_request::CreateGreetingRequest;
-use crate::types::greeting::Greeting;
-
-impl GreetingController for GreetingControllerImpl {
-    fn create_greeting(
-        &self,
-        body: CreateGreetingRequest,
-    ) -> Result<Greeting, GreetingControllerError> {
-        let greeting = Greeting {
-            count: 0,
-            id: body.name.clone(),
-            name: body.name,
-            tags: body.tags,
-            r#type: None,
-        };
-
-        self.greeting_store
-            .put(greeting.clone())
-            .map_err(|source| GreetingControllerError::GreetingStore {
-                id: greeting.id.clone(),
-                source,
-            })?;
-
-        Ok(greeting)
-    }
-
-    fn delete_greeting(&self, id: &str) -> Result<(), GreetingControllerError> {
-        let _ = id;
-
-        Ok(())
-    }
-
-    fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError> {
-        self.greeting_store
-            .get(id)
-            .map_err(|source| GreetingControllerError::GreetingStore {
-                id: id.to_string(),
-                source,
-            })?
-            .ok_or(GreetingControllerError::NotFound { id: id.to_string() })
-    }
-}
-`
-
-func writeUnder(t *testing.T, root string) func(rel, content string) {
-	t.Helper()
-
-	return func(rel, content string) {
-		t.Helper()
-
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("making %s: %v", filepath.Dir(p), err)
-		}
-
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatalf("writing %s: %v", p, err)
+	for path, content := range files {
+		if strings.Contains(content, "#[path") {
+			t.Errorf("%s mounts a module with a path attribute\n%s", path, content)
 		}
 	}
-}
-
-func TestTheGeneratedCrateCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
-
-	files, err := hexrust.Generate([]byte(twoOperationsAndAPathParam), hexrust.Options{
-		Service: "songe-hello",
-	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
-
-	root := t.TempDir()
-	write := writeUnder(t, root)
-
-	write("Cargo.toml", crateManifest)
-
-	for _, f := range files {
-		if strings.HasSuffix(f.Path, ".rs") {
-			write(f.Path, f.Content)
-		}
-	}
-
-	write("src/controller/greeting_controller.rs", greetingControllerImpl)
-
-	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
-	cmd.Dir = root
-
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return
-	}
-
-	lower := strings.ToLower(string(out))
-	if strings.Contains(lower, "could not resolve host") ||
-		strings.Contains(lower, "failed to get") ||
-		strings.Contains(lower, "spurious network error") {
-		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
-	}
-
-	t.Fatalf("cargo check: %v\n%s", err, out)
 }

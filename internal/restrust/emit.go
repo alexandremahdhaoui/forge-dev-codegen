@@ -277,6 +277,7 @@ func BuildManifest(v view) cellmanifest.Manifest {
 			Type:       s.Struct,
 			Module:     v.ModulePrefix + "adapter::" + s.Module,
 			Implements: s.Port,
+			Fallible:   true,
 			Config: map[string]cellmanifest.ConfigField{
 				"path": {
 					Type:        cellmanifest.FieldTypeString,

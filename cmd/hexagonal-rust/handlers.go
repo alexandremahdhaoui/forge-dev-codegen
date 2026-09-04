@@ -37,10 +37,11 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
-			files, err := hexrust.Generate([]byte(input.OpenapiSpec), hexrust.Options{
+			files, err := hexrust.Generate(hexrust.Options{
 				Service: input.Name,
-				Cell:    layoutString(input.Layout, "cell"),
+				SrcDir:  input.SrcDir,
 				Cells:   cells,
+				Wiring:  []byte(input.WiringSpec),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -51,13 +52,7 @@ func NewHandlers() Handlers {
 				out = append(out, GeneratedFile{Path: f.Path, Content: f.Content})
 			}
 
-			return &GenerateOutput{Files: out, Manifest: true}, nil
+			return &GenerateOutput{Files: out}, nil
 		},
 	}
-}
-
-func layoutString(layout map[string]interface{}, key string) string {
-	v, _ := layout[key].(string)
-
-	return v
 }

@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 )
 
 const cargoCheckCrateManifest = `[package]
@@ -195,6 +195,14 @@ protox = "0.9"
 tonic-prost-build = "0.14"
 `
 
+const bothEnginesCrateLib = `pub mod adapter;
+pub mod controller;
+pub mod driver;
+pub mod grpc;
+pub mod port;
+pub mod types;
+`
+
 const bothEnginesGreetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
 use crate::port::greeting_store::GreetingStore;
 use crate::types::greeting::Greeting;
@@ -219,12 +227,12 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 		t.Skip("cargo is not on PATH")
 	}
 
-	hexFiles, err := hexrust.Generate([]byte(bothEnginesOpenapi), hexrust.Options{
+	restFiles, err := restrust.Generate([]byte(bothEnginesOpenapi), restrust.Options{
 		Service: "songe-hello",
-		Cells:   []string{"grpc"},
+		Root:    true,
 	})
 	if err != nil {
-		t.Fatalf("generating the hexagonal skeleton: %v", err)
+		t.Fatalf("generating the root layers: %v", err)
 	}
 
 	cellFiles, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
@@ -250,8 +258,9 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 
 	write("Cargo.toml", bothEnginesCrateManifest)
 	write("build.rs", cargoCheckBuildScript)
+	write("src/lib.rs", bothEnginesCrateLib)
 
-	for _, f := range hexFiles {
+	for _, f := range restFiles {
 		if strings.HasSuffix(f.Path, ".yaml") {
 			continue
 		}

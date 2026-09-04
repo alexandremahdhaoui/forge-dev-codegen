@@ -233,6 +233,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Type:       v.ClientStruct,
 		Module:     v.ModulePrefix + "adapter::" + v.ClientModule,
 		Implements: v.ClientTrait,
+		Fallible:   true,
 		Config: map[string]cellmanifest.ConfigField{
 			"endpoint": {
 				Type:        cellmanifest.FieldTypeString,

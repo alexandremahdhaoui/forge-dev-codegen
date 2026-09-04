@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
 )
@@ -61,6 +61,14 @@ tokio = { version = "1", features = ["full"] }
 mockall = "0.15"
 tower = "0.5"
 http-body-util = "0.1"
+`
+
+const cargoCrateLib = `pub mod adapter;
+pub mod controller;
+pub mod driver;
+pub mod port;
+pub mod types;
+pub mod udp;
 `
 
 const cargoGreetingControllerImpl = `use crate::controller::{GreetingController, GreetingControllerError, GreetingControllerImpl};
@@ -233,9 +241,9 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		t.Skip("cargo is not on PATH")
 	}
 
-	hexFiles, err := hexrust.Generate([]byte(cargoSpec), hexrust.Options{Service: "songe-hello", Cells: []string{"udp"}})
+	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello", Root: true})
 	if err != nil {
-		t.Fatalf("generating the hexagonal skeleton: %v", err)
+		t.Fatalf("generating the root layers: %v", err)
 	}
 
 	udpFiles, err := udprust.Generate([]byte(cargoUdpProto), udprust.Options{Service: "songe-hello"})
@@ -267,8 +275,9 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 	}
 
 	write("Cargo.toml", cargoCrateManifest)
+	write("src/lib.rs", cargoCrateLib)
 
-	for _, f := range hexFiles {
+	for _, f := range restFiles {
 		if strings.HasSuffix(f.Path, ".yaml") {
 			continue
 		}

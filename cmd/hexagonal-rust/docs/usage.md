@@ -1,99 +1,109 @@
 # hexagonal-rust
 
-A forge-dev generator that turns one OpenAPI document into the rust
-skeleton of one service. Two crates come out. `core` holds types, ports,
-controllers and the hand stubs. `app` holds the sqlite adapters, the axum
-driver and main.
-
-forge-dev never writes outside the engine directory. So each crate holds
-its own cell at its root and names its side.
+A forge-dev generator that stands one rust service crate up around the
+cells that fill it. It reads no OpenAPI document and no proto file. It
+reads the cell list, the wiring document and the manifest every cell
+writes, and it answers the crate root, the root layer modules, the
+config module, the config schema and main.
 
 ```yaml
 name: songe-hello
 kind: hexagonal
 language: rust
 generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/hexagonal-rust
-openapi:
-  specPath: ./.forge/spec-cache/hello.v1.yaml
+configGenerator:
+  engine: forge://github.com/alexandremahdhaoui/golden-configgen/cmd/configgen-gen
+  outputDir: src/config
 layout:
-  side: core
-  coreDir: .
-  cells: [grpc]
+  cells: [rest, grpc, udp]
+wiring:
+  specPath: ./wiring.yaml
 ```
 
-The app crate says `side: app` and `appDir: .`.
+`layout.cells` lists the module directories under `src`. Each one owns
+its own `forge-dev.yaml` and its own generator. `wiring.specPath` names
+the document that says which adapter answers which port and which driver
+starts.
 
-The `generate` tool takes the normalized forge-dev model. `name` is the
-service. `openapiSpec` is the document. `coreDir` and `appDir` are the
-crate roots relative to the engine directory and default to `core` and
-`app`. `side` is `core`, `app` or absent for both. The three may sit at
-the top level of the model or under `layout`.
-
-## Cells
-
-`layout.cells` lists the module directories under `src` that another
-generator fills. `lib.rs` gains one plain `pub mod <cell>;` line per
-name. No `#[path]` attribute. The cell owns its directory and writes its
-own `mod.rs`.
-
-A name Rust cannot spell as a module is refused. So is a name the
-skeleton already owns, and a name listed twice.
-
-## Extra hand modules
-
-`layout.hand` lists module names under `src/hand` that the author writes
-and the spec does not declare.
+## The wiring document
 
 ```yaml
-layout:
-  side: core
-  coreDir: .
-  hand: [echo_controller, datagram]
+binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+      memory:
+        type: GreetingMemoryStore
+        module: adapter::greeting_memory
+        config:
+          capacity: { type: integer, default: 100 }
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
 ```
 
-`src/hand/mod.rs` gains one plain `pub mod <name>;` line each, beside the
-controller stubs. The modules are siblings, so one reaches another with
-`crate::hand::<name>`.
+`binary` names the binary main lands in, at
+`src/bin/zz_generated_<binary>.rs`.
 
-Both crates carry a hand mount. The core one also lists the controller stub
-per `x-controller`. The app one lists nothing but its own names.
+A candidate with no `type` is looked up by name among the adapters the
+cell manifests provide. A candidate with a `type` and a `module` is
+written by hand. Its module lives under `adapter::`, the crate's root
+adapter layer, and the generated `src/adapter/mod.rs` mounts it with one
+`mod` line. When such a candidate declares config fields, the engine
+also writes its `<Type>Config` struct.
 
-A name Rust cannot spell as a module is refused. So is `mod`, a name
-listed twice, and a controller the spec already declares.
+A field carries a type among string, integer, boolean and duration, plus
+`default` and `description`.
 
-## What the spec decides
+## What it refuses
 
-| Spec | Emitted |
+Every refusal names the thing that broke.
+
+- a listed cell with no `src/<cell>/forge-dev.yaml`
+- a listed cell with no `src/<cell>/zz_generated_cell.yaml`
+- a port a controller consumes and the wiring names no candidate for
+- a candidate that declares no type and no manifest provides
+- a driver the wiring names and no manifest provides
+- a driver a manifest provides and the wiring never names
+- a driver that requires a controller trait no manifest provides
+- a key the wiring schema does not know
+
+## What it emits
+
+| Emitted | Holds |
 |---|---|
-| `components.schemas.<Name>` | `core/src/types/zz_generated_<snake>.rs`, a serde struct |
-| a schema with `x-store: true` | `core/src/port/zz_generated_<snake>_store.rs`, trait `<Name>Store` with `put` and `get`, mockable under test |
-| | `app/src/adapter/zz_generated_<snake>_sqlite.rs`, `<Name>SqliteStore` over rusqlite with an audit table |
-| an operation with `x-controller: <name>` | `core/src/controller/zz_generated_<name>_controller.rs`, trait `<Pascal>Controller` and `<Pascal>ControllerImpl` generic over the `x-ports` |
-| | `core/src/hand/<name>_controller.rs`, one function per operation, written once and never again |
-| `paths` | `app/src/driver/zz_generated_http_driver.rs`, an axum router with wire types mapped at the edge |
-| | `app/src/bin/<name>-server.rs`, main |
+| `src/lib.rs` | one `pub mod` per root layer, the config module and every cell |
+| `src/<layer>/mod.rs` | the root layer, adapter and driver opening with the clippy allow |
+| `src/adapter/zz_generated_<module>_config.rs` | the config struct of one hand written candidate |
+| `src/config/mod.rs` | mounts the loader the config generator writes |
+| `zz_generated_config_spec.yaml` | the Spec schema the config generator reads |
+| `src/bin/zz_generated_<binary>.rs` | main |
 
-Every `x-ports` entry names `<Name>Store` of an `x-store` schema. An
-`x-store` schema needs a required string property `id`. Request bodies and
-2xx responses `$ref` a component schema. Path parameters are strings or
-integers.
+## The config keys
 
-Main reads `SONGE_STORE_<NAME>_PATH` for each store and defaults to
-`:memory:`. It binds `<NAME>_ADDR` with the default `127.0.0.1:0` and
-prints `LISTENING <port>` once bound.
+The schema holds one property per decision.
 
-## Files and names
+| Key | Type | From |
+|---|---|---|
+| `<port>` | string | the port choice, defaulting to the wiring default |
+| `<port><Candidate><Field>` | the field type | one candidate config field |
+| `driver<Name>` | boolean | whether that driver starts |
+| `<driver><Field>` | the field type | one driver config field |
 
-Every file except a hand stub and a `mod.rs` is named `zz_generated_*`.
-Every generated file starts with the generated header. The root cell owns
-one real `mod.rs` per layer directory, so `lib.rs` is plain
-`pub mod <layer>;` lines and no file carries a `#[path]` attribute. A
-layer `mod.rs` names the generated file and aliases it, so
-`crate::types::greeting` reads the same as before.
+configgen-gen cannot emit an enum, so the port choice travels as a
+string. Main matches it and answers an error naming the port and every
+candidate it knows.
 
-## What the crates need
+## Main
 
-The factory owns `Cargo.toml`. `core` needs `serde` with `derive`,
-`serde_json` and `thiserror`, plus `mockall` under dev. `app` needs the
-core crate, `anyhow`, `axum`, `rusqlite` with `bundled`, `serde`,
-`serde_json`, `thiserror` and `tokio` with `full`.
+Main loads the config, matches each port choice into one boxed adapter,
+builds each controller with its ports in declaration order, and starts
+each driver its flag enables. A driver is built with its config and the
+controllers it requires, bound, announced and spawned. Main refuses to
+run with every driver disabled and then joins the ones it started.
+
+The crate needs `anyhow`, `tokio` and `songe-common`, whose
+`error::chain` main uses to render a driver failure.

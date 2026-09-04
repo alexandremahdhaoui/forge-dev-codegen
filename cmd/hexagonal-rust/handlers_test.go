@@ -16,8 +16,13 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
 
 const smallSpec = `
@@ -50,18 +55,73 @@ components:
           type: string
 `
 
+const smallWiring = `binary: svc-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+`
+
+func standUpTheRestCell(t *testing.T) string {
+	t.Helper()
+
+	files, err := restrust.Generate([]byte(smallSpec), restrust.Options{Service: "svc"})
+	if err != nil {
+		t.Fatalf("generating the rest cell: %v", err)
+	}
+
+	root := t.TempDir()
+	dir := filepath.Join(root, "src", "rest")
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making %s: %v", dir, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "forge-dev.yaml"), []byte("name: svc\nkind: rest\n"), 0o644); err != nil {
+		t.Fatalf("writing the cell config: %v", err)
+	}
+
+	for _, f := range files {
+		if f.Path != cellmanifest.FileName {
+			continue
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, f.Path), []byte(f.Content), 0o644); err != nil {
+			t.Fatalf("writing the cell manifest: %v", err)
+		}
+	}
+
+	return root
+}
+
 func TestTheEngineFillsTheHexagonalRustCellOnly(t *testing.T) {
 	generate := NewHandlers().Generate
+	root := standUpTheRestCell(t)
 
-	if _, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "cli", OpenapiSpec: smallSpec}); err == nil {
+	input := GenerateInput{
+		Name: "svc", Kind: "hexagonal", Language: "rust",
+		SrcDir: root, WiringSpec: smallWiring,
+		Layout: map[string]interface{}{"cells": []interface{}{"rest"}},
+	}
+
+	cli := input
+	cli.Kind = "cli"
+
+	if _, err := generate(context.Background(), cli); err == nil {
 		t.Error("the cli kind must be refused")
 	}
 
-	if _, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "hexagonal", Language: "go", OpenapiSpec: smallSpec}); err == nil {
+	golang := input
+	golang.Language = "go"
+
+	if _, err := generate(context.Background(), golang); err == nil {
 		t.Error("the go language must be refused")
 	}
 
-	out, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "hexagonal", Language: "rust", OpenapiSpec: smallSpec})
+	out, err := generate(context.Background(), input)
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
@@ -71,31 +131,30 @@ func TestTheEngineFillsTheHexagonalRustCellOnly(t *testing.T) {
 	}
 }
 
-func TestTheAnswerDeclaresThatItCarriesACellManifest(t *testing.T) {
+func TestTheSkeletonAnswersNoCellManifestOfItsOwn(t *testing.T) {
+	root := standUpTheRestCell(t)
+
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
+		Name: "svc", Kind: "hexagonal", SrcDir: root, WiringSpec: smallWiring,
+		Layout: map[string]interface{}{"cells": []interface{}{"rest"}},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if !out.Manifest {
-		t.Error("the answer does not declare a manifest")
-	}
-
 	for _, f := range out.Files {
-		if f.Path == "zz_generated_cell.yaml" {
-			return
+		if f.Path == cellmanifest.FileName {
+			t.Fatal("the skeleton reads manifests, it never writes one")
 		}
 	}
-
-	t.Fatal("no cell manifest was answered")
 }
 
 func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
+	root := standUpTheRestCell(t)
+
 	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"cells": []interface{}{"grpc"}},
+		Name: "svc", Kind: "hexagonal", SrcDir: root, WiringSpec: smallWiring,
+		Layout: map[string]interface{}{"cells": []interface{}{"rest"}},
 	})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -106,7 +165,7 @@ func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
 			continue
 		}
 
-		if !strings.Contains(f.Content, "pub mod grpc;") {
+		if !strings.Contains(f.Content, "pub mod rest;") {
 			t.Errorf("src/lib.rs does not mount the cell\n%s", f.Content)
 		}
 
@@ -118,34 +177,19 @@ func TestTheLayoutMountsEverySecondEnginesCell(t *testing.T) {
 
 func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"cells": "grpc"},
+		Name: "svc", Kind: "hexagonal", WiringSpec: smallWiring,
+		Layout: map[string]interface{}{"cells": "rest"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "it is a list of module directory names under src") {
 		t.Fatalf("want an error refusing the cells shape, got %v", err)
 	}
 }
 
-func TestTheLayoutNamesTheCellTheManifestDeclares(t *testing.T) {
-	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
-		Name: "svc", Kind: "hexagonal", OpenapiSpec: smallSpec,
-		Layout: map[string]interface{}{"cell": "http"},
+func TestAModelWithNoWiringDocumentIsRefused(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal",
 	})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "the cell names no wiring file") {
+		t.Fatalf("want an error naming the missing wiring, got %v", err)
 	}
-
-	for _, f := range out.Files {
-		if f.Path != "zz_generated_cell.yaml" {
-			continue
-		}
-
-		if !strings.Contains(f.Content, "cell: http") {
-			t.Errorf("the manifest does not name the cell\n%s", f.Content)
-		}
-
-		return
-	}
-
-	t.Fatal("no cell manifest was answered")
 }

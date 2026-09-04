@@ -16,7 +16,7 @@ components:
       properties:
         name:
           type: string
-          description: The service name. The crates are <name>-core and <name>-app, the address env is <NAME>_ADDR, the server binary is <name>-server.
+          description: The service name. The crate is named after it.
         version:
           type: string
           description: The service version.
@@ -35,24 +35,27 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cells lists the module directories under src. cell names the manifest cell and defaults to rest.
+          description: The kind's layout. cells lists the module directories under src, one per transport cell.
         runtime:
           type: object
           additionalProperties: true
           description: The runnable inputs. Unused here.
         openapiSpec:
           type: string
-          description: The raw OpenAPI document. Its schemas, x-store, paths, x-controller and x-ports decide everything emitted.
+          description: Unused. The rest cell reads the OpenAPI document, the skeleton reads the cell manifests.
+        wiringSpec:
+          type: string
+          description: The wiring document. It names the binary, one candidate set per port and one enabled flag per driver.
         checksum:
           type: string
           description: The source checksum forge-dev computed.
         srcDir:
           type: string
-          description: The crate root. Every emitted path is relative to it.
+          description: The crate root. Every emitted path is relative to it, and every listed cell is read under src.
       required:
         - name
         - kind
-        - openapiSpec
+        - wiringSpec
     GeneratedFile:
       type: object
       properties:
@@ -73,8 +76,5 @@ components:
           description: The emitted files. forge-dev core writes them.
           items:
             $ref: "#/components/schemas/GeneratedFile"
-        manifest:
-          type: boolean
-          description: True when the answer carries the cell manifest zz_generated_cell.yaml.
       required:
         - files

@@ -18,7 +18,8 @@ Every manifest carries `version: "1"`. A reader refuses any other value.
 The manifest lists what the cell provides and what it needs.
 
 - `provides.drivers` a driver, the controller traits it needs, its config fields
-- `provides.adapters` an adapter, the port it implements, its config fields
+- `provides.adapters` an adapter, the port it implements, whether its `new` is
+  fallible, its config fields
 - `provides.controllers` a controller trait, its impl struct, its ports
 - `provides.ports` a port trait the cell declares
 - `requires.ports` a port trait the cell needs somebody else to declare

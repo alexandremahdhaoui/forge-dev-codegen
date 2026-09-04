@@ -58,6 +58,7 @@ type Adapter struct {
 	Type       string                 `json:"type" yaml:"type"`
 	Module     string                 `json:"module" yaml:"module"`
 	Implements string                 `json:"implements" yaml:"implements"`
+	Fallible   bool                   `json:"fallible,omitempty" yaml:"fallible,omitempty"`
 	Config     map[string]ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
