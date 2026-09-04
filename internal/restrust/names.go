@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hexrust
+package restrust
 
 import (
 	"strings"
@@ -67,4 +67,8 @@ func Pascal(s string) string {
 
 func Upper(s string) string {
 	return strings.ToUpper(Snake(s))
+}
+
+func IsModuleName(name string) bool {
+	return rustAndSQLIdent.MatchString(name) && !rustKeywords[name]
 }

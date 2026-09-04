@@ -20,7 +20,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 )
 
 var tableName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -59,7 +59,7 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 			return nil, fmt.Errorf("finding store %q: the schema is not marked x-store", name)
 		}
 
-		snake := hexrust.Snake(name)
+		snake := restrust.Snake(name)
 		if !tableName.MatchString(snake) {
 			return nil, fmt.Errorf("naming the table of store %q: %q is not a table name matching %s", name, snake, tableName)
 		}
@@ -67,7 +67,7 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 		stores = append(stores, Store{
 			Name:     name,
 			Snake:    snake,
-			Upper:    hexrust.Upper(name),
+			Upper:    restrust.Upper(name),
 			Required: schema.Required,
 		})
 	}

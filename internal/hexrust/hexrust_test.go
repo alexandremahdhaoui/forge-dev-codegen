@@ -164,7 +164,6 @@ func TestOneStoreAndOneOperationEmitOneCrateWorthOfLayers(t *testing.T) {
 	wantPaths := []string{
 		"src/adapter/mod.rs",
 		"src/adapter/zz_generated_greeting_sqlite.rs",
-		"src/bin/zz_generated_songe_hello_server.rs",
 		"src/controller/mod.rs",
 		"src/controller/zz_generated_greeting_controller.rs",
 		"src/driver/mod.rs",
@@ -833,37 +832,6 @@ func TestTheDriverAnswersTheStatusTheSpecDeclaresForAnInvalidRequest(t *testing.
 				if strings.HasSuffix(f.Path, "zz_generated_http_driver.rs") && !strings.Contains(f.Content, tt.want) {
 					t.Errorf("the driver lacks %q\n%s", tt.want, f.Content)
 				}
-			}
-		})
-	}
-}
-
-func TestNamesFollowRustCasing(t *testing.T) {
-	tests := []struct {
-		in     string
-		snake  string
-		pascal string
-		upper  string
-	}{
-		{"createGreeting", "create_greeting", "CreateGreeting", "CREATE_GREETING"},
-		{"GreetingStore", "greeting_store", "GreetingStore", "GREETING_STORE"},
-		{"player-session", "player_session", "PlayerSession", "PLAYER_SESSION"},
-		{"songe-hello", "songe_hello", "SongeHello", "SONGE_HELLO"},
-		{"HTTPServer", "httpserver", "HTTPServer", "HTTPSERVER"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			if got := hexrust.Snake(tt.in); got != tt.snake {
-				t.Errorf("Snake(%q) = %q, want %q", tt.in, got, tt.snake)
-			}
-
-			if got := hexrust.Pascal(tt.in); got != tt.pascal {
-				t.Errorf("Pascal(%q) = %q, want %q", tt.in, got, tt.pascal)
-			}
-
-			if got := hexrust.Upper(tt.in); got != tt.upper {
-				t.Errorf("Upper(%q) = %q, want %q", tt.in, got, tt.upper)
 			}
 		})
 	}

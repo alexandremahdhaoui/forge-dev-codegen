@@ -21,7 +21,7 @@ import (
 	"regexp"
 	"text/template"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 )
 
@@ -46,7 +46,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the vectors: the service name is required")
 	}
 
-	if !serviceIdent.MatchString(hexrust.Snake(opts.Service)) {
+	if !serviceIdent.MatchString(restrust.Snake(opts.Service)) {
 		return nil, fmt.Errorf("emitting the vectors: service name %q is not one Rust or Cargo can spell, use letters, digits and underscores and start with a letter", opts.Service)
 	}
 
@@ -54,7 +54,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		opts.Cell = udprust.DefaultCell
 	}
 
-	spec, err := hexrust.Parse(openapiDoc)
+	spec, err := restrust.Parse(openapiDoc)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 	}, nil
 }
 
-func declaredOperations(spec *hexrust.Spec) func(string) bool {
+func declaredOperations(spec *restrust.Spec) func(string) bool {
 	declared := map[string]bool{}
 
 	for _, c := range spec.Controllers {

@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 )
 
 type view struct {
@@ -98,7 +98,7 @@ type testView struct {
 	ExpectedSubstringLiteral string
 }
 
-func buildOpSignature(op hexrust.Operation) opSignature {
+func buildOpSignature(op restrust.Operation) opSignature {
 	sig := opSignature{Ident: op.Ident, ReturnType: "()"}
 	if op.Response != "" {
 		sig.ReturnType = op.Response
@@ -125,14 +125,14 @@ func paramArgType(kind string) string {
 	return "i64"
 }
 
-func buildView(spec *hexrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
+func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
 	v := view{
 		Header: header,
-		Crate:  hexrust.Snake(opts.Service),
+		Crate:  restrust.Snake(opts.Service),
 	}
 
-	opsByID := map[string]hexrust.Operation{}
-	controllerByName := map[string]hexrust.Controller{}
+	opsByID := map[string]restrust.Operation{}
+	controllerByName := map[string]restrust.Controller{}
 	usedTypes := map[string]bool{}
 
 	for _, c := range spec.Controllers {
@@ -156,7 +156,7 @@ func buildView(spec *hexrust.Spec, vectors *VectorsFile, datagrams *datagramServ
 	}
 
 	for _, name := range sortedStrings(usedTypes) {
-		v.TypeImports = append(v.TypeImports, importView{Snake: hexrust.Snake(name), Name: name})
+		v.TypeImports = append(v.TypeImports, importView{Snake: restrust.Snake(name), Name: name})
 	}
 
 	for _, c := range vectors.Cases {
@@ -214,7 +214,7 @@ type arm struct {
 	id   string
 }
 
-func chooseArm(c VectorCase, op hexrust.Operation) (arm, error) {
+func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
 	isOK := len(c.ControllerReply) > 0
 	is2xx := c.ExpectedStatus >= 200 && c.ExpectedStatus < 300
 
@@ -245,7 +245,7 @@ func chooseArm(c VectorCase, op hexrust.Operation) (arm, error) {
 	}
 }
 
-func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (testView, error) {
+func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (testView, error) {
 	sig := buildOpSignature(op)
 
 	uri, hasBody, bodyLiteral, err := buildRequest(op, c.Input)
@@ -302,7 +302,7 @@ func buildTest(c VectorCase, op hexrust.Operation, owner hexrust.Controller) (te
 	return tv, nil
 }
 
-func buildRequest(op hexrust.Operation, input json.RawMessage) (uri string, hasBody bool, bodyLiteral string, err error) {
+func buildRequest(op restrust.Operation, input json.RawMessage) (uri string, hasBody bool, bodyLiteral string, err error) {
 	inputMap, err := parseInput(input)
 	if err != nil {
 		return "", false, "", err
@@ -331,7 +331,7 @@ func buildRequest(op hexrust.Operation, input json.RawMessage) (uri string, hasB
 	return uri, true, strconv.Quote(compact), nil
 }
 
-func buildWithPredicates(op hexrust.Operation, input json.RawMessage) ([]string, error) {
+func buildWithPredicates(op restrust.Operation, input json.RawMessage) ([]string, error) {
 	inputMap, err := parseInput(input)
 	if err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func parseInput(input json.RawMessage) (map[string]json.RawMessage, error) {
 	return inputMap, nil
 }
 
-func paramValue(p hexrust.Param, inputMap map[string]json.RawMessage) (string, error) {
+func paramValue(p restrust.Param, inputMap map[string]json.RawMessage) (string, error) {
 	raw, ok := inputMap[p.Name]
 	if !ok {
 		return "", fmt.Errorf("reading input: path parameter %q is missing", p.Name)
@@ -399,7 +399,7 @@ func paramValue(p hexrust.Param, inputMap map[string]json.RawMessage) (string, e
 	return value, nil
 }
 
-func buildReturning(a arm, c VectorCase, op hexrust.Operation, owner hexrust.Controller) (string, error) {
+func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.Controller) (string, error) {
 	switch a.kind {
 	case armKindOK:
 		if op.Response == "" {

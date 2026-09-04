@@ -1,0 +1,15 @@
+name: rest-rust
+kind: mcp-server
+version: 0.1.0
+description: Emits the rust rest cell of one service from its OpenAPI document. It writes the wire types, the axum driver, a store port and a sqlite adapter per x-store schema, and a controller trait with the struct that carries its ports.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+layout:
+  tools:
+    - name: generate
+      description: Answer the rest cell of one service from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

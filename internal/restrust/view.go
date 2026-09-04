@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hexrust
+package restrust
 
 import (
 	"fmt"
@@ -21,24 +21,21 @@ import (
 )
 
 type view struct {
-	Header       string
-	Service      string
-	ServiceUpper string
-	Crate            string
+	Header           string
+	Service          string
 	Cell             string
 	CratePath        string
 	ModulePrefix     string
 	DriverName       string
 	DefaultAddress   string
 	DefaultStorePath string
-	Types        []typeView
-	Stores       []storeView
-	UsedStores   []storeView
-	Controllers  []controllerView
-	Routes       []opView
-	WireImports  []string
-	UsesPath     bool
-	Cells        []string
+	Types            []typeView
+	Stores           []storeView
+	UsedStores       []storeView
+	Controllers      []controllerView
+	Routes           []opView
+	WireImports      []string
+	UsesPath         bool
 }
 
 type fieldView struct {
@@ -113,14 +110,20 @@ type controllerView struct {
 }
 
 func buildView(spec *Spec, opts Options) view {
+	cratePath := "crate::" + opts.Cell + "::"
+	modulePrefix := opts.Cell + "::"
+
+	if opts.Root {
+		cratePath = "crate::"
+		modulePrefix = ""
+	}
+
 	v := view{
-		Header:       header,
-		Service:      opts.Service,
-		ServiceUpper: Upper(opts.Service),
-		Crate:            Snake(opts.Service),
+		Header:           header,
+		Service:          opts.Service,
 		Cell:             opts.Cell,
-		CratePath:        "crate::",
-		ModulePrefix:     opts.ModulePrefix(),
+		CratePath:        cratePath,
+		ModulePrefix:     modulePrefix,
 		DriverName:       opts.Cell,
 		DefaultAddress:   DefaultAddress,
 		DefaultStorePath: DefaultStorePath,
@@ -198,9 +201,6 @@ func buildView(spec *Spec, opts Options) view {
 
 	v.WireImports = sortedKeys(wire)
 
-	v.Cells = append([]string{}, opts.Cells...)
-	sort.Strings(v.Cells)
-
 	return v
 }
 
@@ -229,7 +229,7 @@ func buildTypeView(t TypeDef) typeView {
 func coreType(ft fieldType) string {
 	switch ft.Kind {
 	case "ref":
-		return "crate::types::" + Snake(ft.Ref) + "::" + ft.Ref
+		return "super::" + Snake(ft.Ref) + "::" + ft.Ref
 	case "array":
 		return "Vec<" + coreType(*ft.Item) + ">"
 	default:

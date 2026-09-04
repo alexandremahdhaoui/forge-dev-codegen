@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: rest-rust Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+          description: Unused. The engine has no configuration. The model it receives carries everything.
+    GenerateInput:
+      type: object
+      description: The normalized model forge-dev hands every generator.
+      properties:
+        name:
+          type: string
+          description: The service name. The crate is named after it.
+        version:
+          type: string
+          description: The service version.
+        description:
+          type: string
+          description: The service description.
+        kind:
+          type: string
+          description: What the program is. This engine fills the rest kind only.
+        language:
+          type: string
+          description: The cell's language. This engine emits rust only.
+        packageName:
+          type: string
+          description: Unused here.
+        layout:
+          type: object
+          additionalProperties: true
+          description: The kind's layout. cell names the module directory and defaults to rest.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
+        openapiSpec:
+          type: string
+          description: The raw OpenAPI document. Its schemas, x-store, paths, x-controller and x-ports decide everything emitted.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed.
+        srcDir:
+          type: string
+          description: The cell directory. Every emitted path is relative to it.
+      required:
+        - name
+        - kind
+        - openapiSpec
+    GeneratedFile:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The file path, relative to the engine source directory.
+        content:
+          type: string
+          description: The file content.
+      required:
+        - path
+        - content
+    GenerateOutput:
+      type: object
+      properties:
+        files:
+          type: array
+          description: The emitted files. forge-dev core writes them.
+          items:
+            $ref: "#/components/schemas/GeneratedFile"
+        manifest:
+          type: boolean
+          description: True when the answer carries the cell manifest zz_generated_cell.yaml.
+      required:
+        - files

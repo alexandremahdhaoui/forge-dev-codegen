@@ -37,7 +37,8 @@ it fills, then the library that fills it.
 | rest-rust-axum | rest-api x rust | axum |
 | rest-python-fastapi | rest-api x python | fastapi |
 | rest-typescript-fastify | rest-api x typescript | fastify |
-| hexagonal-rust | hexagonal x rust | axum, rusqlite, thiserror, mockall |
+| hexagonal-rust | hexagonal x rust | thiserror, mockall |
+| rest-rust | rest x rust | axum, rusqlite, thiserror, mockall |
 | grpc-rust-tonic | grpc x rust | tonic, prost, protox |
 | udp-rust | udp x rust | prost, tokio |
 | vectors-rust | vectors x rust | mockall, tower, http-body-util, tokio |
