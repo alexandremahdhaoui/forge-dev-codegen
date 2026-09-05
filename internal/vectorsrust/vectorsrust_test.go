@@ -336,6 +336,51 @@ func TestAServiceNameThatCannotBeACrateNameIsRefused(t *testing.T) {
 	}
 }
 
+func TestTheRestCellNamesTheModuleTheGeneratedTestsImport(t *testing.T) {
+	tests := []struct {
+		name         string
+		restCell     string
+		wantContains string
+		wantRefusal  string
+	}{
+		{
+			name:         "a rest cell named http puts the driver under the http module",
+			restCell:     "http",
+			wantContains: "use songe_hello::http::driver::",
+		},
+		{
+			name:        "a rest cell name Rust cannot spell as a module is refused",
+			restCell:    "1-http",
+			wantRefusal: `rest cell "1-http" is not a name Rust can spell as a module`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := vectorsrust.Generate([]byte(helloSpec), []byte(helloCases), vectorsrust.Options{
+				Service:  "songe-hello",
+				RestCell: tt.restCell,
+			})
+
+			if tt.wantRefusal != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantRefusal) {
+					t.Fatalf("want a refusal containing %q, got %v", tt.wantRefusal, err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("generating: %v", err)
+			}
+
+			if !strings.Contains(files[0].Content, tt.wantContains) {
+				t.Fatalf("the file lacks %q\n%s", tt.wantContains, files[0].Content)
+			}
+		})
+	}
+}
+
 func TestAControllerReplyWithANon2xxExpectedStatusIsRefused(t *testing.T) {
 	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": "Songe"}, "controllerReply": {"id": "g1", "name": "Songe", "count": 0}, "expectedStatus": 422}]}`
 

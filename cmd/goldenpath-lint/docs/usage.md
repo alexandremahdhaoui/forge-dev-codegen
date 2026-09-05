@@ -71,6 +71,15 @@ lines, so the lines are joined up to the closing semicolon before matching. The
 finding reports the line the statement starts on. An attribute line such as a
 tokio test attribute is scanned the same way.
 
+A use statement no semicolon closes is skipped. The join stops at a blank line,
+at the end of the file, or at a line that leaves no brace open and carries no
+semicolon. The statement is reported nowhere and the lines after it are scanned
+as usual.
+
+A leading `::` is read. `use ::std::fs;` names `std::fs` like `use std::fs;`
+does. A `pub`, `pub(crate)`, `pub(super)` or `pub(in path)` in front of the use
+does not hide it.
+
 Generated files are checked too. A generator that emits io into a controller is
 a bug.
 

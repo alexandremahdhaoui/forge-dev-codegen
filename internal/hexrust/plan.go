@@ -395,8 +395,8 @@ func planCandidate(
 
 		if entry.Adapter.Implements != trait {
 			return candidatePlan{}, fmt.Errorf(
-				"wiring port %q: candidate %q implements %q and the wiring names it under %q",
-				trait, name, entry.Adapter.Implements, trait,
+				"wiring port %q: candidate %q implements %q instead",
+				trait, name, entry.Adapter.Implements,
 			)
 		}
 

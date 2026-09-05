@@ -10,5 +10,5 @@ Reads layout.cells, the wiring and the cell manifests of one service. Answers th
 
 - **Type:** `string`
 - **Required:** No
-- **Description:** Unused. The engine has no configuration; the model it receives carries everything.
+- **Description:** Unused. The engine has no configuration. The model it receives carries everything.
 

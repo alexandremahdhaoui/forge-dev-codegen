@@ -27,7 +27,6 @@ import (
 )
 
 const nodeCrateManifest = `[workspace]
-members = ["common"]
 
 [package]
 name = "songe-hello"
@@ -45,7 +44,7 @@ prost = "0.14"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-songe-common = { path = "common" }
+songe-common = { path = "SONGE_COMMON_DIR" }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tonic = "0.14"
@@ -57,30 +56,6 @@ mockall = "0.15"
 [build-dependencies]
 protox = "0.9"
 tonic-prost-build = "0.14"
-`
-
-const nodeCommonManifest = `[package]
-name = "songe-common"
-version = "0.1.0"
-edition = "2021"
-`
-
-const nodeCommonLib = `pub mod error;
-`
-
-const nodeCommonError = `use std::error::Error;
-
-pub fn chain(error: &dyn Error) -> String {
-    let mut parts = vec![error.to_string()];
-    let mut current = error.source();
-
-    while let Some(source) = current {
-        parts.push(source.to_string());
-        current = source.source();
-    }
-
-    parts.join(": ")
-}
 `
 
 const nodeBuildScript = `include!("src/grpc/zz_generated_build.rs");
@@ -299,6 +274,23 @@ func targetDir(t *testing.T) string {
 	return sharedTargetDir
 }
 
+func songeCommonDir(t *testing.T) string {
+	t.Helper()
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("locating the repo root: %v", err)
+	}
+
+	dir := filepath.Join(repoRoot, "..", "songe-common")
+
+	if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
+		t.Skipf("songe-common is not checked out beside the repo at %s: %v", dir, err)
+	}
+
+	return dir
+}
+
 func standUpTheNodeCrate(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -328,11 +320,8 @@ func standUpTheNodeCrate(t *testing.T) (string, string) {
 		write(path, content)
 	}
 
-	write("Cargo.toml", nodeCrateManifest)
+	write("Cargo.toml", strings.ReplaceAll(nodeCrateManifest, "SONGE_COMMON_DIR", songeCommonDir(t)))
 	write("build.rs", nodeBuildScript)
-	write("common/Cargo.toml", nodeCommonManifest)
-	write("common/src/lib.rs", nodeCommonLib)
-	write("common/src/error.rs", nodeCommonError)
 	write("src/config/zz_generated_config.rs", nodeConfigLoader)
 	write("src/adapter/greeting_memory.rs", nodeMemoryAdapter)
 	write("src/rest/controller/greeting_controller.rs", nodeGreetingControllerImpl)

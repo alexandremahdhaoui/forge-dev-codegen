@@ -2,6 +2,8 @@ package cellmanifest
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -14,12 +16,14 @@ const (
 	defsPrefix     = "#/$defs/"
 )
 
+var unmodelledKeywords = []string{"anyOf", "oneOf", "if", "then", "not"}
+
 type schemaNode struct {
 	kind        string
 	refusesNull bool
 }
 
-var schemaKeys = deriveSchemaKeys(schema)
+var schemaKeys = mustDeriveSchemaKeys(schema)
 
 func join(prefix, segment string) string {
 	if prefix == "" {
@@ -29,17 +33,38 @@ func join(prefix, segment string) string {
 	return prefix + "." + segment
 }
 
-func deriveSchemaKeys(document []byte) map[string]schemaNode {
-	keys := map[string]schemaNode{}
-
-	var root any
-	if err := json.Unmarshal(document, &root); err != nil {
-		return keys
+func mustDeriveSchemaKeys(document []byte) map[string]schemaNode {
+	keys, err := deriveSchemaKeys(document)
+	if err != nil {
+		panic(err)
 	}
 
-	collectSchemaKeys(root, "", definitionsOf(root), map[string]bool{}, keys)
-
 	return keys
+}
+
+func deriveSchemaKeys(document []byte) (map[string]schemaNode, error) {
+	var root any
+	if err := json.Unmarshal(document, &root); err != nil {
+		return nil, fmt.Errorf("parsing the cell schema: %w", err)
+	}
+
+	keys := map[string]schemaNode{}
+
+	if err := collectSchemaKeys(root, "", definitionsOf(root), map[string]bool{}, keys); err != nil {
+		return nil, fmt.Errorf("deriving the cell schema keys: %w", err)
+	}
+
+	if onlyTheRoot(keys) {
+		return nil, errors.New("deriving the cell schema keys: the schema declares no key under the root")
+	}
+
+	return keys, nil
+}
+
+func onlyTheRoot(keys map[string]schemaNode) bool {
+	_, hasRoot := keys[""]
+
+	return hasRoot && len(keys) == 1
 }
 
 func definitionsOf(root any) map[string]any {
@@ -62,18 +87,25 @@ func collectSchemaKeys(
 	defs map[string]any,
 	open map[string]bool,
 	out map[string]schemaNode,
-) {
-	sources, entered := flattenSchema(node, defs, open)
+) error {
+	sources, entered, err := flattenSchema(node, key, defs, open)
+	if err != nil {
+		return err
+	}
 
 	out[key] = schemaNodeOf(sources)
 
 	for _, source := range sources {
-		collectChildKeys(source, key, defs, open, out)
+		if err := collectChildKeys(source, key, defs, open, out); err != nil {
+			return err
+		}
 	}
 
 	for _, name := range entered {
 		delete(open, name)
 	}
+
+	return nil
 }
 
 func collectChildKeys(
@@ -82,26 +114,43 @@ func collectChildKeys(
 	defs map[string]any,
 	open map[string]bool,
 	out map[string]schemaNode,
-) {
+) error {
 	if properties, isObject := source["properties"].(map[string]any); isObject {
 		for name, child := range properties {
-			collectSchemaKeys(child, join(key, name), defs, open, out)
+			if err := collectSchemaKeys(child, join(key, name), defs, open, out); err != nil {
+				return err
+			}
 		}
 	}
 
 	if items, present := source["items"]; present {
-		collectSchemaKeys(items, key+itemSuffix, defs, open, out)
+		if err := collectSchemaKeys(items, key+itemSuffix, defs, open, out); err != nil {
+			return err
+		}
 	}
 
 	if additional, isObject := source["additionalProperties"].(map[string]any); isObject {
-		collectSchemaKeys(additional, join(key, anyNameSegment), defs, open, out)
+		if err := collectSchemaKeys(additional, join(key, anyNameSegment), defs, open, out); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
-func flattenSchema(node any, defs map[string]any, open map[string]bool) ([]map[string]any, []string) {
+func flattenSchema(
+	node any,
+	key string,
+	defs map[string]any,
+	open map[string]bool,
+) ([]map[string]any, []string, error) {
 	object, isObject := node.(map[string]any)
 	if !isObject {
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	if err := refuseUnmodelledKeywords(object, key); err != nil {
+		return nil, nil, err
 	}
 
 	sources := []map[string]any{object}
@@ -114,31 +163,64 @@ func flattenSchema(node any, defs map[string]any, open map[string]bool) ([]map[s
 			open[name] = true
 			entered = append(entered, name)
 
-			nested, nestedEntered := flattenSchema(defs[name], defs, open)
+			nested, nestedEntered, err := flattenSchema(defs[name], key, defs, open)
+			if err != nil {
+				return nil, nil, err
+			}
+
 			sources = append(sources, nested...)
 			entered = append(entered, nestedEntered...)
 		}
 	}
 
 	for _, member := range listOf(object["allOf"]) {
-		nested, nestedEntered := flattenSchema(member, defs, open)
+		nested, nestedEntered, err := flattenSchema(member, key, defs, open)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		sources = append(sources, nested...)
 		entered = append(entered, nestedEntered...)
 	}
 
-	return sources, entered
+	return sources, entered, nil
 }
 
-func schemaNodeOf(sources []map[string]any) schemaNode {
-	types := map[string]bool{}
-
-	for _, source := range sources {
-		for _, name := range declaredTypes(source["type"]) {
-			types[name] = true
+func refuseUnmodelledKeywords(object map[string]any, key string) error {
+	for _, keyword := range unmodelledKeywords {
+		if _, present := object[keyword]; present {
+			return fmt.Errorf("schema key %q carries %q which the key walk does not model", key, keyword)
 		}
 	}
 
+	return nil
+}
+
+func schemaNodeOf(sources []map[string]any) schemaNode {
+	var types map[string]bool
+
+	for _, source := range sources {
+		declared := declaredTypes(source["type"])
+		if len(declared) == 0 {
+			continue
+		}
+
+		types = intersectTypes(types, declared)
+	}
+
 	return schemaNode{kind: kindOf(types), refusesNull: len(types) > 0 && !types["null"]}
+}
+
+func intersectTypes(known map[string]bool, declared []string) map[string]bool {
+	next := map[string]bool{}
+
+	for _, name := range declared {
+		if known == nil || known[name] {
+			next[name] = true
+		}
+	}
+
+	return next
 }
 
 func declaredTypes(value any) []string {

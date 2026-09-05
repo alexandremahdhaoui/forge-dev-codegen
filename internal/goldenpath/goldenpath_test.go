@@ -319,26 +319,60 @@ func TestAUseStatementNoSemicolonClosesIsReportedNowhereAndSwallowsNoLaterLine(t
 	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
 	path := "src/controller/greeting_controller.rs"
 
-	for _, line := range []int{29, 33} {
-		if hitsAnythingOnLine(findings, path, line) {
-			t.Fatalf("a use statement no semicolon closes is reported nowhere, line %d, got %+v", line, findings)
-		}
+	skipped := []struct {
+		name string
+		line int
+	}{
+		{name: "a bare use with no semicolon stops on its own line", line: 29},
+		{name: "a grouped use whose closing brace carries no semicolon stops there", line: 33},
+		{name: "a grouped use a blank line interrupts stops at the blank line", line: 41},
+		{name: "a grouped use the end of the file cuts stops at the end of the file", line: 48},
 	}
 
-	if !hitsLine(findings, path, 31, "std::fs") {
-		t.Fatalf("expected line 31 to stay reachable and be flagged for std::fs, got %+v", findings)
+	for _, test := range skipped {
+		t.Run(test.name, func(t *testing.T) {
+			if hitsAnythingOnLine(findings, path, test.line) {
+				t.Fatalf("a use statement no semicolon closes is reported nowhere, line %d, got %+v", test.line, findings)
+			}
+		})
 	}
 
-	if !hitsLine(findings, path, 37, "std::process") {
-		t.Fatalf("expected line 37 to stay reachable and be flagged for std::process, got %+v", findings)
+	reachable := []struct {
+		name string
+		line int
+		crat string
+	}{
+		{name: "the use after a bare unclosed use stays reachable", line: 31, crat: "std::fs"},
+		{name: "the use after an unclosed grouped use stays reachable", line: 37, crat: "std::process"},
+		{name: "the use after a blank line stop stays reachable", line: 46, crat: "std::fs"},
+	}
+
+	for _, test := range reachable {
+		t.Run(test.name, func(t *testing.T) {
+			if !hitsLine(findings, path, test.line, test.crat) {
+				t.Fatalf("expected line %d to stay reachable and be flagged for %s, got %+v", test.line, test.crat, findings)
+			}
+		})
 	}
 }
 
 func TestAUseStatementBehindAnyPubRestrictionIsScanned(t *testing.T) {
 	findings := check(t, goldenpath.LayoutRust, "testdata/rust-io-use")
 
-	if !hitsLine(findings, "src/controller/greeting_controller.rs", 27, "tokio") {
-		t.Fatalf("expected the pub(super) use on line 27 to be flagged for tokio, got %+v", findings)
+	tests := []struct {
+		name string
+		line int
+	}{
+		{name: "a pub super use is scanned", line: 27},
+		{name: "a pub in path use is scanned", line: 39},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !hitsLine(findings, "src/controller/greeting_controller.rs", test.line, "tokio") {
+				t.Fatalf("expected the restricted use on line %d to be flagged for tokio, got %+v", test.line, findings)
+			}
+		})
 	}
 }
 

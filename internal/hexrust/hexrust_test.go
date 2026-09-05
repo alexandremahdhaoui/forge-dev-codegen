@@ -565,7 +565,7 @@ drivers:
   grpc: { enabled: true }
   udp: { enabled: true }
 `,
-			want: `wiring port "GreetingStore": candidate "grpc_client" implements "HelloClient" and the wiring names it under "GreetingStore"`,
+			want: `wiring port "GreetingStore": candidate "grpc_client" implements "HelloClient" instead`,
 		},
 	}
 
@@ -620,8 +620,27 @@ func TestAHandWrittenCandidateTheWiringLeavesInfallibleGetsNoQuestionMark(t *tes
 
 	main := generateHello(t, root, helloWiring)["src/bin/zz_generated_songe_hello_node.rs"]
 
-	if strings.Contains(main, `.context("building the memory adapter of songe-hello-node")?`) {
-		t.Errorf("main asks a question mark of an adapter that never fails\n%s", main)
+	armStart := `"memory" => Arc::new(`
+	armEnd := "\n        ),"
+
+	start := strings.Index(main, armStart)
+	if start < 0 {
+		t.Fatalf("main lacks the memory candidate arm %q\n%s", armStart, main)
+	}
+
+	length := strings.Index(main[start:], armEnd)
+	if length < 0 {
+		t.Fatalf("main never closes the memory candidate arm\n%s", main)
+	}
+
+	arm := main[start : start+length]
+
+	if !strings.Contains(arm, "GreetingMemoryStore::new(GreetingMemoryStoreConfig {") {
+		t.Fatalf("the memory candidate arm never builds the adapter\n%s", arm)
+	}
+
+	if strings.Contains(arm, "?") {
+		t.Errorf("main asks a question mark of an adapter that never fails\n%s", arm)
 	}
 }
 

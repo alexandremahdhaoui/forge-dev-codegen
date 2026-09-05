@@ -84,10 +84,6 @@ func IsSnakeIdent(name string) bool {
 	return snakeIdent.MatchString(name)
 }
 
-func IsRustKeyword(name string) bool {
-	return keywords[name]
-}
-
 func IsModuleName(name string) bool {
 	return snakeIdent.MatchString(name) && !keywords[name]
 }
