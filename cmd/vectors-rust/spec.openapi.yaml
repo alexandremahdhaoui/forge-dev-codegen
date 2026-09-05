@@ -9,7 +9,7 @@ components:
       properties:
         note:
           type: string
-          description: Unused. The engine has no configuration; the model it receives carries everything.
+          description: Unused. The engine has no configuration. The model it receives carries everything.
     GenerateInput:
       type: object
       description: The normalized model forge-dev hands every generator.

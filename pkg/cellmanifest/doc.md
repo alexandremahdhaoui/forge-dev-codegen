@@ -23,6 +23,9 @@ The manifest lists what the cell provides and what it needs.
 - `provides.controllers` a controller trait, its impl struct, its ports
 - `provides.ports` a port trait the cell declares
 - `requires.ports` a port trait the cell needs somebody else to declare
+- `buildScript` the cargo build script the cell emits, as a path relative to
+  the cell. Optional. The name starts with `zz_generated`. hexagonal-rust
+  includes every declared script from the crate root build script.
 
 A config field carries a type among string, integer, boolean and duration, plus
 `required`, `default` and `description`. Names are snake case. Types and traits

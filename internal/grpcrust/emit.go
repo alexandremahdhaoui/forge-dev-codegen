@@ -31,6 +31,8 @@ const Generator = "grpc-rust-tonic (forge-dev-codegen)"
 
 const DefaultCell = "grpc"
 
+const BuildScriptFile = "zz_generated_build.rs"
+
 const DefaultAddress = "127.0.0.1:0"
 
 const DefaultEndpoint = "http://127.0.0.1:50051"
@@ -103,9 +105,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	manifest := cellmanifest.Manifest{
-		Version:   cellmanifest.Version,
-		Cell:      opts.Cell,
-		Generator: Generator,
+		Version:     cellmanifest.Version,
+		Cell:        opts.Cell,
+		Generator:   Generator,
+		BuildScript: BuildScriptFile,
 	}
 
 	only := len(spec.Services) == 1
@@ -178,7 +181,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	protoName := rustname.Snake(spec.Services[0].Name)
 	buildData := map[string]any{"Header": header, "Cell": opts.Cell, "Name": protoName}
 
-	if err := add("zz_generated_build.rs", "build", buildData); err != nil {
+	if err := add(BuildScriptFile, "build", buildData); err != nil {
 		return nil, err
 	}
 

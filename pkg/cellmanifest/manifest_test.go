@@ -12,6 +12,7 @@ import (
 const grpcCellExample = `version: "1"
 cell: grpc
 generator: grpc-rust-tonic
+buildScript: zz_generated_build.rs
 provides:
   drivers:
     - name: grpc
@@ -41,9 +42,10 @@ requires:
 
 func exampleManifest() cellmanifest.Manifest {
 	return cellmanifest.Manifest{
-		Version:   cellmanifest.Version,
-		Cell:      "grpc",
-		Generator: "grpc-rust-tonic",
+		Version:     cellmanifest.Version,
+		Cell:        "grpc",
+		Generator:   "grpc-rust-tonic",
+		BuildScript: "zz_generated_build.rs",
 		Provides: cellmanifest.Provides{
 			Drivers: []cellmanifest.Driver{{
 				Name:     "grpc",
@@ -94,6 +96,7 @@ func TestParseReadsEveryFieldOfTheGrpcCellExample(t *testing.T) {
 		{"the version is one", m.Version, "1"},
 		{"the cell name is grpc", m.Cell, "grpc"},
 		{"the generator is grpc-rust-tonic", m.Generator, "grpc-rust-tonic"},
+		{"the build script is the generated one beside the cell", m.BuildScript, "zz_generated_build.rs"},
 		{"one driver is provided", len(m.Provides.Drivers), 1},
 		{"the driver type is HelloGrpcDriver", m.Provides.Drivers[0].Type, "HelloGrpcDriver"},
 		{
@@ -271,6 +274,18 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 		Type: cellmanifest.FieldTypeString,
 	}
 
+	absoluteBuildScript := exampleManifest()
+	absoluteBuildScript.BuildScript = "/zz_generated_build.rs"
+
+	escapingBuildScript := exampleManifest()
+	escapingBuildScript.BuildScript = "../zz_generated_build.rs"
+
+	uncleanBuildScript := exampleManifest()
+	uncleanBuildScript.BuildScript = "./zz_generated_build.rs"
+
+	handWrittenBuildScript := exampleManifest()
+	handWrittenBuildScript.BuildScript = "build.rs"
+
 	cases := []struct {
 		name     string
 		manifest cellmanifest.Manifest
@@ -300,6 +315,26 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			name:     "a manifest with no generator is refused",
 			manifest: noGenerator,
 			message:  `cell "grpc" names no generator`,
+		},
+		{
+			name:     "an absolute build script path is refused",
+			manifest: absoluteBuildScript,
+			message:  `cell "grpc" declares build script "/zz_generated_build.rs" which is not a clean path relative to the cell`,
+		},
+		{
+			name:     "a build script path that leaves the cell is refused",
+			manifest: escapingBuildScript,
+			message:  `cell "grpc" declares build script "../zz_generated_build.rs" which is not a clean path relative to the cell`,
+		},
+		{
+			name:     "a build script path that is not clean is refused",
+			manifest: uncleanBuildScript,
+			message:  `cell "grpc" declares build script "./zz_generated_build.rs" which is not a clean path relative to the cell`,
+		},
+		{
+			name:     "a build script whose name is not generated is refused",
+			manifest: handWrittenBuildScript,
+			message:  `cell "grpc" declares build script "build.rs" whose name does not start with "zz_generated"`,
 		},
 		{
 			name:     "a driver with no type is refused",

@@ -38,6 +38,8 @@ const Generator = "hexagonal-rust (forge-dev-codegen)"
 
 const ConfigSpecFile = "zz_generated_config_spec.yaml"
 
+const BuildScriptFile = "zz_generated_build.rs"
+
 const CellConfigFile = "forge-dev.yaml"
 
 var Layers = []string{"adapter", "controller", "driver", "port", "types"}
@@ -193,6 +195,10 @@ func Generate(opts Options) ([]File, error) {
 		func() error {
 			return add(path.Join("src", "bin", "zz_generated_"+p.BinaryIdent+".rs"), "main", p)
 		},
+	}
+
+	if len(p.BuildScripts) > 0 {
+		steps = append(steps, func() error { return add(BuildScriptFile, "build", p) })
 	}
 
 	for _, layer := range Layers {
@@ -376,6 +382,13 @@ pub use zz_generated_{{ .Module }}_config::{{ .Type }};
 pub mod zz_generated_config;
 
 pub use zz_generated_config::*;
+{{ end -}}
+
+{{- define "build" -}}
+{{ .Header }}
+{{ range .BuildScripts }}
+include!("{{ . }}");
+{{- end }}
 {{ end -}}
 
 {{- define "hand_config" -}}

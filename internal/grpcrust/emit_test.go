@@ -243,6 +243,10 @@ func TestTheCellManifestNamesTheDriverTheAdapterTheControllerAndThePort(t *testi
 		t.Errorf("cell = %q, want grpc", m.Cell)
 	}
 
+	if m.BuildScript != "zz_generated_build.rs" {
+		t.Errorf("build script = %q, want the generated one beside the cell", m.BuildScript)
+	}
+
 	if len(m.Provides.Drivers) != 1 {
 		t.Fatalf("drivers = %+v", m.Provides.Drivers)
 	}

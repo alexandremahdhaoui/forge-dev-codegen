@@ -138,6 +138,51 @@ func TestMergeOfNoCellsGathersNothing(t *testing.T) {
 	}
 }
 
+func TestMergeGathersTheBuildScriptsOfTheCellsThatDeclareOne(t *testing.T) {
+	t.Parallel()
+
+	rest := cell("rest", cellmanifest.Provides{})
+
+	grpc := cell("grpc", cellmanifest.Provides{})
+	grpc.BuildScript = "zz_generated_build.rs"
+
+	udp := cell("udp", cellmanifest.Provides{})
+	udp.BuildScript = "build/zz_generated_build.rs"
+
+	merged, err := cellmanifest.Merge([]cellmanifest.Manifest{rest, grpc, udp})
+	if err != nil {
+		t.Fatalf("merging three cells returned %v", err)
+	}
+
+	want := []cellmanifest.BuildScript{
+		{Cell: "grpc", Path: "zz_generated_build.rs"},
+		{Cell: "udp", Path: "build/zz_generated_build.rs"},
+	}
+
+	if len(merged.BuildScripts) != len(want) {
+		t.Fatalf("got %+v, want %+v", merged.BuildScripts, want)
+	}
+
+	for i := range want {
+		if merged.BuildScripts[i] != want[i] {
+			t.Fatalf("got %+v at %d, want %+v", merged.BuildScripts[i], i, want[i])
+		}
+	}
+}
+
+func TestMergeOfCellsWithNoBuildScriptGathersAnEmptyList(t *testing.T) {
+	t.Parallel()
+
+	merged, err := cellmanifest.Merge([]cellmanifest.Manifest{cell("rest", cellmanifest.Provides{})})
+	if err != nil {
+		t.Fatalf("merging one cell returned %v", err)
+	}
+
+	if merged.BuildScripts == nil || len(merged.BuildScripts) != 0 {
+		t.Fatalf("got %+v, want an empty list", merged.BuildScripts)
+	}
+}
+
 func TestMergeNamesBothCellsWhenTwoProvideOneThing(t *testing.T) {
 	t.Parallel()
 

@@ -16,7 +16,10 @@ const (
 	defsPrefix     = "#/$defs/"
 )
 
-var unmodelledKeywords = []string{"anyOf", "oneOf", "if", "then", "not"}
+var unmodelledKeywords = []string{
+	"anyOf", "oneOf", "if", "then", "not",
+	"patternProperties", "prefixItems", "contains", "dependentSchemas", "unevaluatedProperties",
+}
 
 type schemaNode struct {
 	kind        string

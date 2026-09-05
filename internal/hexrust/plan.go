@@ -16,6 +16,7 @@ package hexrust
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -35,10 +36,11 @@ type plan struct {
 	Ports       []portPlan
 	Controllers []controllerPlan
 	Drivers     []driverPlan
-	HandModules []string
-	HandConfigs []handConfigPlan
-	Imports     []string
-	Keys        []specKey
+	HandModules  []string
+	HandConfigs  []handConfigPlan
+	Imports      []string
+	Keys         []specKey
+	BuildScripts []string
 }
 
 type portPlan struct {
@@ -169,6 +171,12 @@ func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, e
 
 	p.Cells = append(p.Cells, opts.Cells...)
 	sort.Strings(p.Cells)
+
+	for _, script := range merged.BuildScripts {
+		p.BuildScripts = append(p.BuildScripts, path.Join("src", script.Cell, script.Path))
+	}
+
+	sort.Strings(p.BuildScripts)
 
 	if err := checkRequiredPorts(merged); err != nil {
 		return plan{}, err

@@ -4,16 +4,19 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	FileName = "zz_generated_cell.yaml"
-	Version  = "1"
+	FileName        = "zz_generated_cell.yaml"
+	Version         = "1"
+	GeneratedPrefix = "zz_generated"
 )
 
 //go:embed cell.schema.json
@@ -27,11 +30,12 @@ func Schema() []byte {
 }
 
 type Manifest struct {
-	Version   string   `json:"version" yaml:"version"`
-	Cell      string   `json:"cell" yaml:"cell"`
-	Generator string   `json:"generator" yaml:"generator"`
-	Provides  Provides `json:"provides" yaml:"provides"`
-	Requires  Requires `json:"requires" yaml:"requires"`
+	Version     string   `json:"version" yaml:"version"`
+	Cell        string   `json:"cell" yaml:"cell"`
+	Generator   string   `json:"generator" yaml:"generator"`
+	BuildScript string   `json:"buildScript,omitempty" yaml:"buildScript,omitempty"`
+	Provides    Provides `json:"provides" yaml:"provides"`
+	Requires    Requires `json:"requires" yaml:"requires"`
 }
 
 type Provides struct {
@@ -301,6 +305,10 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("cell %q names no generator", m.Cell)
 	}
 
+	if err := validateBuildScript(m.Cell, m.BuildScript); err != nil {
+		return err
+	}
+
 	for _, driver := range m.Provides.Drivers {
 		if err := driver.validate(m.Cell); err != nil {
 			return err
@@ -438,6 +446,28 @@ func (p Port) validate(cell string) error {
 	}
 
 	return validateModule(fmt.Sprintf("port %q in cell %q", p.Trait, cell), p.Module)
+}
+
+func validateBuildScript(cell, script string) error {
+	if script == "" {
+		return nil
+	}
+
+	if path.IsAbs(script) || path.Clean(script) != script || strings.HasPrefix(script, "../") {
+		return fmt.Errorf(
+			"cell %q declares build script %q which is not a clean path relative to the cell",
+			cell, script,
+		)
+	}
+
+	if !strings.HasPrefix(path.Base(script), GeneratedPrefix) {
+		return fmt.Errorf(
+			"cell %q declares build script %q whose name does not start with %q",
+			cell, script, GeneratedPrefix,
+		)
+	}
+
+	return nil
 }
 
 func validateType(owner, fieldType string) error {

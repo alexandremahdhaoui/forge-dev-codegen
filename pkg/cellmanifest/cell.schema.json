@@ -9,6 +9,7 @@
     "version": { "type": "string", "const": "1" },
     "cell": { "$ref": "#/$defs/snakeName" },
     "generator": { "type": "string", "minLength": 1 },
+    "buildScript": { "$ref": "#/$defs/buildScript" },
     "provides": { "$ref": "#/$defs/provides" },
     "requires": { "$ref": "#/$defs/requires" }
   },
@@ -16,6 +17,10 @@
     "snakeName": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "buildScript": {
+      "type": "string",
+      "pattern": "^([A-Za-z0-9_][A-Za-z0-9_.-]*/)*zz_generated[A-Za-z0-9_.-]*$"
     },
     "rustIdent": {
       "type": "string",

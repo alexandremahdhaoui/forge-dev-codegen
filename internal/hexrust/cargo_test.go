@@ -32,6 +32,7 @@ const nodeCrateManifest = `[workspace]
 name = "songe-hello"
 version = "0.1.0"
 edition = "2021"
+build = "zz_generated_build.rs"
 
 [[bin]]
 name = "songe-hello-node"
@@ -56,9 +57,6 @@ mockall = "0.15"
 [build-dependencies]
 protox = "0.9"
 tonic-prost-build = "0.14"
-`
-
-const nodeBuildScript = `include!("src/grpc/zz_generated_build.rs");
 `
 
 const nodeGreetingControllerImpl = `use crate::rest::controller::{
@@ -284,8 +282,14 @@ func songeCommonDir(t *testing.T) string {
 
 	dir := filepath.Join(repoRoot, "..", "songe-common")
 
-	if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
-		t.Skipf("songe-common is not checked out beside the repo at %s: %v", dir, err)
+	crateManifest := filepath.Join(dir, "Cargo.toml")
+	if _, err := os.Stat(crateManifest); err != nil {
+		t.Fatalf("songe-common is not checked out beside the repo, %s is missing: %v", crateManifest, err)
+	}
+
+	workspaceManifest := filepath.Join(repoRoot, "..", "Cargo.toml")
+	if _, err := os.Stat(workspaceManifest); err != nil {
+		t.Fatalf("songe-common inherits its dependencies from the workspace, %s is missing: %v", workspaceManifest, err)
 	}
 
 	return dir
@@ -321,7 +325,6 @@ func standUpTheNodeCrate(t *testing.T) (string, string) {
 	}
 
 	write("Cargo.toml", strings.ReplaceAll(nodeCrateManifest, "SONGE_COMMON_DIR", songeCommonDir(t)))
-	write("build.rs", nodeBuildScript)
 	write("src/config/zz_generated_config.rs", nodeConfigLoader)
 	write("src/adapter/greeting_memory.rs", nodeMemoryAdapter)
 	write("src/rest/controller/greeting_controller.rs", nodeGreetingControllerImpl)

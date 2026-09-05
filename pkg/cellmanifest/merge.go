@@ -26,11 +26,17 @@ type Merged struct {
 	Ports         map[string]PortEntry
 	Adapters      []AdapterEntry
 	RequiredPorts []RequiredPort
+	BuildScripts  []BuildScript
 }
 
 type RequiredPort struct {
 	Trait string
 	Cell  string
+}
+
+type BuildScript struct {
+	Cell string
+	Path string
 }
 
 type DriverEntry struct {
@@ -59,7 +65,8 @@ func Merge(manifests []Manifest) (Merged, error) {
 		Drivers:     map[string]DriverEntry{},
 		Controllers: map[string]ControllerEntry{},
 		Ports:       map[string]PortEntry{},
-		Adapters:    []AdapterEntry{},
+		Adapters:     []AdapterEntry{},
+		BuildScripts: []BuildScript{},
 	}
 
 	requiredBy := map[string]string{}
@@ -93,6 +100,10 @@ func Merge(manifests []Manifest) (Merged, error) {
 
 		if err := mergeAdapters(&merged, cellOfAdapter, m); err != nil {
 			return Merged{}, err
+		}
+
+		if m.BuildScript != "" {
+			merged.BuildScripts = append(merged.BuildScripts, BuildScript{Cell: m.Cell, Path: m.BuildScript})
 		}
 
 		for _, trait := range m.Requires.Ports {

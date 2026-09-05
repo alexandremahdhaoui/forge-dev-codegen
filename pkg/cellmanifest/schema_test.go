@@ -88,6 +88,11 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 			manifestYAML: "version: \"1\"\ncell: udp\ngenerator: udp-rust\n",
 		},
 		{
+			name: "a build script under a directory of the cell validates against the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
+				"buildScript: build/zz_generated_build.rs\n",
+		},
+		{
 			name: "a config field with every key validates against the schema",
 			manifestYAML: "version: \"1\"\ncell: rest\ngenerator: rest-rust-axum\n" +
 				"provides:\n  adapters:\n    - name: greeting_sqlite\n      type: GreetingSqliteStore\n" +
@@ -138,6 +143,14 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 		{
 			name:         "a version other than one fails the schema",
 			manifestYAML: "version: \"2\"\ncell: grpc\ngenerator: grpc-rust-tonic\n",
+		},
+		{
+			name:         "a build script that leaves the cell fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nbuildScript: ../zz_generated_build.rs\n",
+		},
+		{
+			name:         "a build script whose name is not generated fails the schema",
+			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nbuildScript: build.rs\n",
 		},
 		{
 			name:         "a cell name that is not snake case fails the schema",

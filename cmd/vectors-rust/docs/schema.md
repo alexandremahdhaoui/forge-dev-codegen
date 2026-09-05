@@ -10,5 +10,5 @@ Emits rust integration tests from OpenAPI declared vectors - one tokio test per 
 
 - **Type:** `string`
 - **Required:** No
-- **Description:** Unused. The engine has no configuration; the model it receives carries everything.
+- **Description:** Unused. The engine has no configuration. The model it receives carries everything.
 
