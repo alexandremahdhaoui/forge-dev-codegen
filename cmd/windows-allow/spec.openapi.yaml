@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: windows-allow Spec Schema
+  version: 0.1.0
+  description: Configuration schema for the windows-allow test runner
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: Configuration for windows-allow. A dev machine tool that clears a locally built Windows exe past Smart App Control by relinking the hash until the machine allows a build. Never a release step.
+      required: [source, destination, name, probeExpect]
+      properties:
+        rootDir:
+          type: string
+          description: The repo directory whose commit names the deployed file. Defaults to the current directory.
+        source:
+          type: string
+          description: The built Windows exe to clear, a path relative to rootDir.
+        destination:
+          type: string
+          description: The directory the allowed build lands in. Env vars are expanded, so $WIN_OUTPUT_PATH works.
+        name:
+          type: string
+          description: The base name of the game binary. The deployed file is name-commit-hash.exe.
+        attempts:
+          type: integer
+          description: How many builds to try before giving up. Defaults to 8.
+        keep:
+          type: integer
+          description: How many builds of this binary to keep in the destination after an allowed one. Older builds of the same name are removed. Builds of other projects are never touched. Defaults to 3.
+        probeArgs:
+          type: array
+          items:
+            type: string
+          description: The arguments the probe runs the exe with.
+        probeExpect:
+          type: string
+          description: The string an allowed build prints. Its absence with Invalid argument present means the build is blocked.
+        probeTimeoutSeconds:
+          type: integer
+          description: How long the probe waits for the exe to print before it stops it. Defaults to 8.

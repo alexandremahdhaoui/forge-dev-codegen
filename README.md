@@ -63,6 +63,7 @@ in any of the four languages, from one shared renderer
 | no-comment-lint | test runner | fails on any comment in go, rust, python or typescript. license headers and generated files exempt |
 | goldenpath-lint | test runner | fails when a repo drifts from the go or rust layout, a layer is not flat, a layer holds a stray file, a file no generated mod line reaches, or a use statement or an attribute of a pure layer names an io crate or an io path |
 | forge-lint | test runner | fails on go:// URIs, an unknown engine scheme, a missing artifactStorePath, missing hack scripts, a unit stage with no runner, go-build on a Rust repo, or an adapter reached from a controller or a driver |
+| windows-allow | test runner | a dev machine tool, clears a locally built Windows exe past Smart App Control by restamping a copy so its hash changes until the machine allows a build |
 
 A module directory in a consuming repo is the engine cell: it holds a
 forge-dev.yaml naming the concern engine and receives the emitted files

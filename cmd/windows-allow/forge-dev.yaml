@@ -1,0 +1,9 @@
+name: windows-allow
+kind: mcp-server
+profile: test-runner
+version: 0.1.0
+description: Clears a locally built Windows exe past Smart App Control by restamping a copy so its hash changes until the dev machine allows a build. A dev machine tool. Never a release step.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main

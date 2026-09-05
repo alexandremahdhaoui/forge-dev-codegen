@@ -201,6 +201,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-windows-allow
+    src: ./cmd/windows-allow
+    engine: forge://forge-dev
+
+  - name: windows-allow
+    src: ./cmd/windows-allow
+    dest: ./build/bin
+    engine: forge://go-build
+
 test:
   - name: lint
     runner: forge://go-lint
