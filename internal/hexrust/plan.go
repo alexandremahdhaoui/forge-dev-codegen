@@ -172,11 +172,16 @@ func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, e
 	p.Cells = append(p.Cells, opts.Cells...)
 	sort.Strings(p.Cells)
 
+	if len(merged.BuildScripts) > 1 {
+		return plan{}, fmt.Errorf(
+			"cells %q and %q both declare a build script, one crate holds one fn main",
+			merged.BuildScripts[0].Cell, merged.BuildScripts[1].Cell,
+		)
+	}
+
 	for _, script := range merged.BuildScripts {
 		p.BuildScripts = append(p.BuildScripts, path.Join("src", script.Cell, script.Path))
 	}
-
-	sort.Strings(p.BuildScripts)
 
 	if err := checkRequiredPorts(merged); err != nil {
 		return plan{}, err

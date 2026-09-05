@@ -106,8 +106,9 @@ hexagonal-rust writes from `layout.cells`:
 pub mod grpc;
 ```
 
-The app crate's `build.rs` sits at the crate root and includes the
-generated one:
+The cell manifest declares `buildScript`. hexagonal-rust reads it and
+writes the crate root `zz_generated_build.rs`, which includes the cell one.
+Nobody writes a `build.rs` by hand.
 
 ```rust
 include!("src/grpc/zz_generated_build.rs");

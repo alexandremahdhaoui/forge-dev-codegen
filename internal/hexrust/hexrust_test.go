@@ -303,6 +303,47 @@ drivers:
 	}
 }
 
+func TestTwoCellsThatEachDeclareABuildScriptAreRefusedBecauseOneCrateHoldsOneFnMain(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest")
+
+	manifest := cellmanifest.Manifest{
+		Version:     cellmanifest.Version,
+		Cell:        "ws",
+		Generator:   "a test",
+		BuildScript: "zz_generated_build.rs",
+	}
+
+	body, err := cellmanifest.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshalling the manifest: %v", err)
+	}
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), string(body))
+
+	_, err = hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+`),
+	})
+
+	want := `cells "grpc" and "ws" both declare a build script, one crate holds one fn main`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want it to name %q", err, want)
+	}
+}
+
 func TestTheCrateRootMountsEveryRootLayerTheConfigModuleAndEveryCell(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 	files := generateHello(t, root, helloWiring)
