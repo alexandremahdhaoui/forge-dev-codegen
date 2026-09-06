@@ -57,7 +57,7 @@ in any of the four languages, from one shared renderer
 | logging-gen | `kind: logging` | the logging module |
 | telemetry-gen | `kind: telemetry` | the metrics and tracing module |
 | resilience-gen | `kind: resilience` | the resilience module |
-| delivery-gen | `kind: delivery` | one Containerfile per layout binary |
+| containerfile-gen | `kind: delivery` | one `zz_generated.Containerfile` per layout binary |
 | testenv-sqlite | testenv subengine | one sqlite file per x-store schema, seeded from vectors, exports SONGE_STORE_<UPPER>_PATH |
 | testenv-stack | testenv subengine | starts service binaries on free ports, waits for LISTENING, exports one address env per service |
 | no-comment-lint | test runner | fails on any comment in go, rust, python or typescript. license headers and generated files exempt |

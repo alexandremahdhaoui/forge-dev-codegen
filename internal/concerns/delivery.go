@@ -66,7 +66,7 @@ func EmitDelivery(lang Language, repo string, binaries []Binary) ([]File, error)
 		}
 
 		out = append(out, File{
-			Path:    fmt.Sprintf("%s/Containerfile", b.Name),
+			Path:    fmt.Sprintf("%s/zz_generated.Containerfile", b.Name),
 			Content: body,
 		})
 	}

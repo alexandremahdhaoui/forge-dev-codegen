@@ -138,12 +138,12 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
-  - name: gen-delivery-gen
-    src: ./cmd/delivery-gen
+  - name: gen-containerfile-gen
+    src: ./cmd/containerfile-gen
     engine: forge://forge-dev
 
-  - name: delivery-gen
-    src: ./cmd/delivery-gen
+  - name: containerfile-gen
+    src: ./cmd/containerfile-gen
     dest: ./build/bin
     engine: forge://go-build
 

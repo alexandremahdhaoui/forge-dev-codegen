@@ -39,7 +39,7 @@ changes; the registry is the factory, not a table in code.
 
 ## The concern engines
 
-`logging-gen`, `telemetry-gen`, `resilience-gen` and `delivery-gen` each
+`logging-gen`, `telemetry-gen`, `resilience-gen` and `containerfile-gen` each
 fill their own custom kind across all four languages. They render through
 one shared package, `internal/concerns`, so two cells naming one concern
 cannot drift: one template, one renderer. A concern engine is named

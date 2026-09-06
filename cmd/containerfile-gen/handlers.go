@@ -35,7 +35,7 @@ func NewHandlers() Handlers {
 	return Handlers{
 		Generate: func(_ context.Context, input GenerateInput) (*GenerateOutput, error) {
 			if input.Kind != "delivery" {
-				return nil, fmt.Errorf("emitting %q: delivery-gen fills the delivery cell only", input.Kind)
+				return nil, fmt.Errorf("emitting %q: containerfile-gen fills the delivery cell only", input.Kind)
 			}
 
 			lang := concerns.Language(input.Language)

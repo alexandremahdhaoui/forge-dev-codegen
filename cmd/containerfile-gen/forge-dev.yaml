@@ -1,7 +1,7 @@
-name: delivery-gen
+name: containerfile-gen
 kind: mcp-server
 version: 0.1.0
-description: Emits the delivery module for one language cell. One of the composable observability generators of forge-dev-codegen.
+description: Emits one zz_generated.Containerfile per binary the layout declares, for one language cell. One of the composable observability generators of forge-dev-codegen.
 openapi:
   specPath: ./spec.openapi.yaml
 generate:

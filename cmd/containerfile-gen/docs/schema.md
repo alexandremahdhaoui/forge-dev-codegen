@@ -1,6 +1,6 @@
-# delivery-gen Configuration
+# containerfile-gen Configuration
 
-Emits the delivery module for one language cell. One of the composable observability generators of forge-dev-codegen.
+Emits one zz_generated.Containerfile per binary the layout declares, for one language cell. One of the composable observability generators of forge-dev-codegen.
 
 > Full OpenAPI specification: [spec.openapi.yaml](../spec.openapi.yaml)
 
