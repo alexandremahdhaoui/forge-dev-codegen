@@ -205,7 +205,13 @@ extend type monster
 	declared := map[string]wireRelation{}
 	extended := map[string]wireRelation{}
 
-	for _, one := range decodeWire(t, "a module extending its own type", string(encoded)).TypeDefinitions {
+	entries := decodeWire(t, "a module extending its own type", string(encoded)).TypeDefinitions
+
+	if len(entries) != 2 {
+		t.Fatalf("the type monster lands %d times, a consumer of this shape has to fold the duplicate", len(entries))
+	}
+
+	for _, one := range entries {
 		if one.Type != "monster" {
 			t.Fatalf("the transformed model carries the type %q", one.Type)
 		}

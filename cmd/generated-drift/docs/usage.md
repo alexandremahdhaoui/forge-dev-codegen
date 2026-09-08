@@ -23,11 +23,21 @@ The engine runs the forge it was built against and refuses any other, because a 
 
 Build info answers which one that is. A build recording a version of `github.com/alexandremahdhaoui/forge` resolves a forge through the shared tool precedence, asks it for its version, and refuses a mismatch by name with both versions and the resolved path. A build recording no version came from the enclosing workspace, so it runs `go run github.com/alexandremahdhaoui/forge/cmd/forge`, the same rule forge uses for its own engines, and the two are one source tree. Neither path reads an environment variable.
 
+Build info describes the gate, never the repo under test. So the repo under test must sit in the same Go workspace as the gate. A gate built in a workspace takes the workspace path for every repo it is pointed at, and a repo outside that workspace has no version to run forge at, so the run fails loudly instead of answering wrong.
+
+The version question is asked from an empty directory the engine makes, with `GIT_CEILING_DIRECTORIES` set above it. An unstamped forge falls back to `git describe` in whatever directory it was started from, so a forge with no version of its own would otherwise answer the tags of the repo under test. Those tags live in the same namespace and the factory bumps them together, so the answer could match by accident and the gate would accept a forge it never checked. Away from every repository that forge answers `dev` and the gate refuses it by name.
+
 ## The artifact store
 
-The engine leaves the store exactly as it found it, absent included.
+The gate runs alone in a repo.
 
-It renames the store to a sibling `.aside` file rather than holding it in memory, so an interrupt leaves it on disk under a name. It takes the same `.lock` file forge takes around a store write, once to move the store and once to put it back, so a run beside an ordinary build cannot lose that build's records. It never holds the lock across the build, because the build writes the store itself.
+It renames the store to a sibling `.aside` file rather than holding it in memory, so an interrupt leaves it on disk under a name. It takes the same `.lock` file forge takes around a store write, once to move the store and once to put it back. It never holds that lock across the build, because the build writes the store itself.
+
+The restore renames the copy back over whatever the build left at the store path. That is why the gate runs alone. An ordinary `forge build` running beside it loses every record it wrote. A second gate on the same repo is worse. It would move the first gate's fresh store aside over the first gate's saved copy, destroy the only copy of the original, and answer green on a comparison the first gate poisoned. So the gate takes a second lock of its own, `.drift-lock` beside the store, and holds it from before the move until after the restore. A second gate waits there rather than interleaving.
+
+A run that finds an `.aside` already in place refuses and names both paths, because an interrupted run left it and the move would overwrite the only copy. Read that file. Move it back over the store path when it is the store you want to keep. Delete it when it is not. Then run the gate again.
+
+The gate leaves the store exactly as it found it, absent included, when it runs alone.
 
 ## Output
 

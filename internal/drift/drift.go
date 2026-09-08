@@ -23,6 +23,10 @@ const (
 
 	forgeName   = "forge"
 	forgeModule = "github.com/alexandremahdhaoui/forge/cmd/forge"
+
+	asideSuffix     = ".aside"
+	storeLockSuffix = ".lock"
+	gateLockSuffix  = ".drift-lock"
 )
 
 type Options struct {
@@ -45,7 +49,7 @@ func Check(opts Options) (findings []Finding, err error) {
 		return nil, err
 	}
 
-	before, err := snapshot(root)
+	storePath, err := artifactStorePath(root)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +59,19 @@ func Check(opts Options) (findings []Finding, err error) {
 		return nil, err
 	}
 
-	store, err := takeArtifactStore(root)
+	releaseGate, err := lockPath(storePath + gateLockSuffix)
+	if err != nil {
+		return nil, err
+	}
+
+	defer releaseGate()
+
+	before, err := snapshot(root)
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := takeArtifactStore(storePath)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +129,17 @@ func ResolveForge(builtAgainst string) (Forge, error) {
 func askForgeItsVersion(candidate Forge) (string, error) {
 	spelled := strings.Join(candidate.Argv, " ")
 
+	outsideAnyRepository, err := os.MkdirTemp("", "generated-drift-version-")
+	if err != nil {
+		return "", fmt.Errorf("making an empty directory to ask the %s forge %q for its version: %w",
+			candidate.Source, spelled, err)
+	}
+
+	defer func() { _ = os.RemoveAll(outsideAnyRepository) }()
+
 	cmd := exec.Command(candidate.Argv[0], append(append([]string{}, candidate.Argv[1:]...), "version")...)
+	cmd.Dir = outsideAnyRepository
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(outsideAnyRepository))
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -180,10 +206,10 @@ type savedStore struct {
 	taken bool
 }
 
-func takeArtifactStore(root string) (savedStore, error) {
+func artifactStorePath(root string) (string, error) {
 	spec, err := forge.ReadSpecFromPath(filepath.Join(root, "forge.yaml"))
 	if err != nil {
-		return savedStore{}, fmt.Errorf("reading the forge.yaml of %q: %w", root, err)
+		return "", fmt.Errorf("reading the forge.yaml of %q: %w", root, err)
 	}
 
 	path := spec.ArtifactStorePath
@@ -191,9 +217,24 @@ func takeArtifactStore(root string) (savedStore, error) {
 		path = filepath.Join(root, path)
 	}
 
-	saved := savedStore{path: path, aside: path + ".aside"}
+	return path, nil
+}
 
-	unlock, err := lockArtifactStore(path)
+func takeArtifactStore(path string) (savedStore, error) {
+	saved := savedStore{path: path, aside: path + asideSuffix}
+
+	switch _, err := os.Stat(saved.aside); {
+	case err == nil:
+		return savedStore{}, fmt.Errorf(
+			"refusing to move the artifact store %q aside: %q already holds a copy an interrupted run of this gate saved. "+
+				"read that copy, move it back over %q when it is the store you want to keep, delete it when it is not, "+
+				"then run the gate again",
+			path, saved.aside, path)
+	case !os.IsNotExist(err):
+		return savedStore{}, fmt.Errorf("looking for an artifact store copy at %q: %w", saved.aside, err)
+	}
+
+	unlock, err := lockPath(path + storeLockSuffix)
 	if err != nil {
 		return savedStore{}, err
 	}
@@ -214,7 +255,7 @@ func takeArtifactStore(root string) (savedStore, error) {
 }
 
 func (s savedStore) putBack() error {
-	unlock, err := lockArtifactStore(s.path)
+	unlock, err := lockPath(s.path + storeLockSuffix)
 	if err != nil {
 		return err
 	}
@@ -236,22 +277,20 @@ func (s savedStore) putBack() error {
 	return nil
 }
 
-func lockArtifactStore(path string) (func(), error) {
-	lockPath := path + ".lock"
-
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		return nil, fmt.Errorf("creating the directory of the artifact store lock %q: %w", lockPath, err)
+func lockPath(path string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("creating the directory of the lock %q: %w", path, err)
 	}
 
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("opening the artifact store lock %q: %w", lockPath, err)
+		return nil, fmt.Errorf("opening the lock %q: %w", path, err)
 	}
 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		_ = file.Close()
 
-		return nil, fmt.Errorf("taking the artifact store lock %q: %w", lockPath, err)
+		return nil, fmt.Errorf("taking the lock %q: %w", path, err)
 	}
 
 	return func() {

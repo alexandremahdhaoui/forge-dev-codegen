@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/drift"
 )
@@ -133,6 +134,21 @@ func TestResolveForgeWrapsAForgeThatCannotAnswerItsVersion(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "cannot start") {
 		t.Fatalf("expected the output in the message, got %v", err)
+	}
+}
+
+func TestResolveForgeAsksForTheVersionOutsideEveryRepositorySoAnUnstampedForgeCannotBorrowTheTagsAround(t *testing.T) {
+	stubForgeOnPath(t, `printf 'forge version %s\n' "$(git describe --tags --always 2>/dev/null || echo dev)"`)
+
+	t.Chdir(repositoryTagged(t, "v0.49.0"))
+
+	_, err := drift.ResolveForge("v0.49.0")
+	if err == nil {
+		t.Fatal("expected a forge carrying no version of its own to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "it reports dev") {
+		t.Fatalf("expected the version it answered away from the repository, got %v", err)
 	}
 }
 
@@ -346,7 +362,11 @@ func TestCheckRefusesARootDirectoryWithNoForgeYaml(t *testing.T) {
 }
 
 func TestCheckRefusesARootDirectoryGitDoesNotKnow(t *testing.T) {
-	_, err := drift.Check(drift.Options{RootDir: t.TempDir()})
+	root := t.TempDir()
+
+	write(t, filepath.Join(root, "forge.yaml"), forgeYAML)
+
+	_, err := drift.Check(drift.Options{RootDir: root})
 	if err == nil {
 		t.Fatal("expected a directory outside a git repository to be refused")
 	}
@@ -402,8 +422,32 @@ func TestCheckRefusesWhenItCannotTakeTheArtifactStoreLock(t *testing.T) {
 		t.Fatal("expected a lock that cannot be opened to be refused")
 	}
 
-	if !strings.Contains(err.Error(), "opening the artifact store lock") {
+	if !strings.Contains(err.Error(), "opening the lock") {
 		t.Fatalf("expected the action in the message, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "artifact-store.yaml.lock") {
+		t.Fatalf("expected the lock it could not open in the message, got %v", err)
+	}
+}
+
+func TestCheckRefusesWhenItCannotTakeTheLockThatKeepsTwoGatesApart(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
+
+	remove(t, filepath.Join(root, ".forge", "artifact-store.yaml.drift-lock"))
+	sealDirectory(t, filepath.Join(root, ".forge"))
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a lock that cannot be opened to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "opening the lock") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "artifact-store.yaml.drift-lock") {
+		t.Fatalf("expected the lock it could not open in the message, got %v", err)
 	}
 }
 
@@ -418,7 +462,7 @@ func TestCheckRefusesWhenTheArtifactStoreDirectoryIsAFile(t *testing.T) {
 		t.Fatal("expected a store directory that is a file to be refused")
 	}
 
-	if !strings.Contains(err.Error(), "creating the directory of the artifact store lock") {
+	if !strings.Contains(err.Error(), "creating the directory of the lock") {
 		t.Fatalf("expected the action in the message, got %v", err)
 	}
 }
@@ -434,7 +478,7 @@ func TestCheckWrapsAFailureToTakeTheArtifactStoreLockAfterTheBuild(t *testing.T)
 		t.Fatal("expected a lock that cannot be reopened to be an error")
 	}
 
-	if !strings.Contains(err.Error(), "opening the artifact store lock") {
+	if !strings.Contains(err.Error(), "opening the lock") {
 		t.Fatalf("expected the action in the message, got %v", err)
 	}
 }
@@ -503,6 +547,93 @@ func TestCheckAnswersNothingWhenTheBuildOnlyRewritesTheArtifactStore(t *testing.
 	}
 }
 
+func TestCheckRefusesAnArtifactStoreCopyAnInterruptedRunLeftBehindAndNamesBothPaths(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
+
+	store := filepath.Join(root, ".forge", "artifact-store.yaml")
+	aside := store + ".aside"
+	orphan := "artifacts: [saved by a run that died]\n"
+
+	write(t, aside, orphan)
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a leftover copy of the artifact store to be refused")
+	}
+
+	for _, want := range []string{store, aside, "run the gate again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in the refusal, got %v", want, err)
+		}
+	}
+
+	if got := read(t, aside); got != orphan {
+		t.Fatalf("expected the leftover copy untouched, got %q", got)
+	}
+
+	if got := read(t, store); got != "artifacts: []\n" {
+		t.Fatalf("expected the artifact store untouched, got %q", got)
+	}
+}
+
+func TestTwoChecksOnOneRepositoryRunOneAtATimeAndLeaveTheArtifactStoreTheyFound(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, `mkdir .forge/building || { echo two builds at once >&2; exit 1; }
+printf 'artifacts: [rebuilt]\n' > .forge/artifact-store.yaml
+sleep 1
+rmdir .forge/building`)
+
+	store := filepath.Join(root, ".forge", "artifact-store.yaml")
+	found := "artifacts: [found]\n"
+
+	write(t, store, found)
+
+	done := make(chan struct{}, 2)
+
+	check := func() {
+		defer func() { done <- struct{}{} }()
+
+		findings, err := drift.Check(drift.Options{RootDir: root})
+		if err != nil {
+			t.Errorf("a check sharing the repository with another answered %v", err)
+
+			return
+		}
+
+		if len(findings) != 0 {
+			t.Errorf("a check sharing the repository with another found %v", findings)
+		}
+	}
+
+	go check()
+
+	waitForPath(t, filepath.Join(root, ".forge", "building"))
+
+	go check()
+
+	<-done
+	<-done
+
+	if got := read(t, store); got != found {
+		t.Fatalf("expected the artifact store the checks found, got %q", got)
+	}
+}
+
+func waitForPath(t *testing.T, path string) {
+	t.Helper()
+
+	deadline := time.Now().Add(30 * time.Second)
+
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("waiting for %q: it never appeared", path)
+}
+
 func checkOK(t *testing.T, root string) []drift.Finding {
 	t.Helper()
 
@@ -536,6 +667,7 @@ func repoWithStubbedWorkspaceForge(t *testing.T, body string) string {
 	write(t, filepath.Join(root, "zz_generated.rs"), "generated\n")
 	write(t, filepath.Join(root, ".forge", "artifact-store.yaml"), "artifacts: []\n")
 	write(t, filepath.Join(root, ".forge", "artifact-store.yaml.lock"), "")
+	write(t, filepath.Join(root, ".forge", "artifact-store.yaml.drift-lock"), "")
 
 	git(t, root, "init")
 	git(t, root, "add", "forge.yaml", ".gitignore", "zz_generated.rs")
@@ -567,6 +699,18 @@ func stubBinaryOnPath(t *testing.T, name, body string) string {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	return path
+}
+
+func repositoryTagged(t *testing.T, tag string) string {
+	t.Helper()
+
+	root := t.TempDir()
+
+	git(t, root, "init")
+	git(t, root, "-c", "user.email=probe@songe", "-c", "user.name=probe", "commit", "--allow-empty", "-m", tag)
+	git(t, root, "tag", "-a", tag, "-m", tag)
+
+	return root
 }
 
 func git(t *testing.T, root string, args ...string) {
