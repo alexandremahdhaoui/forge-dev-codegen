@@ -32,9 +32,16 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: udp-rust generates rust only", input.Language)
 			}
 
+			push, err := layoutStrings(input.Layout, "push")
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := udprust.Generate([]byte(input.ProtoSpec), udprust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
+				Hello:   layoutString(input.Layout, "hello"),
+				Push:    push,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -54,4 +61,29 @@ func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
+}
+
+func layoutStrings(layout map[string]interface{}, key string) ([]string, error) {
+	raw, ok := layout[key]
+	if !ok {
+		return nil, nil
+	}
+
+	entries, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading layout.%s: it is a list of rpc names, not %v", key, raw)
+	}
+
+	names := make([]string, 0, len(entries))
+
+	for i, entry := range entries {
+		name, ok := entry.(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("reading layout.%s entry %d: it is an rpc name, not %v", key, i, entry)
+		}
+
+		names = append(names, name)
+	}
+
+	return names, nil
 }

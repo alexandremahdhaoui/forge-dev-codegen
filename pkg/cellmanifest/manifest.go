@@ -54,6 +54,7 @@ type Driver struct {
 	Type     string                 `json:"type" yaml:"type"`
 	Module   string                 `json:"module" yaml:"module"`
 	Requires []string               `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Ports    []string               `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Config   map[string]ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
@@ -368,6 +369,12 @@ func (d Driver) validate(cell string) error {
 	for _, trait := range d.Requires {
 		if !rustIdentPattern.MatchString(trait) {
 			return fmt.Errorf("%s requires %q which is not a Rust ident", owner, trait)
+		}
+	}
+
+	for _, trait := range d.Ports {
+		if !rustIdentPattern.MatchString(trait) {
+			return fmt.Errorf("%s consumes port %q which is not a Rust ident", owner, trait)
 		}
 	}
 

@@ -38,6 +38,10 @@ const DefaultEndpoint = "127.0.0.1:0"
 
 const DefaultTimeoutMs = 2000
 
+const DefaultSessions = 64
+
+const DefaultTickMs = 1000
+
 var Layers = []string{"adapter", "controller", "driver", "port", "types"}
 
 var allowingLayers = map[string]bool{"adapter": true, "driver": true}
@@ -85,6 +89,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the skeleton: the proto document declares no service")
 	}
 
+	if err := checkSessionNames(spec, opts); err != nil {
+		return nil, err
+	}
+
 	files := []File{}
 
 	add := func(p, name string, data any) error {
@@ -113,6 +121,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 	methodByHash := map[uint8]string{}
 	only := len(spec.Services) == 1
+	session := false
 
 	for _, svc := range spec.Services {
 		v, err := buildServiceView(spec, svc, opts, only)
@@ -150,6 +159,28 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			},
 		}
 
+		if v.Session {
+			session = true
+
+			steps = append(steps,
+				func() error {
+					return add(path.Join("adapter", "zz_generated_"+v.BroadcastAdapter+".rs"), "broadcast_adapter", v)
+				},
+				func() error {
+					return add(path.Join("driver", "zz_generated_"+v.TickModule+".rs"), "tick", v)
+				},
+				func() error {
+					return add(path.Join("port", "zz_generated_"+v.GateModule+".rs"), "gate", v)
+				},
+				func() error {
+					return add(path.Join("port", "zz_generated_"+v.BroadcastModule+".rs"), "broadcast", v)
+				},
+				func() error {
+					return add(path.Join("types", "zz_generated_"+v.PushModule+".rs"), "push", v)
+				},
+			)
+		}
+
 		for _, step := range steps {
 			if err := step(); err != nil {
 				return nil, err
@@ -167,6 +198,14 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		mount("controller", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_codec", Alias: v.ServiceSnake + "_codec"})
 		userMods["controller"] = append(userMods["controller"], v.ControllerSnake+"_controller")
 
+		if v.Session {
+			mount("adapter", modEntry{Module: "zz_generated_" + v.BroadcastAdapter, Alias: v.BroadcastAdapter})
+			mount("driver", modEntry{Module: "zz_generated_" + v.TickModule, Alias: v.TickModule})
+			mount("port", modEntry{Module: "zz_generated_" + v.GateModule, Alias: v.GateModule})
+			mount("port", modEntry{Module: "zz_generated_" + v.BroadcastModule, Alias: v.BroadcastModule})
+			mount("types", modEntry{Module: "zz_generated_" + v.PushModule, Alias: v.PushModule})
+		}
+
 		addServiceToManifest(&manifest, v)
 	}
 
@@ -175,6 +214,14 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	mount("types", modEntry{Module: "zz_generated_context", Alias: "context"})
+
+	if session {
+		if err := add(path.Join("types", "zz_generated_admission.rs"), "admission", map[string]any{"Header": header}); err != nil {
+			return nil, err
+		}
+
+		mount("types", modEntry{Module: "zz_generated_admission", Alias: "admission"})
+	}
 
 	for _, layer := range Layers {
 		mod := layerMod{
@@ -211,11 +258,19 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 }
 
 func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
+	controllerPorts := []string{}
+	driverPorts := []string{}
+
+	if v.Session {
+		controllerPorts = []string{v.BroadcastTrait}
+		driverPorts = []string{v.GateTrait, v.BroadcastTrait}
+	}
+
 	m.Provides.Controllers = append(m.Provides.Controllers, cellmanifest.Controller{
 		Trait:  v.ControllerTrait,
 		Impl:   v.ControllerTrait + "Impl",
 		Module: v.ModulePrefix + "controller",
-		Ports:  []string{},
+		Ports:  controllerPorts,
 	})
 
 	m.Provides.Drivers = append(m.Provides.Drivers, cellmanifest.Driver{
@@ -223,6 +278,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Type:     v.DriverStruct,
 		Module:   v.ModulePrefix + "driver::" + v.DriverModule,
 		Requires: []string{v.ControllerTrait},
+		Ports:    driverPorts,
 		Config: map[string]cellmanifest.ConfigField{
 			"addr": {
 				Type:        cellmanifest.FieldTypeString,
@@ -257,6 +313,44 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 				Type:        cellmanifest.FieldTypeDuration,
 				Default:     DefaultTimeoutMs,
 				Description: "How long the " + v.ServiceSnake + " client waits for one answer",
+			},
+		},
+	})
+
+	if !v.Session {
+		return
+	}
+
+	m.Provides.Drivers = append(m.Provides.Drivers, cellmanifest.Driver{
+		Name:     v.TickName,
+		Type:     v.TickStruct,
+		Module:   v.ModulePrefix + "driver::" + v.TickModule,
+		Requires: []string{v.ControllerTrait},
+		Config: map[string]cellmanifest.ConfigField{
+			"interval_ms": {
+				Type:        cellmanifest.FieldTypeInteger,
+				Default:     DefaultTickMs,
+				Description: "How many milliseconds the " + v.ServiceSnake + " tick driver waits between two ticks",
+			},
+		},
+	})
+
+	m.Provides.Ports = append(m.Provides.Ports,
+		cellmanifest.Port{Trait: v.GateTrait, Module: v.ModulePrefix + "port::" + v.GateModule},
+		cellmanifest.Port{Trait: v.BroadcastTrait, Module: v.ModulePrefix + "port::" + v.BroadcastModule},
+	)
+
+	m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+		Name:       v.BroadcastName,
+		Type:       v.BroadcastStruct,
+		Module:     v.ModulePrefix + "adapter::" + v.BroadcastAdapter,
+		Implements: v.BroadcastTrait,
+		Fallible:   true,
+		Config: map[string]cellmanifest.ConfigField{
+			"max_sessions": {
+				Type:        cellmanifest.FieldTypeInteger,
+				Default:     DefaultSessions,
+				Description: "How many sessions the " + v.ServiceSnake + " peer table holds before it refuses a new one",
 			},
 		},
 	})
@@ -310,6 +404,39 @@ pub struct Context {
 }
 {{ end -}}
 
+{{- define "admission" -}}
+{{ .Header }}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission {
+    Admitted,
+    Refused { reason: String },
+}
+{{ end -}}
+
+{{- define "push" -}}
+{{ .Header }}
+{{ if .PushTypes }}
+use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .PushTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+{{ end }}
+#[derive(Debug, Clone, PartialEq)]
+pub enum {{ .PushEnum }} {
+{{- range .Pushes }}
+    {{ .Pascal }}({{ .Request }}),
+{{- end }}
+}
+
+impl {{ .PushEnum }} {
+    pub fn kind(&self) -> &'static str {
+        match *self {
+{{- range .Pushes }}
+            Self::{{ .Pascal }}(_) => "{{ .Pascal }}",
+{{- end }}
+        }
+    }
+}
+{{ end -}}
+
 {{- define "types" -}}
 {{ .Header }}
 {{ range .Messages }}
@@ -323,6 +450,94 @@ pub struct {{ .Name }} {
 {{ end -}}
 {{ end -}}
 
+{{- define "gate" -}}
+{{ .Header }}
+
+use {{ .CratePath }}types::admission::Admission;
+use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ .HelloRpc.Request }};
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .GateError }} {
+    #[error("admitting session {session_id:?} from {peer}")]
+    Admit {
+        session_id: [u8; 16],
+        peer: std::net::SocketAddr,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .GateTrait }}: Send + Sync {
+    fn admit(
+        &self,
+        session_id: &[u8; 16],
+        request: &{{ .HelloRpc.Request }},
+        peer: std::net::SocketAddr,
+    ) -> Result<Admission, {{ .GateError }}>;
+}
+{{ end -}}
+
+{{- define "broadcast" -}}
+{{ .Header }}
+
+use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+
+pub type {{ .SenderType }} =
+    Box<dyn Fn(&[u8], std::net::SocketAddr) -> std::io::Result<usize> + Send + Sync>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .BroadcastError }} {
+    #[error("attaching a sender to the {{ .ServiceSnake }} broadcast: one is attached already")]
+    Attached,
+    #[error("locking the {{ .ServiceSnake }} peer table while {action}: poisoned")]
+    Poisoned { action: &'static str },
+    #[error("encoding {kind} for session {session_id:?}")]
+    Encode {
+        kind: &'static str,
+        session_id: [u8; 16],
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("sending {kind} to session {session_id:?}: it is not in the peer table")]
+    UnknownSession {
+        kind: &'static str,
+        session_id: [u8; 16],
+    },
+    #[error("sending {kind}: the {{ .ServiceSnake }} udp driver is not bound")]
+    NotBound { kind: &'static str },
+    #[error("sending {kind} to session {session_id:?} at {peer}")]
+    Send {
+        kind: &'static str,
+        session_id: [u8; 16],
+        peer: std::net::SocketAddr,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .BroadcastTrait }}: Send + Sync {
+    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .BroadcastError }}>;
+
+    fn admit_peer(
+        &self,
+        session_id: &[u8; 16],
+        peer: std::net::SocketAddr,
+    ) -> Result<bool, {{ .BroadcastError }}>;
+
+    fn follow_peer(
+        &self,
+        session_id: &[u8; 16],
+        peer: std::net::SocketAddr,
+    ) -> Result<bool, {{ .BroadcastError }}>;
+
+    fn send_to(&self, session_id: &[u8; 16], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}>;
+
+    fn send_all(&self, push: {{ .PushEnum }}) -> Result<usize, {{ .BroadcastError }}>;
+}
+{{ end -}}
+
 {{- define "port" -}}
 {{ .Header }}
 
@@ -330,7 +545,7 @@ use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $
 
 #[derive(Debug, thiserror::Error)]
 pub enum {{ .ClientError }} {
-{{- range .Rpcs }}
+{{- range .Inbound }}
     #[error("calling {{ .FullMethod }}")]
     {{ .Pascal }} {
         #[source]
@@ -340,7 +555,7 @@ pub enum {{ .ClientError }} {
 }
 
 pub trait {{ .ClientTrait }}: Send + Sync {
-{{- range .Rpcs }}
+{{- range .Inbound }}
     fn {{ .Ident }}(
         &self,
         request: {{ .Request }},
@@ -351,7 +566,11 @@ pub trait {{ .ClientTrait }}: Send + Sync {
 
 {{- define "controller" -}}
 {{ .Header }}
+{{ if .Session }}
+use std::sync::Arc;
 
+use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
+{{- end }}
 use {{ .CratePath }}types::context::Context;
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
 
@@ -361,19 +580,40 @@ pub enum {{ .ControllerError }} {
     Invalid { field: String, reason: String },
     #[error("running {operation:?}: not implemented")]
     NotImplemented { operation: String },
+{{- if .Session }}
+    #[error("broadcasting {kind}")]
+    Broadcast {
+        kind: String,
+        #[source]
+        source: {{ .BroadcastError }},
+    },
+{{- end }}
 }
 
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .ControllerTrait }}: Send + Sync {
-{{- range .Rpcs }}
+{{- range .Inbound }}
     fn {{ .Ident }}(
         &self,
         request: {{ .Request }},
         context: &Context,
     ) -> Result<{{ .Reply }}, {{ $.ControllerError }}>;
 {{- end }}
+{{- if .Session }}
+    fn on_tick(&self, tick: u64) -> Result<(), {{ .ControllerError }}>;
+{{- end }}
+}
+{{ if .Session }}
+pub struct {{ .ControllerTrait }}Impl {
+    pub(crate) {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
 }
 
+impl {{ .ControllerTrait }}Impl {
+    pub fn new({{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>) -> Self {
+        Self { {{ .BroadcastSnake }} }
+    }
+}
+{{- else }}
 pub struct {{ .ControllerTrait }}Impl;
 
 impl {{ .ControllerTrait }}Impl {
@@ -387,6 +627,7 @@ impl Default for {{ .ControllerTrait }}Impl {
         Self::new()
     }
 }
+{{- end }}
 {{ end -}}
 
 {{- define "codec" -}}
@@ -394,7 +635,10 @@ impl Default for {{ .ControllerTrait }}Impl {
 
 use prost::Message;
 
-use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .CodecTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+{{- if .Session }}
+use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+{{- end }}
 
 pub const MAGIC: [u8; 4] = 0x5555_4944u32.to_be_bytes();
 pub const MAGIC_LEN: usize = 4;
@@ -422,6 +666,10 @@ pub enum {{ .CodecError }} {
     Version { length: usize, got: u8 },
     #[error("reading a datagram of {length} bytes: function hash {hash} names no rpc of {{ .ServicePascal }}")]
     UnknownMethod { length: usize, hash: u8 },
+{{- if .Session }}
+    #[error("reading a datagram of {length} bytes: function hash {hash} names a server to client rpc of {{ .ServicePascal }}")]
+    Outbound { length: usize, hash: u8 },
+{{- end }}
     #[error("reading a datagram of {length} bytes: it carries session id {got:?}, this caller opened session {expected:?}")]
     UnknownSession {
         length: usize,
@@ -440,7 +688,7 @@ pub enum {{ .CodecError }} {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum {{ .RequestEnum }} {
-{{- range .Rpcs }}
+{{- range .Inbound }}
     {{ .Pascal }}({{ .Request }}),
 {{- end }}
 }
@@ -519,12 +767,20 @@ pub fn decode_request(
     }
 
     let request = match framed.hash {
-{{- range .Rpcs }}
+{{- range .Inbound }}
         {{ .Upper }}_HASH => {{ $.RequestEnum }}::{{ .Pascal }}({{ .Request }}::decode(framed.payload)
             .map_err(|source| {{ $.CodecError }}::Payload {
                 operation: {{ .Upper }}_METHOD,
                 source,
             })?),
+{{- end }}
+{{- range .Pushes }}
+        {{ .Upper }}_HASH => {
+            return Err({{ $.CodecError }}::Outbound {
+                length: datagram.len(),
+                hash: {{ .Upper }}_HASH,
+            })
+        }
 {{- end }}
         hash => {
             return Err({{ .CodecError }}::UnknownMethod {
@@ -587,7 +843,7 @@ fn open<M: Message + Default>(
 
     M::decode(framed.payload).map_err(|source| {{ .CodecError }}::Payload { operation, source })
 }
-{{ range .Rpcs }}
+{{ range .Inbound }}
 pub fn encode_{{ .Ident }}_request(
     session_id: &[u8; SESSION_ID_LEN],
     request: &{{ .Request }},
@@ -609,6 +865,40 @@ pub fn decode_{{ .Ident }}_reply(
     open({{ .Upper }}_METHOD, session_id, {{ .Upper }}_HASH, datagram)
 }
 {{ end -}}
+{{- if .Session }}
+pub fn encode_push(
+    session_id: &[u8; SESSION_ID_LEN],
+    push: &{{ .PushEnum }},
+) -> Result<Vec<u8>, {{ .CodecError }}> {
+    match push {
+{{- range .Pushes }}
+        {{ $.PushEnum }}::{{ .Pascal }}(message) => seal({{ .Upper }}_METHOD, session_id, {{ .Upper }}_HASH, message),
+{{- end }}
+    }
+}
+
+pub fn decode_push(
+    session_id: &[u8; SESSION_ID_LEN],
+    datagram: &[u8],
+) -> Result<{{ .PushEnum }}, {{ .CodecError }}> {
+    let framed = unframe(datagram)?;
+
+    match framed.hash {
+{{- range .Pushes }}
+        {{ .Upper }}_HASH => Ok({{ $.PushEnum }}::{{ .Pascal }}(open(
+            {{ .Upper }}_METHOD,
+            session_id,
+            {{ .Upper }}_HASH,
+            datagram,
+        )?)),
+{{- end }}
+        hash => Err({{ .CodecError }}::UnknownMethod {
+            length: datagram.len(),
+            hash,
+        }),
+    }
+}
+{{ end -}}
 {{ end -}}
 
 {{- define "driver" -}}
@@ -621,11 +911,36 @@ use std::time::Duration;
 
 use {{ .CratePath }}controller::{{ .ServiceSnake }}_codec as codec;
 use {{ .CratePath }}controller::{{ .ControllerTrait }};
+{{- if .Session }}
+use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
+use {{ .CratePath }}port::{{ .GateModule }}::{{ .GateTrait }};
+use {{ .CratePath }}types::admission::Admission;
+{{- end }}
 use {{ .CratePath }}types::context::Context;
 
 const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);
 const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;
-const MAX_PEERS_TOLD_ABOUT_THE_VERSION: usize = 256;
+const MAX_PEERS_TOLD: usize = 256;
+
+struct Told {
+    peers: HashSet<SocketAddr>,
+}
+
+impl Told {
+    fn new() -> Self {
+        Self {
+            peers: HashSet::with_capacity(MAX_PEERS_TOLD),
+        }
+    }
+
+    fn first_time(&mut self, peer: SocketAddr) -> bool {
+        if self.peers.len() >= MAX_PEERS_TOLD {
+            self.peers.clear();
+        }
+
+        self.peers.insert(peer)
+    }
+}
 
 pub struct {{ .DriverConfig }} {
     pub addr: String,
@@ -662,19 +977,42 @@ pub enum {{ .DriverError }} {
     },
     #[error("using the {{ .ServiceSnake }} udp driver for {address:?}: it is not bound yet")]
     NotBound { address: String },
+{{- if .Session }}
+    #[error("attaching the socket bound on {address:?} to the {{ .ServiceSnake }} broadcast")]
+    Attach {
+        address: String,
+        #[source]
+        source: {{ .BroadcastError }},
+    },
+{{- end }}
 }
 
 pub struct {{ .DriverStruct }} {
     config: {{ .DriverConfig }},
     controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
-    socket: Option<tokio::net::UdpSocket>,
+{{- if .Session }}
+    session_gate: Arc<dyn {{ .GateTrait }} + Send + Sync>,
+    broadcast: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+{{- end }}
+    socket: Option<Arc<tokio::net::UdpSocket>>,
 }
 
 impl {{ .DriverStruct }} {
-    pub fn new(config: {{ .DriverConfig }}, controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>) -> Self {
+    pub fn new(
+        config: {{ .DriverConfig }},
+        controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+{{- if .Session }}
+        session_gate: Arc<dyn {{ .GateTrait }} + Send + Sync>,
+        broadcast: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+{{- end }}
+    ) -> Self {
         Self {
             config,
             controller,
+{{- if .Session }}
+            session_gate,
+            broadcast,
+{{- end }}
             socket: None,
         }
     }
@@ -686,6 +1024,19 @@ impl {{ .DriverStruct }} {
                 address: self.config.addr.clone(),
                 source,
             })?;
+
+        let socket = Arc::new(socket);
+{{- if .Session }}
+
+        let sender = socket.clone();
+
+        self.broadcast
+            .attach(Box::new(move |datagram, peer| sender.try_send_to(datagram, peer)))
+            .map_err(|source| {{ .DriverError }}::Attach {
+                address: self.config.addr.clone(),
+                source,
+            })?;
+{{- end }}
 
         self.socket = Some(socket);
 
@@ -714,11 +1065,65 @@ impl {{ .DriverStruct }} {
 
         Ok(())
     }
+{{- if .Session }}
+
+    fn admit(&self, session_id: &[u8; codec::SESSION_ID_LEN], request: &{{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ .HelloRpc.Request }}, peer: SocketAddr, refused: &mut Told, full: &mut Told) -> bool {
+        match self.session_gate.admit(session_id, request, peer) {
+            Ok(Admission::Admitted) => {}
+            Ok(Admission::Refused { reason }) => {
+                if refused.first_time(peer) {
+                    eprintln!("refusing session {session_id:?} from {peer}: {reason}");
+                }
+
+                return false;
+            }
+            Err(error) => {
+                eprintln!("dropping a hello from {peer}: {}", error_chain(&error));
+
+                return false;
+            }
+        }
+
+        match self.broadcast.admit_peer(session_id, peer) {
+            Ok(true) => true,
+            Ok(false) => {
+                if full.first_time(peer) {
+                    eprintln!("refusing session {session_id:?} from {peer}: the peer table is full");
+                }
+
+                false
+            }
+            Err(error) => {
+                eprintln!("dropping a hello from {peer}: {}", error_chain(&error));
+
+                false
+            }
+        }
+    }
+
+    fn follow(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr, unknown: &mut Told) -> bool {
+        match self.broadcast.follow_peer(session_id, peer) {
+            Ok(true) => true,
+            Ok(false) => {
+                if unknown.first_time(peer) {
+                    eprintln!("dropping datagrams from {peer}: session {session_id:?} was never admitted");
+                }
+
+                false
+            }
+            Err(error) => {
+                eprintln!("dropping a datagram from {peer}: {}", error_chain(&error));
+
+                false
+            }
+        }
+    }
+{{- end }}
 
     pub async fn serve(self) -> Result<(), {{ .DriverError }}> {
         let configured = self.config.addr.clone();
 
-        let socket = self.socket.ok_or({{ .DriverError }}::NotBound {
+        let socket = self.socket.clone().ok_or({{ .DriverError }}::NotBound {
             address: configured.clone(),
         })?;
 
@@ -729,8 +1134,12 @@ impl {{ .DriverStruct }} {
 
         let mut buffer = [0u8; codec::MAX_DATAGRAM_LEN + 1];
         let mut consecutive_recv_errors = 0usize;
-        let mut peers_told_about_the_version: HashSet<SocketAddr> =
-            HashSet::with_capacity(MAX_PEERS_TOLD_ABOUT_THE_VERSION);
+        let mut told_about_the_version = Told::new();
+{{- if .Session }}
+        let mut told_about_a_refusal = Told::new();
+        let mut told_about_a_full_table = Told::new();
+        let mut told_about_an_unknown_session = Told::new();
+{{- end }}
 
         loop {
             let (read, peer) = match socket.recv_from(&mut buffer).await {
@@ -765,11 +1174,7 @@ impl {{ .DriverStruct }} {
             let (session_id, request) = match codec::decode_request(datagram) {
                 Ok(decoded) => decoded,
                 Err(codec::{{ .CodecError }}::Version { got, .. }) => {
-                    if peers_told_about_the_version.len() >= MAX_PEERS_TOLD_ABOUT_THE_VERSION {
-                        peers_told_about_the_version.clear();
-                    }
-
-                    if peers_told_about_the_version.insert(peer) {
+                    if told_about_the_version.first_time(peer) {
                         eprintln!(
                             "dropping datagrams from {peer}: they speak schema version {got}, this build speaks {}",
                             codec::SCHEMA_VERSION
@@ -783,14 +1188,31 @@ impl {{ .DriverStruct }} {
 
                     continue;
                 }
+{{- if .Session }}
+                Err(codec::{{ .CodecError }}::Outbound { hash, .. }) => {
+                    eprintln!("dropping a datagram from {peer}: function hash {hash} names a server to client rpc");
+
+                    continue;
+                }
+{{- end }}
                 Err(_) => continue,
             };
 
             let context = Context { session_id, peer };
 
             let answer = match request {
-{{- range .Rpcs }}
+{{- range .Inbound }}
                 codec::{{ $.RequestEnum }}::{{ .Pascal }}(request) => {
+{{- if .Hello }}
+                    if !self.admit(&session_id, &request, peer, &mut told_about_a_refusal, &mut told_about_a_full_table) {
+                        continue;
+                    }
+{{- else if $.Session }}
+                    if !self.follow(&session_id, peer, &mut told_about_an_unknown_session) {
+                        continue;
+                    }
+{{- end }}
+
                     match self.controller.{{ .Ident }}(request, &context) {
 {{- if .Silent }}
                         Ok(_) => None,
@@ -848,6 +1270,275 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 }
 {{ end -}}
 
+{{- define "tick" -}}
+{{ .Header }}
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use {{ .CratePath }}controller::{{ .ControllerTrait }};
+
+pub struct {{ .TickConfig }} {
+    pub interval_ms: i64,
+}
+
+impl Default for {{ .TickConfig }} {
+    fn default() -> Self {
+        Self {
+            interval_ms: {{ .DefaultTickMs }},
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .TickError }} {
+    #[error("binding the {{ .ServiceSnake }} tick driver: interval_ms {interval_ms} is below 1")]
+    IntervalBelowOne { interval_ms: i64 },
+    #[error("using the {{ .ServiceSnake }} tick driver: it is not bound yet")]
+    NotBound,
+}
+
+pub struct {{ .TickStruct }} {
+    config: {{ .TickConfig }},
+    controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+    interval: Option<Duration>,
+}
+
+impl {{ .TickStruct }} {
+    pub fn new(config: {{ .TickConfig }}, controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>) -> Self {
+        Self {
+            config,
+            controller,
+            interval: None,
+        }
+    }
+
+    pub async fn bind(&mut self) -> Result<(), {{ .TickError }}> {
+        let interval_ms = u64::try_from(self.config.interval_ms)
+            .ok()
+            .filter(|interval_ms| *interval_ms >= 1)
+            .ok_or({{ .TickError }}::IntervalBelowOne {
+                interval_ms: self.config.interval_ms,
+            })?;
+
+        self.interval = Some(Duration::from_millis(interval_ms));
+
+        Ok(())
+    }
+
+    pub fn interval_ms(&self) -> Result<u64, {{ .TickError }}> {
+        self.interval
+            .map(|interval| interval.as_millis() as u64)
+            .ok_or({{ .TickError }}::NotBound)
+    }
+
+    pub fn announce(&self) -> Result<(), {{ .TickError }}> {
+        println!("TICKING {}", self.interval_ms()?);
+
+        Ok(())
+    }
+
+    pub async fn serve(self) -> Result<(), {{ .TickError }}> {
+        let interval = self.interval.ok_or({{ .TickError }}::NotBound)?;
+
+        let mut ticker = tokio::time::interval(interval);
+        ticker.tick().await;
+
+        let mut tick: u64 = 0;
+
+        loop {
+            ticker.tick().await;
+            tick = tick.wrapping_add(1);
+
+            if let Err(error) = self.controller.on_tick(tick) {
+                eprintln!(
+                    "skipping tick {tick} of the {{ .ServiceSnake }} tick driver: {}",
+                    error_chain(&error)
+                );
+            }
+        }
+    }
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        parts.push(current.to_string());
+        source = current.source();
+    }
+
+    parts.join(": ")
+}
+{{ end -}}
+
+{{- define "broadcast_adapter" -}}
+{{ .Header }}
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+use {{ .CratePath }}controller::{{ .ServiceSnake }}_codec as codec;
+use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}, {{ .SenderType }}{{ "}" }};
+use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+
+pub struct {{ .BroadcastConfig }} {
+    pub max_sessions: i64,
+}
+
+impl Default for {{ .BroadcastConfig }} {
+    fn default() -> Self {
+        Self {
+            max_sessions: {{ .DefaultSessions }},
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .BroadcastStruct }}Error {
+    #[error("sizing the {{ .ServiceSnake }} peer table: max_sessions {max_sessions} is below 1")]
+    MaxSessionsBelowOne { max_sessions: i64 },
+}
+
+type Peers = HashMap<[u8; codec::SESSION_ID_LEN], SocketAddr>;
+
+pub struct {{ .BroadcastStruct }} {
+    max_sessions: usize,
+    peers: Mutex<Peers>,
+    sender: OnceLock<{{ .SenderType }}>,
+}
+
+impl {{ .BroadcastStruct }} {
+    pub fn new(config: {{ .BroadcastConfig }}) -> Result<Self, {{ .BroadcastStruct }}Error> {
+        let max_sessions = usize::try_from(config.max_sessions)
+            .ok()
+            .filter(|max_sessions| *max_sessions >= 1)
+            .ok_or({{ .BroadcastStruct }}Error::MaxSessionsBelowOne {
+                max_sessions: config.max_sessions,
+            })?;
+
+        Ok(Self {
+            max_sessions,
+            peers: Mutex::new(HashMap::new()),
+            sender: OnceLock::new(),
+        })
+    }
+
+    pub fn peer_of(&self, session_id: &[u8; codec::SESSION_ID_LEN]) -> Result<Option<SocketAddr>, {{ .BroadcastError }}> {
+        Ok(self.peers("reading a peer")?.get(session_id).copied())
+    }
+
+    pub fn sessions(&self) -> Result<usize, {{ .BroadcastError }}> {
+        Ok(self.peers("counting the sessions")?.len())
+    }
+
+    fn peers(&self, action: &'static str) -> Result<MutexGuard<'_, Peers>, {{ .BroadcastError }}> {
+        self.peers
+            .lock()
+            .map_err(|_| {{ .BroadcastError }}::Poisoned { action })
+    }
+
+    fn deliver(
+        &self,
+        kind: &'static str,
+        session_id: &[u8; codec::SESSION_ID_LEN],
+        peer: SocketAddr,
+        push: &{{ .PushEnum }},
+    ) -> Result<(), {{ .BroadcastError }}> {
+        let sender = self
+            .sender
+            .get()
+            .ok_or({{ .BroadcastError }}::NotBound { kind })?;
+
+        let datagram = codec::encode_push(session_id, push).map_err(|source| {{ .BroadcastError }}::Encode {
+            kind,
+            session_id: *session_id,
+            source: Box::new(source),
+        })?;
+
+        sender(&datagram, peer)
+            .map(|_| ())
+            .map_err(|source| {{ .BroadcastError }}::Send {
+                kind,
+                session_id: *session_id,
+                peer,
+                source,
+            })
+    }
+}
+
+impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
+    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .BroadcastError }}> {
+        self.sender
+            .set(sender)
+            .map_err(|_| {{ .BroadcastError }}::Attached)
+    }
+
+    fn admit_peer(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr) -> Result<bool, {{ .BroadcastError }}> {
+        let mut peers = self.peers("admitting a peer")?;
+
+        if peers.len() >= self.max_sessions && !peers.contains_key(session_id) {
+            return Ok(false);
+        }
+
+        peers.insert(*session_id, peer);
+
+        Ok(true)
+    }
+
+    fn follow_peer(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr) -> Result<bool, {{ .BroadcastError }}> {
+        let mut peers = self.peers("following a peer")?;
+
+        let Some(known) = peers.get_mut(session_id) else {
+            return Ok(false);
+        };
+
+        *known = peer;
+
+        Ok(true)
+    }
+
+    fn send_to(&self, session_id: &[u8; codec::SESSION_ID_LEN], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}> {
+        let kind = push.kind();
+
+        let peer = self
+            .peers("sending to a session")?
+            .get(session_id)
+            .copied()
+            .ok_or({{ .BroadcastError }}::UnknownSession {
+                kind,
+                session_id: *session_id,
+            })?;
+
+        self.deliver(kind, session_id, peer, &push)
+    }
+
+    fn send_all(&self, push: {{ .PushEnum }}) -> Result<usize, {{ .BroadcastError }}> {
+        let kind = push.kind();
+
+        let targets: Vec<([u8; codec::SESSION_ID_LEN], SocketAddr)> = self
+            .peers("sending to every session")?
+            .iter()
+            .map(|(session_id, peer)| (*session_id, *peer))
+            .collect();
+
+        let mut reached = 0usize;
+
+        for (session_id, peer) in targets {
+            match self.deliver(kind, &session_id, peer, &push) {
+                Ok(()) => reached += 1,
+                Err(error @ {{ .BroadcastError }}::Send { .. }) => eprintln!("{error}"),
+                Err(error) => return Err(error),
+            }
+        }
+
+        Ok(reached)
+    }
+}
+{{ end -}}
+
 {{- define "adapter" -}}
 {{ .Header }}
 
@@ -898,7 +1589,7 @@ impl {{ .ClientStruct }} {
 }
 
 impl {{ .ClientTrait }} for {{ .ClientStruct }} {
-{{- range .Rpcs }}
+{{- range .Inbound }}
     async fn {{ .Ident }}(&self, request: {{ .Request }}) -> Result<{{ .Reply }}, {{ $.ClientError }}> {
         let datagram = codec::encode_{{ .Ident }}_request(&self.session_id, &request)
             .map_err(failing_{{ .Ident }})?;
@@ -929,7 +1620,7 @@ impl {{ .ClientTrait }} for {{ .ClientStruct }} {
     }
 {{ end -}}
 }
-{{ range .Rpcs }}
+{{ range .Inbound }}
 fn failing_{{ .Ident }}<E: std::error::Error + Send + Sync + 'static>(source: E) -> {{ $.ClientError }} {
     {{ $.ClientError }}::{{ .Pascal }} {
         source: Box::new(source),

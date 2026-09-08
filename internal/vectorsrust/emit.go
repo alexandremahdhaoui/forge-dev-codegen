@@ -34,6 +34,8 @@ type Options struct {
 	Cell     string
 	RestCell string
 	Proto    []byte
+	Hello    string
+	Push     []string
 }
 
 type File struct {
@@ -69,7 +71,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		return nil, err
 	}
 
-	datagrams, err := readDatagramService(opts.Proto, opts.Cell)
+	datagrams, err := readDatagramService(opts.Proto, opts.Cell, opts.Hello, opts.Push)
 	if err != nil {
 		return nil, err
 	}
@@ -147,12 +149,31 @@ use {{ $.Crate }}::{{ $.RestCell }}::controller::{{ .Pascal }}ControllerError;
 use {{ $.Crate }}::{{ $.RestCell }}::types::{{ .Snake }}::{{ .Name }};
 {{ end }}
 {{- if .HasDatagrams }}
+{{- if .Datagram.Session }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_broadcast::{{ "{" }}{{ .Datagram.BroadcastStruct }}, {{ .Datagram.BroadcastConfig }}{{ "}" }};
+{{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_client::{{ "{" }}{{ .Datagram.ClientStruct }}, {{ .Datagram.ClientStruct }}Config{{ "}" }};
+{{- if or .NeedsRegister .HasReconnect }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::controller::{{ .Datagram.Snake }}_codec as {{ .Datagram.Snake }}_codec;
+{{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::controller::{{ .Datagram.Pascal }}ControllerError;
+{{- if .HasPush }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::driver::{{ .Datagram.Snake }}_tick_driver::{{ "{" }}{{ .Datagram.TickStruct }}, {{ .Datagram.TickConfig }}{{ "}" }};
+{{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::driver::{{ .Datagram.Snake }}_udp_driver::{{ "{" }}{{ .Datagram.DriverStruct }}, {{ .Datagram.DriverStruct }}Config{{ "}" }};
+{{- if .HasPush }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_broadcast::{{ .Datagram.Pascal }}Broadcast;
+{{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_client::{{ .Datagram.ClientTrait }};
+{{- if .Datagram.Session }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_session_gate::{{ .Datagram.GateError }};
+use {{ .Crate }}::{{ .Datagram.Cell }}::types::admission::Admission;
+{{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::types::context::Context;
 use {{ .Crate }}::{{ .Datagram.Cell }}::types::{{ .Datagram.Snake }}_messages::{{ "{" }}{{ range $i, $t := .Datagram.TypeImports }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
+{{- if .HasPush }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::types::{{ .Datagram.PushModule }}::{{ .Datagram.PushEnum }};
+{{- end }}
 
 fn error_chain(error: &dyn std::error::Error) -> String {
     let mut parts = vec![error.to_string()];
@@ -232,10 +253,309 @@ mockall::mock! {
 {{- range .Datagram.Ops }}
         fn {{ .Ident }}(&self, request: {{ .Request }}, context: &Context) -> Result<{{ .Reply }}, {{ $.Datagram.Pascal }}ControllerError>;
 {{- end }}
+{{- if .Datagram.Session }}
+        fn on_tick(&self, tick: u64) -> Result<(), {{ .Datagram.Pascal }}ControllerError>;
+{{- end }}
     }
 }
 {{ end }}
+{{- if and .HasDatagrams .Datagram.Session }}
+mockall::mock! {
+    pub {{ .Datagram.GateTrait }} {}
+    impl {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_session_gate::{{ .Datagram.GateTrait }} for {{ .Datagram.GateTrait }} {
+        fn admit(&self, session_id: &[u8; 16], request: &{{ .Datagram.HelloRequest }}, peer: std::net::SocketAddr) -> Result<Admission, {{ .Datagram.GateError }}>;
+    }
+}
+
+#[allow(dead_code)]
+struct {{ .Datagram.Pascal }}Stack {
+    port: u16,
+    broadcast: std::sync::Arc<{{ .Datagram.BroadcastStruct }}>,
+    controller: std::sync::Arc<Mock{{ .Datagram.Pascal }}Controller>,
+}
+
+fn {{ .Datagram.Snake }}_gate(admits: bool) -> Mock{{ .Datagram.GateTrait }} {
+    let mut gate = Mock{{ .Datagram.GateTrait }}::new();
+    gate.expect_admit().returning(move |_session_id, _request, _peer| {
+        if admits {
+            return Ok(Admission::Admitted);
+        }
+
+        Ok(Admission::Refused {
+            reason: "refused by vectors-rust".to_string(),
+        })
+    });
+
+    gate
+}
+
+fn {{ .Datagram.Snake }}_broadcast() -> std::sync::Arc<{{ .Datagram.BroadcastStruct }}> {
+    std::sync::Arc::new(
+        {{ .Datagram.BroadcastStruct }}::new({{ .Datagram.BroadcastConfig }} { max_sessions: 64 })
+            .expect("a peer table"),
+    )
+}
+
+async fn stand_up_{{ .Datagram.Snake }}(
+    controller: Mock{{ .Datagram.Pascal }}Controller,
+    gate: Mock{{ .Datagram.GateTrait }},
+    broadcast: std::sync::Arc<{{ .Datagram.BroadcastStruct }}>,
+) -> {{ .Datagram.Pascal }}Stack {
+    let controller = std::sync::Arc::new(controller);
+
+    let mut driver = {{ .Datagram.DriverStruct }}::new(
+        {{ .Datagram.DriverStruct }}Config {
+            addr: "127.0.0.1:0".to_string(),
+        },
+        controller.clone(),
+        std::sync::Arc::new(gate),
+        broadcast.clone(),
+    );
+
+    driver.bind().await.expect("a bound udp socket");
+
+    let port = driver.local_port().expect("a bound udp port");
+
+    tokio::spawn(async move {
+        if let Err(error) = driver.serve().await {
+            eprintln!("serving {{ .Datagram.DriverStruct }}: {}", error_chain(&error));
+        }
+    });
+
+    {{ .Datagram.Pascal }}Stack {
+        port,
+        broadcast,
+        controller,
+    }
+}
+
+{{- if .NeedsRegister }}
+async fn register_{{ .Datagram.Snake }}(
+    port: u16,
+    session_id: &str,
+    hello: {{ .Datagram.HelloRequest }},
+) -> (tokio::net::UdpSocket, {{ .Datagram.HelloReply }}) {
+    let session = {{ .Datagram.Snake }}_codec::session_id_from(session_id);
+
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("a bound socket");
+
+    let datagram = {{ .Datagram.Snake }}_codec::encode_{{ .Datagram.HelloIdent }}_request(&session, &hello)
+        .expect("a hello datagram");
+
+    socket
+        .send_to(&datagram, format!("127.0.0.1:{port}"))
+        .await
+        .expect("a sent hello");
+{{- if .Datagram.HelloSilent }}
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    (socket, {{ .Datagram.HelloReply }}::default())
+{{- else }}
+
+    let mut buffer = [0u8; {{ .Datagram.Snake }}_codec::MAX_DATAGRAM_LEN + 1];
+
+    let read = tokio::time::timeout(
+        std::time::Duration::from_millis(2000),
+        socket.recv(&mut buffer),
+    )
+    .await
+    .expect("a hello reply in time")
+    .expect("a hello reply");
+
+    let reply = {{ .Datagram.Snake }}_codec::decode_{{ .Datagram.HelloIdent }}_reply(&session, &buffer[..read])
+        .expect("a decoded hello reply");
+
+    (socket, reply)
+{{- end }}
+}
+{{- end }}
+{{- if .HasPush }}
+
+async fn receive_{{ .Datagram.Snake }}_push(
+    socket: &tokio::net::UdpSocket,
+    session_id: &str,
+    timeout_ms: u64,
+) -> Option<{{ .Datagram.PushEnum }}> {
+    let mut buffer = [0u8; {{ .Datagram.Snake }}_codec::MAX_DATAGRAM_LEN + 1];
+
+    let read = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        socket.recv(&mut buffer),
+    )
+    .await
+    .ok()?
+    .ok()?;
+
+    Some(
+        {{ .Datagram.Snake }}_codec::decode_push(&{{ .Datagram.Snake }}_codec::session_id_from(session_id), &buffer[..read])
+            .expect("a decoded push"),
+    )
+}
+{{- end }}
+{{ end }}
 {{ range .DatagramTests }}
+{{- if eq .Kind "push" }}
+{{- $t := . }}
+#[tokio::test]
+async fn {{ .Name }}() {
+    let broadcast = {{ .ServiceSnake }}_broadcast();
+    let pushing = broadcast.clone();
+
+    let mut {{ .ControllerVar }} = Mock{{ .ServicePascal }}Controller::new();
+    {{ .ControllerVar }}
+        .expect_{{ .HelloIdent }}()
+        .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
+    {{ .ControllerVar }}
+        .expect_on_tick()
+        .returning(move |_tick| {
+            pushing
+                .send_all({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }}))
+                .map(|_reached| ())
+                .map_err(|source| {{ .ControllerError }}::Broadcast {
+                    kind: "{{ .PushVariant }}".to_string(),
+                    source,
+                })
+        });
+
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate(true), broadcast).await;
+
+    let peers = vec![
+{{- range .SessionLiterals }}
+        ({{ . }}, register_{{ $t.ServiceSnake }}(stack.port, {{ . }}, {{ $t.HelloLiteral }}).await.0),
+{{- end }}
+    ];
+
+    let mut tick = {{ .ServicePascal }}TickDriver::new(
+        {{ .ServicePascal }}TickDriverConfig {
+            interval_ms: {{ .TickIntervalMs }},
+        },
+        stack.controller.clone(),
+    );
+
+    tick.bind().await.expect("a bound tick interval");
+
+    tokio::spawn(async move {
+        if let Err(error) = tick.serve().await {
+            eprintln!("serving {{ .ServicePascal }}TickDriver: {}", error_chain(&error));
+        }
+    });
+
+    for (session_id, socket) in &peers {
+        let push = receive_{{ .ServiceSnake }}_push(socket, session_id, {{ .TimeoutMs }}).await;
+
+        assert_eq!(push, Some({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }})), "session {session_id} never received the push");
+    }
+}
+{{- else if eq .Kind "dropped" }}
+#[tokio::test]
+async fn {{ .Name }}() {
+    let mut {{ .ControllerVar }} = Mock{{ .ServicePascal }}Controller::new();
+    {{ .ControllerVar }}.{{ .ExpectMethod }}().never();
+{{- if and .Registered (not .IsHello) }}
+    {{ .ControllerVar }}
+        .expect_{{ .HelloIdent }}()
+        .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
+{{- end }}
+
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+{{- if and .Registered (not .IsHello) }}
+
+    let _registered = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .HelloLiteral }}).await;
+{{- end }}
+
+    let client = {{ .ClientStruct }}::new({{ .ClientConfig }} {
+        address: format!("127.0.0.1:{}", stack.port),
+        session_id: {{ .SessionLiteral }}.to_string(),
+        timeout_ms: {{ .TimeoutMs }},
+    });
+
+    let error = client
+        .{{ .ClientMethod }}({{ .RequestLiteral }})
+        .await
+        .expect_err("the datagram is dropped, no reply comes back");
+
+    assert!(error.to_string().contains("{{ .RpcPascal }}"), "{error}");
+}
+{{- else if eq .Kind "reconnect" }}
+#[tokio::test]
+async fn {{ .Name }}() {
+    let expected_request = {{ .RequestLiteral }};
+    let controller_reply = {{ .ReplyLiteral }};
+
+    let mut {{ .ControllerVar }} = Mock{{ .ServicePascal }}Controller::new();
+    {{ .ControllerVar }}
+        .{{ .ExpectMethod }}()
+        .times(2)
+        .returning(move |request, _context| {
+            assert_eq!(request, expected_request);
+
+            Ok(controller_reply.clone())
+        });
+
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+
+    let (first, _) = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .RequestLiteral }}).await;
+    let (second, reply) = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .RequestLiteral }}).await;
+
+    assert_eq!(reply, {{ .ExpectedLiteral }});
+
+    let first_address = first.local_addr().expect("the first address");
+    let second_address = second.local_addr().expect("the second address");
+
+    assert_ne!(first_address, second_address);
+    assert_eq!(
+        stack
+            .broadcast
+            .peer_of(&{{ .ServiceSnake }}_codec::session_id_from({{ .SessionLiteral }}))
+            .expect("a peer"),
+        Some(second_address),
+        "the peer table still points at the first address"
+    );
+}
+{{- else if .Session }}
+#[tokio::test]
+async fn {{ .Name }}() {
+    let expected_request = {{ .RequestLiteral }};
+    let controller_reply = {{ .ReplyLiteral }};
+
+    let mut {{ .ControllerVar }} = Mock{{ .ServicePascal }}Controller::new();
+    {{ .ControllerVar }}
+        .{{ .ExpectMethod }}()
+        .times(1)
+        .returning(move |request, _context| {
+            assert_eq!(request, expected_request);
+
+            Ok(controller_reply.clone())
+        });
+{{- if and .Registered (not .IsHello) }}
+    {{ .ControllerVar }}
+        .expect_{{ .HelloIdent }}()
+        .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
+{{- end }}
+
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+{{- if and .Registered (not .IsHello) }}
+
+    let _registered = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .HelloLiteral }}).await;
+{{- end }}
+
+    let client = {{ .ClientStruct }}::new({{ .ClientConfig }} {
+        address: format!("127.0.0.1:{}", stack.port),
+        session_id: {{ .SessionLiteral }}.to_string(),
+        timeout_ms: {{ .TimeoutMs }},
+    });
+
+    let reply = client
+        .{{ .ClientMethod }}({{ .RequestLiteral }})
+        .await
+        .expect("a reply");
+
+    assert_eq!(reply, {{ .ExpectedLiteral }});
+}
+{{- else }}
 #[tokio::test]
 async fn {{ .Name }}() {
     let expected_request = {{ .RequestLiteral }};
@@ -281,6 +601,7 @@ async fn {{ .Name }}() {
 
     assert_eq!(reply, {{ .ExpectedLiteral }});
 }
+{{- end }}
 {{ end }}
 {{ range .Tests }}
 #[tokio::test]

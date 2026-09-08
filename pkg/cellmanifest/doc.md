@@ -17,7 +17,9 @@ Every manifest carries `version: "1"`. A reader refuses any other value.
 
 The manifest lists what the cell provides and what it needs.
 
-- `provides.drivers` a driver, the controller traits it needs, its config fields
+- `provides.drivers` a driver, the controller traits it needs, the port traits
+  it consumes under `ports`, its config fields. hexagonal-rust hands the
+  controllers to `new` first and the ports after them, in manifest order
 - `provides.adapters` an adapter, the port it implements, whether its `new` is
   fallible, its config fields
 - `provides.controllers` a controller trait, its impl struct, its ports

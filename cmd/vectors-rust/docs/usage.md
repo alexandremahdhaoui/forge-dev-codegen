@@ -117,6 +117,52 @@ rejection text includes that field. The one case this cannot cover is the
 underlying `500` reply, whose body is a fixed "internal error" text set by
 the driver, not by the controller error's message.
 
+## Session cases
+
+When the udp cell names `layout.hello`, the vectors cell names the same
+`hello` and `push` under its own `layout`. Every datagram test then
+stands the generated driver up over a mocked controller, a mocked
+`<Service>SessionGate` and the real `<Service>UdpBroadcast` peer table.
+
+```yaml
+layout:
+  cell: udp
+  hello: Hello
+  push: [Counter]
+```
+
+A datagram case gains these fields. Every one is optional.
+
+| Field | Meaning |
+|---|---|
+| `gate` | `admit` or `refuse`. What the mocked gate answers. Defaults to `admit`. |
+| `session` | `registered` or `unknown`. Whether the harness sends a hello for the case's `sessionId` before the operation. Defaults to `registered`. A hello case never needs one. |
+| `hello` | The hello request the harness registers with. Missing fields default. |
+| `reconnect` | On the hello rpc only. The hello is sent twice from two sockets. The reply of the second must match `expectedBody` and the peer table must point at the second socket. |
+| `expectDropped` | The client must get no reply within a short timeout. Drop `controllerReply` and `expectedBody`. Pair it with `gate: refuse` for a refused hello or `session: unknown` for a datagram the peer table never admitted. |
+| `expectPush` | The case sends no request. The tick driver runs and the server pushes. It names the push `rpc`, the registered `sessionIds` the push must reach and a `payload` the received push must equal. |
+
+```json
+{
+  "case": "udp_counter_reaches_two_sessions_on_a_tick",
+  "operation": "udp_counter",
+  "input": null,
+  "hello": { "secret": "open" },
+  "expectPush": {
+    "rpc": "Counter",
+    "sessionIds": ["0123456789abcdef", "fedcba9876543210"],
+    "payload": { "tick": 3 }
+  }
+}
+```
+
+A push case registers every session id with a hello first, binds a
+`<Service>TickDriver` at a 10 millisecond interval over the mocked
+controller, and asserts each peer receives the decoded push. The mocked
+controller's `on_tick` sends the push through the real peer table. An
+operation naming a push rpc carries `expectPush` and no `input`. Every
+other datagram case carries `input` and a 16 byte `sessionId`.
+
 ## How the mock is built
 
 `hexagonal-rust` marks the controller trait `#[cfg_attr(test, mockall::automock)]`.

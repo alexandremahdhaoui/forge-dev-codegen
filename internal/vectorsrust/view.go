@@ -37,6 +37,9 @@ type view struct {
 	HasDatagrams     bool
 	Datagram         datagramServiceView
 	DatagramTests    []datagramTestView
+	HasPush          bool
+	HasReconnect     bool
+	NeedsRegister    bool
 }
 
 type importView struct {
@@ -197,6 +200,10 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 			}
 
 			v.DatagramTests = append(v.DatagramTests, tv)
+
+			v.HasPush = v.HasPush || tv.Kind == kindPush
+			v.HasReconnect = v.HasReconnect || tv.Kind == kindReconnect
+			v.NeedsRegister = v.NeedsRegister || tv.Kind == kindPush || tv.Kind == kindReconnect || (tv.Registered && !tv.IsHello)
 		}
 	}
 

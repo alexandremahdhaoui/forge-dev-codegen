@@ -17,6 +17,8 @@ package udprust
 type Options struct {
 	Service string
 	Cell    string
+	Hello   string
+	Push    []string
 }
 
 type File struct {

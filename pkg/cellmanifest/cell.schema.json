@@ -81,6 +81,7 @@
         "requires": {
           "allOf": [{ "$ref": "#/$defs/traitList" }, { "minItems": 1 }]
         },
+        "ports": { "$ref": "#/$defs/traitList" },
         "config": { "$ref": "#/$defs/config" }
       }
     },

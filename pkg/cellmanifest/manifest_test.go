@@ -215,6 +215,9 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 	driverWithABadType := exampleManifest()
 	driverWithABadType.Provides.Drivers[0].Type = "hello-grpc-driver"
 
+	driverWithABadPort := exampleManifest()
+	driverWithABadPort.Provides.Drivers[0].Ports = []string{"session-gate"}
+
 	driverWithoutModule := exampleManifest()
 	driverWithoutModule.Provides.Drivers[0].Module = ""
 
@@ -295,6 +298,11 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			name:     "a manifest with an empty cell name is refused",
 			manifest: noCell,
 			message:  "cell name is empty",
+		},
+		{
+			name:     "a port a driver consumes that is not a Rust ident is refused",
+			manifest: driverWithABadPort,
+			message:  `driver "grpc" in cell "grpc" consumes port "session-gate" which is not a Rust ident`,
 		},
 		{
 			name:     "a cell name that is not snake case is refused",

@@ -327,7 +327,7 @@ func TestAnRpcReplyingNothingIsNeverAnsweredOnTheWire(t *testing.T) {
 	driver := files["driver/zz_generated_hello_datagram_udp_driver.rs"].Content
 	adapter := files["adapter/zz_generated_hello_datagram_udp_client.rs"].Content
 
-	if !strings.Contains(driver, "codec::HelloDatagramRequest::Note(request) => {\n                    match self.controller.note(request, &context) {\n                        Ok(_) => None,") {
+	if !strings.Contains(driver, "codec::HelloDatagramRequest::Note(request) => {\n\n                    match self.controller.note(request, &context) {\n                        Ok(_) => None,") {
 		t.Fatalf("the driver answered a Nothing rpc:\n%s", driver)
 	}
 
@@ -388,14 +388,14 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 	for _, want := range []string{
 		"const RECV_ERROR_PAUSE: Duration = Duration::from_millis(50);",
 		"const MAX_CONSECUTIVE_RECV_ERRORS: usize = 100;",
-		"const MAX_PEERS_TOLD_ABOUT_THE_VERSION: usize = 256;",
+		"const MAX_PEERS_TOLD: usize = 256;",
 		"pub struct HelloDatagramUdpDriverConfig {",
 		"pub struct HelloDatagramUdpDriver {",
 		"    controller: Arc<dyn HelloDatagramController + Send + Sync>,",
 		"    pub async fn bind(&mut self) -> Result<(), HelloDatagramUdpDriverError> {",
-		"if peers_told_about_the_version.len() >= MAX_PEERS_TOLD_ABOUT_THE_VERSION {",
+		"if self.peers.len() >= MAX_PEERS_TOLD {",
 		"println!(\"LISTENING_UDP {}\", self.local_port()?);",
-		"if peers_told_about_the_version.insert(peer) {",
+		"if told_about_the_version.first_time(peer) {",
 		"dropping a datagram from {peer}: function hash {hash} names no rpc",
 	} {
 		if !strings.Contains(driver, want) {

@@ -34,6 +34,22 @@ type VectorCase struct {
 	ExpectedStatus         int             `json:"expectedStatus"`
 	ExpectedBody           json.RawMessage `json:"expectedBody"`
 	ExpectedErrorSubstring string          `json:"expectedErrorSubstring"`
+	Gate                   string          `json:"gate"`
+	Session                string          `json:"session"`
+	Hello                  json.RawMessage `json:"hello"`
+	Reconnect              bool            `json:"reconnect"`
+	ExpectDropped          bool            `json:"expectDropped"`
+	ExpectPush             *ExpectPush     `json:"expectPush"`
+}
+
+type ExpectPush struct {
+	Rpc        string          `json:"rpc"`
+	SessionIds []string        `json:"sessionIds"`
+	Payload    json.RawMessage `json:"payload"`
+}
+
+func (c VectorCase) IsPush() bool {
+	return c.ExpectPush != nil
 }
 
 var rustTestIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -72,6 +88,12 @@ func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) b
 		}
 
 		if declaresDatagram(c.Operation) {
+			if c.IsPush() || c.ExpectDropped {
+				datagrams = append(datagrams, c)
+
+				continue
+			}
+
 			if len(c.ControllerReply) == 0 {
 				return nil, fmt.Errorf("reading vector %q: a datagram case needs controllerReply, the reply the mocked controller answers", c.Case)
 			}

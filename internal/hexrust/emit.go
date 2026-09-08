@@ -462,6 +462,9 @@ async fn run() -> anyhow::Result<()> {
 {{- range .Controllers }}
             {{ . }}.clone(),
 {{- end }}
+{{- range .PortVars }}
+            {{ . }}.clone(),
+{{- end }}
         );
 
         {{ .Var }}

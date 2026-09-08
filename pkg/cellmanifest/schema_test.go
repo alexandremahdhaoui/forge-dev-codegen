@@ -88,6 +88,13 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 			manifestYAML: "version: \"1\"\ncell: udp\ngenerator: udp-rust\n",
 		},
 		{
+			name: "a driver that consumes ports validates against the schema",
+			manifestYAML: "version: \"1\"\ncell: udp\ngenerator: udp-rust\n" +
+				"provides:\n  drivers:\n    - name: udp\n      type: HelloDatagramUdpDriver\n" +
+				"      module: udp::driver::hello_datagram_udp_driver\n      requires: [HelloDatagramController]\n" +
+				"      ports: [HelloDatagramSessionGate, HelloDatagramBroadcast]\n",
+		},
+		{
 			name: "a build script under a directory of the cell validates against the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"buildScript: build/zz_generated_build.rs\n",

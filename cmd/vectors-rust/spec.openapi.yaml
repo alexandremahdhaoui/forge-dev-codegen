@@ -54,7 +54,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. crateDir names the crate root relative to srcDir and defaults to srcDir itself, vectors names the vectors document relative to srcDir, cell names the udp module directory, which defaults to udp, and restCell names the rest module directory, which defaults to rest.
+          description: The kind's layout. crateDir names the crate root relative to srcDir and defaults to srcDir itself, vectors names the vectors document relative to srcDir, cell names the udp module directory, which defaults to udp, restCell names the rest module directory, which defaults to rest, hello names the rpc a udp session opens with and push lists the rpcs the udp server sends to a client, both as the udp cell names them.
       required:
         - name
         - kind

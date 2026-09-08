@@ -39,12 +39,19 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
+			push, err := layoutStrings(input.Layout, "push")
+			if err != nil {
+				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
+			}
+
 			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
 				Service:  input.Name,
 				CrateDir: layoutString(input.Layout, "crateDir"),
 				Cell:     layoutString(input.Layout, "cell"),
 				RestCell: layoutString(input.Layout, "restCell"),
 				Proto:    []byte(input.ProtoSpec),
+				Hello:    layoutString(input.Layout, "hello"),
+				Push:     push,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
@@ -82,4 +89,29 @@ func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
+}
+
+func layoutStrings(layout map[string]interface{}, key string) ([]string, error) {
+	raw, ok := layout[key]
+	if !ok {
+		return nil, nil
+	}
+
+	entries, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading layout.%s: it is a list of rpc names, not %v", key, raw)
+	}
+
+	names := make([]string, 0, len(entries))
+
+	for i, entry := range entries {
+		name, ok := entry.(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("reading layout.%s entry %d: it is an rpc name, not %v", key, i, entry)
+		}
+
+		names = append(names, name)
+	}
+
+	return names, nil
 }

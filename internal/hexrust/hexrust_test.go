@@ -553,16 +553,6 @@ func TestTheWiringIsRefusedWhenItFightsTheManifests(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "a port a controller consumes with no candidate",
-			wiring: `binary: songe-hello-node
-drivers:
-  rest: { enabled: true }
-  grpc: { enabled: true }
-  udp: { enabled: true }
-`,
-			want: `wiring the ports: controller "GreetingController" consumes port "GreetingStore" and the wiring names no candidate for it`,
-		},
-		{
 			name: "a candidate no manifest provides",
 			wiring: `binary: songe-hello-node
 ports:
@@ -735,6 +725,178 @@ func TestAHandWrittenCandidateTheWiringLeavesInfallibleGetsNoQuestionMark(t *tes
 
 	if strings.Contains(arm, "?") {
 		t.Errorf("main asks a question mark of an adapter that never fails\n%s", arm)
+	}
+}
+
+func TestASilentWiringPicksTheOnlyAdapterTheCellsProvideForAPort(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, `binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp: { enabled: true }
+`)
+
+	main := files["src/bin/zz_generated_songe_hello_node.rs"]
+
+	for _, want := range []string{
+		"let greeting_store: Arc<dyn GreetingStore + Send + Sync> = match config.greeting_store.as_str() {",
+		`"sqlite" => Arc::new(`,
+		`"building GreetingStore: {other:?} names no adapter, the adapters are sqlite"`,
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main lacks %q\n%s", want, main)
+		}
+	}
+
+	if !strings.Contains(files["zz_generated_config_spec.yaml"], "default: sqlite") {
+		t.Errorf("the config spec does not default the choice to the only adapter\n%s", files["zz_generated_config_spec.yaml"])
+	}
+}
+
+func writeWsCell(t *testing.T, root string, manifest cellmanifest.Manifest) {
+	t.Helper()
+
+	body, err := cellmanifest.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshalling the manifest: %v", err)
+	}
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), string(body))
+}
+
+func TestAPortAControllerConsumesWithNoAdapterAnywhereIsRefused(t *testing.T) {
+	root := standUpCells(t, "rest")
+
+	writeWsCell(t, root, cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Drivers: []cellmanifest.Driver{{
+				Name:     "ws",
+				Type:     "WsDriver",
+				Module:   "ws::driver::ws_driver",
+				Requires: []string{"WsController"},
+			}},
+			Controllers: []cellmanifest.Controller{{
+				Trait:  "WsController",
+				Impl:   "WsControllerImpl",
+				Module: "ws::controller",
+				Ports:  []string{"Clock"},
+			}},
+			Ports: []cellmanifest.Port{{Trait: "Clock", Module: "ws::port::clock"}},
+		},
+	})
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+  ws: { enabled: true }
+`),
+	})
+
+	want := `wiring the ports: controller "WsController" consumes port "Clock" and the wiring names no candidate for it`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestAPortWithTwoProvidedAdaptersAndASilentWiringIsRefused(t *testing.T) {
+	root := standUpCells(t, "rest")
+
+	writeWsCell(t, root, cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{{
+				Name:       "greeting_redis",
+				Type:       "GreetingRedisStore",
+				Module:     "ws::adapter::greeting_redis",
+				Implements: "GreetingStore",
+			}},
+		},
+	})
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+`),
+	})
+
+	want := `wiring the ports: controller "GreetingController" consumes port "GreetingStore", the cells provide greeting_redis, sqlite for it and the wiring names no choice`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestADriverConsumingPortsGetsThemAfterItsControllers(t *testing.T) {
+	root := standUpCells(t, "rest")
+
+	writeWsCell(t, root, cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Drivers: []cellmanifest.Driver{{
+				Name:     "ws",
+				Type:     "WsDriver",
+				Module:   "ws::driver::ws_driver",
+				Requires: []string{"GreetingController"},
+				Ports:    []string{"SessionGate", "GreetingStore"},
+			}},
+			Adapters: []cellmanifest.Adapter{{
+				Name:       "gate_memory",
+				Type:       "GateMemory",
+				Module:     "ws::adapter::gate_memory",
+				Implements: "SessionGate",
+			}},
+			Ports: []cellmanifest.Port{{Trait: "SessionGate", Module: "ws::port::session_gate"}},
+		},
+	})
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+  ws: { enabled: true }
+`),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var main string
+	for _, f := range files {
+		if f.Path == "src/bin/zz_generated_songe_hello_node.rs" {
+			main = f.Content
+		}
+	}
+
+	for _, want := range []string{
+		"let session_gate: Arc<dyn SessionGate + Send + Sync> = match config.session_gate.as_str() {",
+		`"gate_memory" => Arc::new(`,
+		"use songe_hello::ws::port::session_gate::SessionGate;",
+		"let mut ws_driver = WsDriver::new(",
+		"greeting_controller.clone(),\n            session_gate.clone(),\n            greeting_store.clone(),\n        );",
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main lacks %q\n%s", want, main)
+		}
 	}
 }
 

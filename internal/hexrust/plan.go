@@ -27,15 +27,15 @@ import (
 const handAdapterLayer = "adapter::"
 
 type plan struct {
-	Header      string
-	Crate       string
-	Binary      string
-	BinaryIdent string
-	ConfigType  string
-	Cells       []string
-	Ports       []portPlan
-	Controllers []controllerPlan
-	Drivers     []driverPlan
+	Header       string
+	Crate        string
+	Binary       string
+	BinaryIdent  string
+	ConfigType   string
+	Cells        []string
+	Ports        []portPlan
+	Controllers  []controllerPlan
+	Drivers      []driverPlan
 	HandModules  []string
 	HandConfigs  []handConfigPlan
 	Imports      []string
@@ -80,6 +80,7 @@ type driverPlan struct {
 	EnabledVar  string
 	Fields      []fieldPlan
 	Controllers []string
+	PortVars    []string
 }
 
 type handConfigPlan struct {
@@ -271,6 +272,10 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 			dp.Controllers = append(dp.Controllers, rustname.Snake(trait))
 		}
 
+		for _, trait := range entry.Driver.Ports {
+			dp.PortVars = append(dp.PortVars, rustname.Snake(trait))
+		}
+
 		p.Keys = append(p.Keys, specKey{
 			Key:         "driver_" + rustname.Snake(name),
 			Type:        "boolean",
@@ -331,7 +336,13 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 
 	for _, c := range p.Controllers {
 		for _, trait := range c.Ports {
-			consumed[trait] = append(consumed[trait], c.Trait)
+			consumed[trait] = append(consumed[trait], fmt.Sprintf("controller %q", c.Trait))
+		}
+	}
+
+	for _, d := range p.Drivers {
+		for _, trait := range merged.Drivers[d.Name].Driver.Ports {
+			consumed[trait] = append(consumed[trait], fmt.Sprintf("driver %q", d.Name))
 		}
 	}
 
@@ -341,12 +352,9 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 	}
 
 	for _, trait := range sortedKeys(consumed) {
-		block, wired := wiring.Ports[trait]
-		if !wired {
-			return fmt.Errorf(
-				"wiring the ports: controller %q consumes port %q and the wiring names no candidate for it",
-				consumed[trait][0], trait,
-			)
+		block, err := portBlock(trait, consumed[trait][0], wiring, merged)
+		if err != nil {
+			return err
 		}
 
 		portEntry, provided := merged.Ports[trait]
@@ -386,6 +394,41 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 	}
 
 	return nil
+}
+
+func portBlock(trait, consumer string, wiring Wiring, merged cellmanifest.Merged) (WiringPort, error) {
+	if block, wired := wiring.Ports[trait]; wired {
+		return block, nil
+	}
+
+	provided := []string{}
+
+	for _, entry := range merged.Adapters {
+		if entry.Adapter.Implements == trait {
+			provided = append(provided, entry.Adapter.Name)
+		}
+	}
+
+	sort.Strings(provided)
+
+	if len(provided) == 0 {
+		return WiringPort{}, fmt.Errorf(
+			"wiring the ports: %s consumes port %q and the wiring names no candidate for it",
+			consumer, trait,
+		)
+	}
+
+	if len(provided) > 1 {
+		return WiringPort{}, fmt.Errorf(
+			"wiring the ports: %s consumes port %q, the cells provide %s for it and the wiring names no choice",
+			consumer, trait, list(provided),
+		)
+	}
+
+	return WiringPort{
+		Default:  provided[0],
+		Adapters: map[string]WiringCandidate{provided[0]: {}},
+	}, nil
 }
 
 func planCandidate(

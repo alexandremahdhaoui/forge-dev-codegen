@@ -82,6 +82,8 @@ type rpcView struct {
 	FullMethod string
 	Hash       uint8
 	Silent     bool
+	Hello      bool
+	Push       bool
 }
 
 type serviceView struct {
@@ -114,7 +116,35 @@ type serviceView struct {
 	ControllerError  string
 	Messages         []messageView
 	Rpcs             []rpcView
+	Inbound          []rpcView
+	Pushes           []rpcView
 	TraitTypes       []string
+	CodecTypes       []string
+	PushTypes        []string
+	Session          bool
+	HelloRpc         rpcView
+	GateTrait        string
+	GateError        string
+	GateModule       string
+	GateSnake        string
+	BroadcastTrait   string
+	BroadcastError   string
+	BroadcastModule  string
+	BroadcastSnake   string
+	BroadcastStruct  string
+	BroadcastConfig  string
+	BroadcastAdapter string
+	BroadcastName    string
+	SenderType       string
+	PushEnum         string
+	PushModule       string
+	TickStruct       string
+	TickConfig       string
+	TickError        string
+	TickModule       string
+	TickName         string
+	DefaultSessions  int
+	DefaultTickMs    int
 }
 
 func prostAttribute(f grpcrust.Field) string {
@@ -150,6 +180,52 @@ func buildMessageView(m grpcrust.Message) messageView {
 	return mv
 }
 
+func rpcNames(spec *grpcrust.Spec) map[string]bool {
+	names := map[string]bool{}
+
+	for _, svc := range spec.Services {
+		for _, r := range svc.Rpcs {
+			names[r.Name] = true
+		}
+	}
+
+	return names
+}
+
+func checkSessionNames(spec *grpcrust.Spec, opts Options) error {
+	names := rpcNames(spec)
+
+	if opts.Hello != "" && !names[opts.Hello] {
+		return fmt.Errorf("naming the hello rpc: %q is not an rpc of package %q, layout.hello names one rpc of the proto service block", opts.Hello, spec.Package)
+	}
+
+	for _, name := range opts.Push {
+		if !names[name] {
+			return fmt.Errorf("naming the push rpcs: %q is not an rpc of package %q, layout.push names rpcs of the proto service block", name, spec.Package)
+		}
+
+		if name == opts.Hello {
+			return fmt.Errorf("naming the push rpcs: %q is the hello rpc, a hello is inbound and cannot be pushed", name)
+		}
+	}
+
+	if len(opts.Push) > 0 && opts.Hello == "" {
+		return fmt.Errorf("naming the push rpcs: %s pushed and no layout.hello named, a push reaches the peers a hello admitted", strings.Join(opts.Push, ", "))
+	}
+
+	return nil
+}
+
+func isPush(name string, opts Options) bool {
+	for _, push := range opts.Push {
+		if push == name {
+			return true
+		}
+	}
+
+	return false
+}
+
 func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, only bool) (serviceView, error) {
 	version, err := SchemaVersion(spec.Package)
 	if err != nil {
@@ -170,11 +246,18 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 
 	driverName := opts.Cell
 	clientName := opts.Cell + "_client"
+	broadcastName := opts.Cell + "_broadcast"
+	tickName := "tick"
 
 	if !only {
 		driverName = opts.Cell + "_" + rustname.Snake(svc.Name)
 		clientName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_client"
+		broadcastName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_broadcast"
+		tickName = "tick_" + rustname.Snake(svc.Name)
 	}
+
+	pascal := rustname.Pascal(svc.Name)
+	snake := rustname.Snake(svc.Name)
 
 	sv := serviceView{
 		Header:           header,
@@ -183,27 +266,49 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		CratePath:        "crate::" + opts.Cell + "::",
 		ModulePrefix:     opts.Cell + "::",
 		SchemaVersion:    version,
-		ServicePascal:    rustname.Pascal(svc.Name),
-		ServiceSnake:     rustname.Snake(svc.Name),
-		ClientTrait:      rustname.Pascal(svc.Name) + "Client",
-		ClientError:      rustname.Pascal(svc.Name) + "ClientError",
-		ClientStruct:     rustname.Pascal(svc.Name) + "UdpClient",
-		ClientConfig:     rustname.Pascal(svc.Name) + "UdpClientConfig",
-		ClientModule:     rustname.Snake(svc.Name) + "_udp_client",
+		ServicePascal:    pascal,
+		ServiceSnake:     snake,
+		ClientTrait:      pascal + "Client",
+		ClientError:      pascal + "ClientError",
+		ClientStruct:     pascal + "UdpClient",
+		ClientConfig:     pascal + "UdpClientConfig",
+		ClientModule:     snake + "_udp_client",
 		ClientName:       clientName,
-		DriverStruct:     rustname.Pascal(svc.Name) + "UdpDriver",
-		DriverConfig:     rustname.Pascal(svc.Name) + "UdpDriverConfig",
-		DriverError:      rustname.Pascal(svc.Name) + "UdpDriverError",
-		DriverModule:     rustname.Snake(svc.Name) + "_udp_driver",
+		DriverStruct:     pascal + "UdpDriver",
+		DriverConfig:     pascal + "UdpDriverConfig",
+		DriverError:      pascal + "UdpDriverError",
+		DriverModule:     snake + "_udp_driver",
 		DriverName:       driverName,
 		DefaultAddress:   DefaultAddress,
 		DefaultEndpoint:  DefaultEndpoint,
 		DefaultTimeoutMs: DefaultTimeoutMs,
-		CodecError:       rustname.Pascal(svc.Name) + "CodecError",
-		RequestEnum:      rustname.Pascal(svc.Name) + "Request",
-		ControllerSnake:  rustname.Snake(svc.Name),
-		ControllerTrait:  rustname.Pascal(svc.Name) + "Controller",
-		ControllerError:  rustname.Pascal(svc.Name) + "ControllerError",
+		CodecError:       pascal + "CodecError",
+		RequestEnum:      pascal + "Request",
+		ControllerSnake:  snake,
+		ControllerTrait:  pascal + "Controller",
+		ControllerError:  pascal + "ControllerError",
+		GateTrait:        pascal + "SessionGate",
+		GateError:        pascal + "SessionGateError",
+		GateModule:       snake + "_session_gate",
+		GateSnake:        snake + "_session_gate",
+		BroadcastTrait:   pascal + "Broadcast",
+		BroadcastError:   pascal + "BroadcastError",
+		BroadcastModule:  snake + "_broadcast",
+		BroadcastSnake:   snake + "_broadcast",
+		BroadcastStruct:  pascal + "UdpBroadcast",
+		BroadcastConfig:  pascal + "UdpBroadcastConfig",
+		BroadcastAdapter: snake + "_udp_broadcast",
+		BroadcastName:    broadcastName,
+		SenderType:       pascal + "Sender",
+		PushEnum:         pascal + "Push",
+		PushModule:       snake + "_push",
+		TickStruct:       pascal + "TickDriver",
+		TickConfig:       pascal + "TickDriverConfig",
+		TickError:        pascal + "TickDriverError",
+		TickModule:       snake + "_tick_driver",
+		TickName:         tickName,
+		DefaultSessions:  DefaultSessions,
+		DefaultTickMs:    DefaultTickMs,
 	}
 
 	for _, m := range messages {
@@ -211,12 +316,14 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 	}
 
 	seenTrait := map[string]bool{}
+	seenCodec := map[string]bool{}
+	seenPush := map[string]bool{}
 
 	for _, r := range svc.Rpcs {
 		fullMethod := spec.Package + "." + svc.Name + "/" + r.Name
 		hash := FunctionHash(fullMethod)
 
-		sv.Rpcs = append(sv.Rpcs, rpcView{
+		rv := rpcView{
 			Ident:      rustname.RustIdent(r.Name),
 			Pascal:     rustname.Pascal(r.Name),
 			Upper:      rustname.Upper(r.Name),
@@ -225,9 +332,40 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 			FullMethod: fullMethod,
 			Hash:       hash,
 			Silent:     rustname.Pascal(r.Response) == NothingMessage,
-		})
+			Hello:      opts.Hello != "" && r.Name == opts.Hello,
+			Push:       isPush(r.Name, opts),
+		}
 
-		for _, t := range []string{rustname.Pascal(r.Request), rustname.Pascal(r.Response)} {
+		sv.Rpcs = append(sv.Rpcs, rv)
+
+		if rv.Hello {
+			sv.Session = true
+			sv.HelloRpc = rv
+		}
+
+		for _, t := range []string{rv.Request, rv.Reply} {
+			if !seenCodec[t] {
+				seenCodec[t] = true
+
+				sv.CodecTypes = append(sv.CodecTypes, t)
+			}
+		}
+
+		if rv.Push {
+			sv.Pushes = append(sv.Pushes, rv)
+
+			if !seenPush[rv.Request] {
+				seenPush[rv.Request] = true
+
+				sv.PushTypes = append(sv.PushTypes, rv.Request)
+			}
+
+			continue
+		}
+
+		sv.Inbound = append(sv.Inbound, rv)
+
+		for _, t := range []string{rv.Request, rv.Reply} {
 			if !seenTrait[t] {
 				seenTrait[t] = true
 
@@ -236,5 +374,18 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		}
 	}
 
+	if len(sv.Pushes) > 0 && !sv.Session {
+		return serviceView{}, fmt.Errorf("building service %q: it pushes %s and holds no hello rpc, a push reaches the peers a hello admitted", svc.Name, pushNames(sv.Pushes))
+	}
+
 	return sv, nil
+}
+
+func pushNames(pushes []rpcView) string {
+	names := make([]string, 0, len(pushes))
+	for _, p := range pushes {
+		names = append(names, p.Pascal)
+	}
+
+	return strings.Join(names, ", ")
 }
