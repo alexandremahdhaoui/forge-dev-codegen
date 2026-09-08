@@ -1,0 +1,13 @@
+name: demo-tui-rust
+kind: tui
+version: 0.1.0
+description: The tui cell of the demo crate. A board controller that moves an at sign with vi keys and quits on q, wired to the crossterm screen and keyboard adapters tui-rust emits. The living proof that the tui cell builds and runs.
+language: rust
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/tui-rust
+wiring:
+  specPath: ./tui.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+layout:
+  cell: tui

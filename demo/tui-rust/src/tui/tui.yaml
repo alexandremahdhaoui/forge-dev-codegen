@@ -1,0 +1,13 @@
+controller: board
+width: 12
+height: 6
+tickMs: 100
+keys:
+  left: h
+  down: j
+  up: k
+  right: l
+  act: a
+  endTurn: space
+  quit: q
+  line: enter

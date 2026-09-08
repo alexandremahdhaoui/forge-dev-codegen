@@ -102,6 +102,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-tui-rust
+    src: ./cmd/tui-rust
+    engine: forge://forge-dev
+
+  - name: tui-rust
+    src: ./cmd/tui-rust
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-vectors-rust
     src: ./cmd/vectors-rust
     engine: forge://forge-dev
@@ -201,6 +210,17 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-demo-tui-rust
+    src: ./demo/tui-rust/src/tui
+    engine: forge://forge-dev
+
+  - name: demo-tui-rust
+    src: ./demo/tui-rust
+    engine: forge://generic-builder
+    spec:
+      command: cargo
+      args: ["build", "--manifest-path", "demo/tui-rust/Cargo.toml"]
+
   - name: gen-windows-allow
     src: ./cmd/windows-allow
     engine: forge://forge-dev
@@ -216,6 +236,18 @@ test:
 
   - name: unit
     runner: forge://go-test
+
+  - name: demo-tui-rust
+    runner: forge://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "--manifest-path", "demo/tui-rust/Cargo.toml"]
+
+  - name: demo-tui-rust-lint
+    runner: forge://generic-test-runner
+    spec:
+      command: cargo
+      args: ["clippy", "--manifest-path", "demo/tui-rust/Cargo.toml", "--all-targets", "--", "-D", "warnings"]
 
 factory:
   module: github.com/alexandremahdhaoui/forge-dev-codegen

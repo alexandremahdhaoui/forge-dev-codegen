@@ -2,6 +2,7 @@
 /.forge/
 .envrc
 /tmp/
+/demo/tui-rust/target/
 
 # forge-factory materialises these. A version is written in forge-factory.yaml.
 /.envrc

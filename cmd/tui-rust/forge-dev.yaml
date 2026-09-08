@@ -1,0 +1,15 @@
+name: tui-rust
+kind: mcp-server
+version: 0.1.0
+description: Emits the rust tui cell of one service from its tui spec. It writes the frame and key types, a Screen port and a Keyboard port, a crossterm adapter for each, a controller trait with the struct that carries its ports, and a driver that owns the terminal loop.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+layout:
+  tools:
+    - name: generate
+      description: Answer the tui cell of one service from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

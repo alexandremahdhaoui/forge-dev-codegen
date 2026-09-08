@@ -1,0 +1,20 @@
+[package]
+name = "demo-tui-rust"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "A board that moves an at sign on a grid. Consumes the tui cell tui-rust emits."
+
+[workspace]
+
+[[bin]]
+name = "demo-tui-rust"
+path = "src/bin/demo_tui_rust.rs"
+
+[dependencies]
+crossterm = "0.29.0"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+mockall = "0.15"
