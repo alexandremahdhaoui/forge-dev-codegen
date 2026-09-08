@@ -343,14 +343,6 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 			sv.HelloRpc = rv
 		}
 
-		for _, t := range []string{rv.Request, rv.Reply} {
-			if !seenCodec[t] {
-				seenCodec[t] = true
-
-				sv.CodecTypes = append(sv.CodecTypes, t)
-			}
-		}
-
 		if rv.Push {
 			sv.Pushes = append(sv.Pushes, rv)
 
@@ -366,6 +358,12 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		sv.Inbound = append(sv.Inbound, rv)
 
 		for _, t := range []string{rv.Request, rv.Reply} {
+			if !seenCodec[t] {
+				seenCodec[t] = true
+
+				sv.CodecTypes = append(sv.CodecTypes, t)
+			}
+
 			if !seenTrait[t] {
 				seenTrait[t] = true
 
