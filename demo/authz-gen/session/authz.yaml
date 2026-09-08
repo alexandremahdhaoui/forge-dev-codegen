@@ -1,0 +1,73 @@
+module: session
+types:
+  - name: account
+    relations:
+      - name: self
+        subjects: [account]
+      - name: create_session
+        expression: self
+  - name: character
+    relations:
+      - name: owner
+        subjects: [account]
+      - name: delete_character
+        expression: owner
+  - name: session
+    relations:
+      - name: host
+        subjects: [character]
+      - name: member
+        subjects: [character]
+      - name: join
+        expression: member
+      - name: leave
+        expression: member
+vectors:
+  - name: a member may join
+    tuples:
+      - user: character:alice
+        relation: member
+        object: session:s1
+    checks:
+      - user: character:alice
+        relation: join
+        object: session:s1
+        expected: true
+      - user: character:bob
+        relation: join
+        object: session:s1
+        expected: false
+  - name: a member may leave
+    tuples:
+      - user: character:alice
+        relation: member
+        object: session:s1
+    checks:
+      - user: character:alice
+        relation: leave
+        object: session:s1
+        expected: true
+  - name: the owner may delete a character and another may not
+    tuples:
+      - user: account:a1
+        relation: owner
+        object: character:alice
+    checks:
+      - user: account:a1
+        relation: delete_character
+        object: character:alice
+        expected: true
+      - user: account:a2
+        relation: delete_character
+        object: character:alice
+        expected: false
+  - name: an account may create a session
+    tuples:
+      - user: account:a1
+        relation: self
+        object: account:a1
+    checks:
+      - user: account:a1
+        relation: create_session
+        object: account:a1
+        expected: true

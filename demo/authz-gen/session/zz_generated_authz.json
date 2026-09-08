@@ -1,0 +1,19 @@
+{
+  "module": "session",
+  "schema": "1.2",
+  "model": "zz_generated_session.fga",
+  "tests": "zz_generated_session.fga.yaml",
+  "types": [
+    "account",
+    "character",
+    "session"
+  ],
+  "references": [],
+  "extends": [],
+  "cases": [
+    "a member may join",
+    "a member may leave",
+    "the owner may delete a character and another may not",
+    "an account may create a session"
+  ]
+}

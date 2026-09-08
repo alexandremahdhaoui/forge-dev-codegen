@@ -120,6 +120,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-authz-gen
+    src: ./cmd/authz-gen
+    engine: forge://forge-dev
+
+  - name: authz-gen
+    src: ./cmd/authz-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-logging-gen
     src: ./cmd/logging-gen
     engine: forge://forge-dev
@@ -220,6 +229,18 @@ build:
     spec:
       command: cargo
       args: ["build", "--manifest-path", "demo/tui-rust/Cargo.toml"]
+
+  - name: gen-demo-authz-session
+    src: ./demo/authz-gen/session
+    engine: forge://forge-dev
+
+  - name: gen-demo-authz-chat
+    src: ./demo/authz-gen/chat
+    engine: forge://forge-dev
+
+  - name: gen-demo-authz-play
+    src: ./demo/authz-gen/play
+    engine: forge://forge-dev
 
   - name: gen-windows-allow
     src: ./cmd/windows-allow

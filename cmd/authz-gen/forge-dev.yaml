@@ -1,0 +1,15 @@
+name: authz-gen
+kind: mcp-server
+version: 0.1.0
+description: Emits the OpenFGA module of one service from its authz.yaml. It writes the module file in the modular DSL, the fga.yaml test file holding every vector, and a manifest a spec repo combines into fga.mod.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+layout:
+  tools:
+    - name: generate
+      description: Answer the OpenFGA module, its tests and its manifest from the normalized forge-dev model.
+      input: GenerateInput
+      output: GenerateOutput

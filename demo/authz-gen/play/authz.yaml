@@ -1,0 +1,118 @@
+module: play
+references:
+  - module: session
+    types:
+      - name: character
+      - name: session
+        relations: [member, host]
+extends:
+  - module: session
+    types:
+      - name: session
+        relations:
+          - name: turn_owner
+            subjects: [character]
+          - name: move
+            expression: turn_owner and member
+          - name: end_turn
+            expression: turn_owner
+types:
+  - name: monster
+    relations:
+      - name: session
+        subjects: [session]
+      - name: alive
+        subjects: ["character:*"]
+        condition: monster_alive
+      - name: attack
+        expression: alive and turn_owner from session and member from session
+conditions:
+  - name: monster_alive
+    parameters:
+      - name: hp
+        type: int
+    expression: hp > 0
+vectors:
+  - name: only the turn owner may attack
+    tuples:
+      - user: session:s1
+        relation: session
+        object: monster:boar
+      - user: character:alice
+        relation: member
+        object: session:s1
+      - user: character:bob
+        relation: member
+        object: session:s1
+      - user: character:alice
+        relation: turn_owner
+        object: session:s1
+      - user: "character:*"
+        relation: alive
+        object: monster:boar
+        condition:
+          name: monster_alive
+    checks:
+      - user: character:alice
+        relation: attack
+        object: monster:boar
+        context:
+          hp: 3
+        expected: true
+      - user: character:bob
+        relation: attack
+        object: monster:boar
+        context:
+          hp: 3
+        expected: false
+  - name: a dead monster refuses attack
+    tuples:
+      - user: session:s1
+        relation: session
+        object: monster:boar
+      - user: character:alice
+        relation: member
+        object: session:s1
+      - user: character:alice
+        relation: turn_owner
+        object: session:s1
+      - user: "character:*"
+        relation: alive
+        object: monster:boar
+        condition:
+          name: monster_alive
+    checks:
+      - user: character:alice
+        relation: attack
+        object: monster:boar
+        context:
+          hp: 0
+        expected: false
+  - name: only the turn owner may move and end the turn
+    tuples:
+      - user: character:alice
+        relation: member
+        object: session:s1
+      - user: character:bob
+        relation: member
+        object: session:s1
+      - user: character:alice
+        relation: turn_owner
+        object: session:s1
+    checks:
+      - user: character:alice
+        relation: move
+        object: session:s1
+        expected: true
+      - user: character:bob
+        relation: move
+        object: session:s1
+        expected: false
+      - user: character:alice
+        relation: end_turn
+        object: session:s1
+        expected: true
+      - user: character:bob
+        relation: end_turn
+        object: session:s1
+        expected: false

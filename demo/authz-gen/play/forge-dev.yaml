@@ -1,0 +1,10 @@
+name: demo-authz-play
+kind: authz
+version: 0.1.0
+description: The play module of the authz demo. It extends the session type with a turn owner and declares a monster whose attack permission holds only while the monster is alive. The living proof that authz-gen emits extensions and conditions.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/authz-gen
+wiring:
+  specPath: ./authz.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main

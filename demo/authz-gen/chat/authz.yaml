@@ -1,0 +1,34 @@
+module: chat
+references:
+  - module: session
+    types:
+      - name: character
+      - name: session
+        relations: [member, host]
+types:
+  - name: channel
+    relations:
+      - name: session
+        subjects: [session]
+      - name: member
+        expression: member from session
+      - name: post
+        expression: member
+vectors:
+  - name: a member may post and a non member may not
+    tuples:
+      - user: session:s1
+        relation: session
+        object: channel:c1
+      - user: character:alice
+        relation: member
+        object: session:s1
+    checks:
+      - user: character:alice
+        relation: post
+        object: channel:c1
+        expected: true
+      - user: character:bob
+        relation: post
+        object: channel:c1
+        expected: false

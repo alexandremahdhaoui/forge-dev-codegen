@@ -1,0 +1,22 @@
+{
+  "module": "chat",
+  "schema": "1.2",
+  "model": "zz_generated_chat.fga",
+  "tests": "zz_generated_chat.fga.yaml",
+  "types": [
+    "channel"
+  ],
+  "references": [
+    {
+      "module": "session",
+      "types": [
+        "character",
+        "session"
+      ]
+    }
+  ],
+  "extends": [],
+  "cases": [
+    "a member may post and a non member may not"
+  ]
+}

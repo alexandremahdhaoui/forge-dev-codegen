@@ -1,0 +1,31 @@
+{
+  "module": "play",
+  "schema": "1.2",
+  "model": "zz_generated_play.fga",
+  "tests": "zz_generated_play.fga.yaml",
+  "types": [
+    "monster"
+  ],
+  "references": [
+    {
+      "module": "session",
+      "types": [
+        "character",
+        "session"
+      ]
+    }
+  ],
+  "extends": [
+    {
+      "module": "session",
+      "types": [
+        "session"
+      ]
+    }
+  ],
+  "cases": [
+    "only the turn owner may attack",
+    "a dead monster refuses attack",
+    "only the turn owner may move and end the turn"
+  ]
+}

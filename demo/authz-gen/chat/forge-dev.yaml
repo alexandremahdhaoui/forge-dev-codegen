@@ -1,0 +1,10 @@
+name: demo-authz-chat
+kind: authz
+version: 0.1.0
+description: The chat module of the authz demo. A channel belongs to a session and only a session member may post. The living proof that authz-gen resolves a type of another module through references.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/authz-gen
+wiring:
+  specPath: ./authz.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main

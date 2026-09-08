@@ -1,0 +1,10 @@
+name: demo-authz-session
+kind: authz
+version: 0.1.0
+description: The session module of the authz demo. Accounts own characters. A session has a host and members. The living proof that authz-gen emits a base module.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/authz-gen
+wiring:
+  specPath: ./authz.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
