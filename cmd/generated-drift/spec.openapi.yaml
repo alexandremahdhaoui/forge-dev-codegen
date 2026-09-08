@@ -1,0 +1,15 @@
+openapi: 3.0.3
+info:
+  title: generated-drift Spec Schema
+  version: 0.1.0
+  description: Configuration schema for the generated-drift test runner
+
+components:
+  schemas:
+    Spec:
+      type: object
+      description: Configuration for generated-drift. Every field is optional. The engine reads the artifactStorePath the repo declares and asks git what the repo tracks or ignores.
+      properties:
+        rootDir:
+          type: string
+          description: The repo directory holding the forge.yaml to build. Defaults to the root forge sends.

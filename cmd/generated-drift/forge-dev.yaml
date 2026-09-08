@@ -1,0 +1,8 @@
+name: generated-drift
+kind: test-runner
+version: 0.1.0
+description: Fails a repo when a build that starts with no artifact store changes a file git tracks or does not ignore.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main

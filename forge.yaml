@@ -210,6 +210,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-generated-drift
+    src: ./cmd/generated-drift
+    engine: forge://forge-dev
+
+  - name: generated-drift
+    src: ./cmd/generated-drift
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-demo-cli-go-cobra
     src: ./cmd/demo-cli-go-cobra
     engine: forge://forge-dev
@@ -279,6 +288,10 @@ test:
     spec:
       command: cargo
       args: ["clippy", "--manifest-path", "demo/tui-rust/Cargo.toml", "--all-targets", "--", "-D", "warnings"]
+
+  - name: generated
+    runner: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/generated-drift
+    spec: {}
 
 factory:
   module: github.com/alexandremahdhaoui/forge-dev-codegen
