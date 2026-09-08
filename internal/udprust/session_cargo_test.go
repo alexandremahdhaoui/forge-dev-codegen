@@ -55,8 +55,10 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
     }
 
     fn on_tick(&self) -> Result<(), HelloDatagramControllerError> {
+        let tick = self.tick_counter.next();
+
         self.hello_datagram_broadcast
-            .send_all(HelloDatagramPush::Counter(Counter { tick: 7 }))
+            .send_all(HelloDatagramPush::Counter(Counter { tick }))
             .map(|_| ())
             .map_err(|source| HelloDatagramControllerError::Broadcast {
                 kind: "Counter".to_string(),
@@ -92,6 +94,7 @@ use songe_hello::udp::port::hello_datagram_peer_table::HelloDatagramPeerTable;
 use songe_hello::udp::port::hello_datagram_session_gate::{
     HelloDatagramSessionGate, HelloDatagramSessionGateError,
 };
+use songe_hello::udp::port::tick_counter::TickCounter;
 use songe_hello::udp::types::admission::Admission;
 use songe_hello::udp::types::hello_datagram_messages::{Counter, Echo, Hello, Welcome};
 use songe_hello::udp::types::hello_datagram_push::HelloDatagramPush;
@@ -99,6 +102,15 @@ use songe_hello::udp::types::hello_datagram_push::HelloDatagramPush;
 const SECRET: &str = "open";
 const SESSION: &str = "0123456789abcdef";
 const OTHER: &str = "fedcba9876543210";
+
+#[derive(Default)]
+struct SevenTicks;
+
+impl TickCounter for SevenTicks {
+    fn next(&self) -> u64 {
+        7
+    }
+}
 
 struct SecretGate;
 
@@ -135,7 +147,10 @@ fn peer_table(max_sessions: i64) -> Arc<HelloDatagramUdpPeerTable> {
 fn controller(peer_table: Arc<HelloDatagramUdpPeerTable>) -> Arc<dyn HelloDatagramController + Send + Sync> {
     let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table);
 
-    Arc::new(HelloDatagramControllerImpl::new(Arc::new(broadcast)))
+    Arc::new(HelloDatagramControllerImpl::new(
+        Arc::new(broadcast),
+        Arc::new(SevenTicks),
+    ))
 }
 
 async fn stand_up(max_sessions: i64) -> Stack {
@@ -362,7 +377,7 @@ async fn the_tick_driver_pushes_the_counter_to_every_admitted_session() {
 }
 
 #[tokio::test]
-async fn the_tick_driver_refuses_to_serve_while_no_udp_driver_attached_a_socket() {
+async fn the_tick_driver_waits_ten_intervals_for_a_socket_then_refuses_to_serve() {
     let peer_table = peer_table(4);
 
     let mut tick = HelloDatagramTickDriver::new(
@@ -373,13 +388,70 @@ async fn the_tick_driver_refuses_to_serve_while_no_udp_driver_attached_a_socket(
 
     tick.bind().await.expect("a bound interval");
 
+    let started = std::time::Instant::now();
+
     let error = tokio::time::timeout(Duration::from_secs(2), tick.serve())
         .await
         .expect("serve ends in time")
         .expect_err("a refusal");
 
-    assert!(matches!(error, HelloDatagramTickDriverError::NotAttached));
+    assert!(started.elapsed() >= Duration::from_millis(100));
+    assert!(matches!(error, HelloDatagramTickDriverError::NotAttached { waited: 10 }));
     assert!(error.to_string().contains("driver_udp"));
+}
+
+#[tokio::test]
+async fn the_tick_driver_serves_when_the_udp_driver_attaches_the_socket_after_it_started() {
+    let peer_table = peer_table(4);
+
+    let mut tick = HelloDatagramTickDriver::new(
+        HelloDatagramTickDriverConfig { interval_ms: 10 },
+        controller(peer_table.clone()),
+        peer_table.clone(),
+    );
+
+    tick.bind().await.expect("a bound interval");
+
+    let serving = tokio::spawn(async move { tick.serve().await });
+
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    peer_table
+        .attach(Box::new(|datagram, _peer| Ok(datagram.len())))
+        .expect("an attached sender");
+
+    let ended = tokio::time::timeout(Duration::from_millis(300), serving).await;
+
+    assert!(ended.is_err(), "serve ended instead of ticking: {ended:?}");
+}
+
+#[tokio::test]
+async fn a_failing_on_tick_is_logged_and_the_tick_driver_keeps_serving() {
+    let peer_table = peer_table(4);
+
+    peer_table
+        .attach(Box::new(|_datagram, _peer| {
+            Err(std::io::Error::other("the socket is gone"))
+        }))
+        .expect("an attached sender");
+
+    let session = codec::session_id_from(SESSION);
+    let peer: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
+    assert!(peer_table.admit_peer(&session, peer).expect("an admission"));
+
+    let mut tick = HelloDatagramTickDriver::new(
+        HelloDatagramTickDriverConfig { interval_ms: 10 },
+        controller(peer_table.clone()),
+        peer_table,
+    );
+
+    tick.bind().await.expect("a bound interval");
+
+    let serving = tokio::spawn(async move { tick.serve().await });
+
+    let ended = tokio::time::timeout(Duration::from_millis(200), serving).await;
+
+    assert!(ended.is_err(), "serve ended on a failing tick: {ended:?}");
 }
 
 #[tokio::test]
@@ -445,7 +517,10 @@ func standUpTheSessionCell(t *testing.T) (string, string) {
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := udprust.Generate([]byte(sessionProto), sessionOptions())
+	opts := sessionOptions()
+	opts.Ports = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+
+	files, err := udprust.Generate([]byte(sessionProto), opts)
 	if err != nil {
 		t.Fatalf("generating the cell: %v", err)
 	}

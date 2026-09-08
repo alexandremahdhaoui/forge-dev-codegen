@@ -32,6 +32,10 @@ layout:
   cell: udp
   hello: Hello
   push: [Counter]
+  ports:
+    - name: TickCounter
+      methods:
+        - fn next(&self) -> u64
 ```
 
 The path is cell relative, so it climbs to the repo root and reads
@@ -48,6 +52,18 @@ the rpcs the server sends to a client. A name in either list that is
 not an rpc of the proto ends the generation with an error naming it. A
 push with no hello is refused, because a push reaches the peers a hello
 admitted.
+
+`layout.ports` lists the ports the controller holds beyond the ones the
+transport gives it, the way a store port serves a rest controller. An
+entry names a Pascal case trait and may list its method signatures in
+Rust syntax. With methods the engine emits
+`port/zz_generated_<snake>.rs` holding the trait under mockall automock.
+Without methods the user writes `port/<snake>.rs` and the port layer
+mounts it. Either way the controller struct gains one boxed field after
+the broadcast port, `new` takes it, the manifest declares the port and
+lists it under `requires`, and wiring.yaml names its adapter. State a
+controller keeps across calls lives behind such a port, never in a
+static.
 
 Every emitted path is relative to the cell directory. The engine never
 writes above it.
@@ -137,13 +153,13 @@ socket refuses and answers how many it reached.
 
 The tick driver takes `interval_ms`, refuses a value below 1 at bind,
 prints `TICKING <ms>` on announce, and calls `on_tick` on every tick.
-The controller pushes state from there and keeps its own count. Before
-each tick the driver checks the peer table holds a socket. When it does
-not, `serve` ends with an error naming `driver_udp`, so a tick driver
-enabled beside a disabled udp driver stops instead of failing forever.
-The check sits in `serve` and not in `bind` because main binds the tick
-driver before the udp driver. An `on_tick` error also ends `serve`, and
-main walks the chain.
+The controller pushes state from there and keeps any count behind a
+port from `layout.ports`. Before its loop `serve` waits up to ten
+intervals for the peer table to hold a socket, because main spawns the
+tick driver before it binds the udp driver. When none arrives it ends
+with an error naming `driver_udp`, so a tick driver enabled beside a
+disabled udp driver stops instead of failing forever. An `on_tick`
+error is logged with its chain and the next tick runs.
 
 ## The wire layout
 

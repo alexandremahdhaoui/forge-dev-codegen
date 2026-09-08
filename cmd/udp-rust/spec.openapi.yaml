@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cell names the module directory and defaults to udp. hello names the rpc a session opens with. push lists the rpcs the server sends to a client.
+          description: The kind's layout. cell names the module directory and defaults to udp. hello names the rpc a session opens with. push lists the rpcs the server sends to a client. ports lists the port traits the controller holds, each a name with optional Rust method signatures.
         runtime:
           type: object
           additionalProperties: true

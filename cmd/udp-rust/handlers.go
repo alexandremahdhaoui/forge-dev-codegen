@@ -37,11 +37,17 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
+			ports, err := layoutPorts(input.Layout)
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := udprust.Generate([]byte(input.ProtoSpec), udprust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
 				Hello:   layoutString(input.Layout, "hello"),
 				Push:    push,
+				Ports:   ports,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -61,6 +67,47 @@ func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
+}
+
+func layoutPorts(layout map[string]interface{}) ([]udprust.PortSpec, error) {
+	raw, ok := layout["ports"]
+	if !ok {
+		return nil, nil
+	}
+
+	entries, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading layout.ports: it is a list of port names or of name and methods entries, not %v", raw)
+	}
+
+	specs := make([]udprust.PortSpec, 0, len(entries))
+
+	for i, entry := range entries {
+		if name, ok := entry.(string); ok && name != "" {
+			specs = append(specs, udprust.PortSpec{Name: name})
+
+			continue
+		}
+
+		fields, ok := entry.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("reading layout.ports entry %d: it is a port name or a name and methods entry, not %v", i, entry)
+		}
+
+		name, _ := fields["name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("reading layout.ports entry %d: it names no port", i)
+		}
+
+		methods, err := layoutStrings(fields, "methods")
+		if err != nil {
+			return nil, fmt.Errorf("reading layout.ports entry %d: %w", i, err)
+		}
+
+		specs = append(specs, udprust.PortSpec{Name: name, Methods: methods})
+	}
+
+	return specs, nil
 }
 
 func layoutStrings(layout map[string]interface{}, key string) ([]string, error) {

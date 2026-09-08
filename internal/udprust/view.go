@@ -16,6 +16,7 @@ package udprust
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ import (
 )
 
 const NothingMessage = "Nothing"
+
+var pascalIdent = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 const (
 	fnvOffsetBasis uint32 = 2166136261
@@ -86,8 +89,16 @@ type rpcView struct {
 	Push       bool
 }
 
+type portView struct {
+	Name      string
+	Snake     string
+	Methods   []string
+	Generated bool
+}
+
 type serviceView struct {
 	Header           string
+	Ports            []portView
 	Package          string
 	Cell             string
 	CratePath        string
@@ -224,6 +235,43 @@ func checkSessionNames(spec *grpcrust.Spec, opts Options) error {
 	return nil
 }
 
+func buildPortViews(opts Options) ([]portView, error) {
+	views := make([]portView, 0, len(opts.Ports))
+	seen := map[string]bool{}
+
+	for _, spec := range opts.Ports {
+		if !pascalIdent.MatchString(spec.Name) {
+			return nil, fmt.Errorf("naming the controller ports: %q is not a Pascal case Rust ident, layout.ports names port traits", spec.Name)
+		}
+
+		if seen[spec.Name] {
+			return nil, fmt.Errorf("naming the controller ports: %q is listed twice", spec.Name)
+		}
+
+		seen[spec.Name] = true
+
+		methods := make([]string, 0, len(spec.Methods))
+
+		for _, method := range spec.Methods {
+			trimmed := strings.TrimSuffix(strings.TrimSpace(method), ";")
+			if !strings.HasPrefix(trimmed, "fn ") || !strings.Contains(trimmed, "(&self") {
+				return nil, fmt.Errorf("naming the controller ports: method %q of %q is not a Rust signature like fn next(&self) -> u64", method, spec.Name)
+			}
+
+			methods = append(methods, trimmed+";")
+		}
+
+		views = append(views, portView{
+			Name:      spec.Name,
+			Snake:     rustname.Snake(spec.Name),
+			Methods:   methods,
+			Generated: len(methods) > 0,
+		})
+	}
+
+	return views, nil
+}
+
 func isPush(name string, opts Options) bool {
 	for _, push := range opts.Push {
 		if push == name {
@@ -252,6 +300,11 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		return serviceView{}, fmt.Errorf("building service %q: %w", svc.Name, err)
 	}
 
+	ports, err := buildPortViews(opts)
+	if err != nil {
+		return serviceView{}, err
+	}
+
 	driverName := opts.Cell
 	clientName := opts.Cell + "_client"
 	broadcastName := opts.Cell + "_broadcast"
@@ -271,6 +324,7 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 
 	sv := serviceView{
 		Header:           header,
+		Ports:            ports,
 		Package:          spec.Package,
 		Cell:             opts.Cell,
 		CratePath:        "crate::" + opts.Cell + "::",

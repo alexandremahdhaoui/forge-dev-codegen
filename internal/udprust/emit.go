@@ -63,6 +63,7 @@ type modEntry struct {
 type layerMod struct {
 	Header   string
 	Allow    bool
+	Public   bool
 	Entries  []modEntry
 	UserMods []string
 }
@@ -187,6 +188,22 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			)
 		}
 
+		for _, port := range v.Ports {
+			port := port
+
+			if !port.Generated {
+				userMods["port"] = append(userMods["port"], port.Snake)
+
+				continue
+			}
+
+			steps = append(steps, func() error {
+				return add(path.Join("port", "zz_generated_"+port.Snake+".rs"), "controller_port", map[string]any{"Header": header, "Port": port})
+			})
+
+			mount("port", modEntry{Module: "zz_generated_" + port.Snake, Alias: port.Snake})
+		}
+
 		for _, step := range steps {
 			if err := step(); err != nil {
 				return nil, err
@@ -235,6 +252,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		mod := layerMod{
 			Header:   header,
 			Allow:    allowingLayers[layer],
+			Public:   layer == "port",
 			Entries:  entries[layer],
 			UserMods: userMods[layer],
 		}
@@ -272,6 +290,17 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 	if v.Session {
 		controllerPorts = []string{v.BroadcastTrait}
 		driverPorts = []string{v.GateTrait, v.PeerTableTrait}
+	}
+
+	for _, port := range v.Ports {
+		controllerPorts = append(controllerPorts, port.Name)
+
+		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+			Trait:  port.Name,
+			Module: v.ModulePrefix + "port::" + port.Snake,
+		})
+
+		m.Requires.Ports = append(m.Requires.Ports, port.Name)
 	}
 
 	m.Provides.Controllers = append(m.Provides.Controllers, cellmanifest.Controller{
@@ -402,7 +431,7 @@ pub mod {{ .Module }};
 {{- end }}
 {{- range .UserMods }}
 
-mod {{ . }};
+{{ if $.Public }}pub {{ end }}mod {{ . }};
 {{- end }}
 {{- range .Entries }}{{ if .Alias }}
 
@@ -467,6 +496,17 @@ pub struct {{ .Name }} {
 {{- end }}
 }
 {{ end -}}
+{{ end -}}
+
+{{- define "controller_port" -}}
+{{ .Header }}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .Port.Name }}: Send + Sync {
+{{- range .Port.Methods }}
+    {{ . }}
+{{- end }}
+}
 {{ end -}}
 
 {{- define "gate" -}}
@@ -617,10 +657,14 @@ pub trait {{ .ClientTrait }}: Send + Sync {
 
 {{- define "controller" -}}
 {{ .Header }}
-{{ if .Session }}
+{{ if or .Session .Ports }}
 use std::sync::Arc;
-
+{{ end }}
+{{- if .Session }}
 use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
+{{- end }}
+{{- range .Ports }}
+use {{ $.CratePath }}port::{{ .Snake }}::{{ .Name }};
 {{- end }}
 use {{ .CratePath }}types::context::Context;
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
@@ -654,14 +698,33 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
     fn on_tick(&self) -> Result<(), {{ .ControllerError }}>;
 {{- end }}
 }
-{{ if .Session }}
+{{ if or .Session .Ports }}
 pub struct {{ .ControllerTrait }}Impl {
+{{- if .Session }}
     pub(crate) {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+{{- end }}
+{{- range .Ports }}
+    pub(crate) {{ .Snake }}: Arc<dyn {{ .Name }} + Send + Sync>,
+{{- end }}
 }
 
 impl {{ .ControllerTrait }}Impl {
-    pub fn new({{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>) -> Self {
-        Self { {{ .BroadcastSnake }} }
+    pub fn new(
+{{- if .Session }}
+        {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+{{- end }}
+{{- range .Ports }}
+        {{ .Snake }}: Arc<dyn {{ .Name }} + Send + Sync>,
+{{- end }}
+    ) -> Self {
+        Self {
+{{- if .Session }}
+            {{ .BroadcastSnake }},
+{{- end }}
+{{- range .Ports }}
+            {{ .Snake }},
+{{- end }}
+        }
     }
 }
 {{- else }}
@@ -1370,7 +1433,7 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 use std::sync::Arc;
 use std::time::Duration;
 
-use {{ .CratePath }}controller::{{ "{" }}{{ .ControllerError }}, {{ .ControllerTrait }}{{ "}" }};
+use {{ .CratePath }}controller::{{ .ControllerTrait }};
 use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ .PeerTableTrait }};
 
 pub struct {{ .TickConfig }} {
@@ -1391,14 +1454,11 @@ pub enum {{ .TickError }} {
     IntervalBelowOne { interval_ms: i64 },
     #[error("using the {{ .ServiceSnake }} tick driver: it is not bound yet")]
     NotBound,
-    #[error("serving the {{ .ServiceSnake }} tick driver: the peer table holds no socket, enable driver_udp so the udp driver attaches one")]
-    NotAttached,
-    #[error("running on_tick of the {{ .ServiceSnake }} tick driver")]
-    OnTick {
-        #[source]
-        source: {{ .ControllerError }},
-    },
+    #[error("serving the {{ .ServiceSnake }} tick driver: the peer table holds no socket after {waited} intervals, enable driver_udp so the udp driver attaches one")]
+    NotAttached { waited: u32 },
 }
+
+const ATTACH_WAIT_INTERVALS: u32 = 10;
 
 pub struct {{ .TickStruct }} {
     config: {{ .TickConfig }},
@@ -1446,8 +1506,28 @@ impl {{ .TickStruct }} {
         Ok(())
     }
 
+    async fn wait_for_the_socket(&self, interval: Duration) -> Result<(), {{ .TickError }}> {
+        for _ in 0..ATTACH_WAIT_INTERVALS {
+            if self.peer_table.attached() {
+                return Ok(());
+            }
+
+            tokio::time::sleep(interval).await;
+        }
+
+        if self.peer_table.attached() {
+            return Ok(());
+        }
+
+        Err({{ .TickError }}::NotAttached {
+            waited: ATTACH_WAIT_INTERVALS,
+        })
+    }
+
     pub async fn serve(self) -> Result<(), {{ .TickError }}> {
         let interval = self.interval.ok_or({{ .TickError }}::NotBound)?;
+
+        self.wait_for_the_socket(interval).await?;
 
         let mut ticker = tokio::time::interval(interval);
         ticker.tick().await;
@@ -1455,15 +1535,26 @@ impl {{ .TickStruct }} {
         loop {
             ticker.tick().await;
 
-            if !self.peer_table.attached() {
-                return Err({{ .TickError }}::NotAttached);
+            if let Err(error) = self.controller.on_tick() {
+                eprintln!(
+                    "skipping a tick of the {{ .ServiceSnake }} tick driver: {}",
+                    error_chain(&error)
+                );
             }
-
-            self.controller
-                .on_tick()
-                .map_err(|source| {{ .TickError }}::OnTick { source })?;
         }
     }
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        parts.push(current.to_string());
+        source = current.source();
+    }
+
+    parts.join(": ")
 }
 {{ end -}}
 

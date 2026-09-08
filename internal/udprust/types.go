@@ -19,6 +19,12 @@ type Options struct {
 	Cell    string
 	Hello   string
 	Push    []string
+	Ports   []PortSpec
+}
+
+type PortSpec struct {
+	Name    string
+	Methods []string
 }
 
 type File struct {

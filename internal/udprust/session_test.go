@@ -246,7 +246,7 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 	for _, want := range []string{
 		"fn on_tick(&self) -> Result<(), HelloDatagramControllerError>;",
 		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,",
-		"pub fn new(hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>) -> Self {",
+		"pub fn new(\n        hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n    ) -> Self {",
 		"Broadcast {\n        kind: String,\n        #[source]\n        source: HelloDatagramBroadcastError,\n    },",
 	} {
 		if !strings.Contains(controller, want) {
@@ -358,19 +358,125 @@ func TestTheTickDriverTakesThePeerTableRefusesToServeUnattachedAndCallsOnTickWit
 		"pub async fn bind(&mut self) -> Result<(), HelloDatagramTickDriverError> {",
 		"println!(\"TICKING {}\", self.interval_ms()?);",
 		"pub async fn serve(self) -> Result<(), HelloDatagramTickDriverError> {",
-		"if !self.peer_table.attached() {\n                return Err(HelloDatagramTickDriverError::NotAttached);",
+		"const ATTACH_WAIT_INTERVALS: u32 = 10;",
+		"self.wait_for_the_socket(interval).await?;",
+		"for _ in 0..ATTACH_WAIT_INTERVALS {\n            if self.peer_table.attached() {\n                return Ok(());",
+		"Err(HelloDatagramTickDriverError::NotAttached {\n            waited: ATTACH_WAIT_INTERVALS,",
 		"enable driver_udp so the udp driver attaches one",
-		".on_tick()\n                .map_err(|source| HelloDatagramTickDriverError::OnTick { source })?;",
+		"if let Err(error) = self.controller.on_tick() {\n                eprintln!(\n                    \"skipping a tick of the hello_datagram tick driver: {}\",\n                    error_chain(&error)",
 	} {
 		if !strings.Contains(tick, want) {
 			t.Errorf("the tick driver lacks %q\n%s", want, tick)
 		}
 	}
 
-	for _, unwanted := range []string{"fn error_chain(", "on_tick(tick)", "wrapping_add"} {
+	for _, unwanted := range []string{"on_tick(tick)", "wrapping_add", "OnTick {"} {
 		if strings.Contains(tick, unwanted) {
 			t.Errorf("the tick driver still carries %q\n%s", unwanted, tick)
 		}
+	}
+}
+
+func TestANamedControllerPortWithMethodsIsEmittedAsAStubHeldByTheControllerAndDemandedFromTheWiring(t *testing.T) {
+	opts := sessionOptions()
+	opts.Ports = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+
+	files, err := udprust.Generate([]byte(sessionProto), opts)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	stub := byPath["port/zz_generated_tick_counter.rs"]
+	if !strings.Contains(stub, "#[cfg_attr(test, mockall::automock)]\npub trait TickCounter: Send + Sync {\n    fn next(&self) -> u64;\n}") {
+		t.Errorf("the port stub is not the trait the layout named\n%s", stub)
+	}
+
+	if !strings.Contains(byPath["port/mod.rs"], "pub use zz_generated_tick_counter as tick_counter;") {
+		t.Errorf("the port layer never aliased the stub\n%s", byPath["port/mod.rs"])
+	}
+
+	controller := byPath["controller/zz_generated_hello_datagram_controller.rs"]
+
+	for _, want := range []string{
+		"use crate::udp::port::tick_counter::TickCounter;",
+		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n    pub(crate) tick_counter: Arc<dyn TickCounter + Send + Sync>,",
+		"hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n        tick_counter: Arc<dyn TickCounter + Send + Sync>,\n    ) -> Self {",
+	} {
+		if !strings.Contains(controller, want) {
+			t.Errorf("the controller lacks %q\n%s", want, controller)
+		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	if !reflect.DeepEqual(m.Provides.Controllers[0].Ports, []string{"HelloDatagramBroadcast", "TickCounter"}) {
+		t.Errorf("controller ports = %q", m.Provides.Controllers[0].Ports)
+	}
+
+	if !reflect.DeepEqual(m.Requires.Ports, []string{"TickCounter"}) {
+		t.Errorf("requires = %q", m.Requires.Ports)
+	}
+
+	declared := false
+	for _, port := range m.Provides.Ports {
+		declared = declared || (port.Trait == "TickCounter" && port.Module == "udp::port::tick_counter")
+	}
+
+	if !declared {
+		t.Errorf("the manifest never declared the port: %+v", m.Provides.Ports)
+	}
+}
+
+func TestANamedControllerPortWithoutMethodsMountsTheUsersOwnPortFile(t *testing.T) {
+	opts := udprust.Options{Service: "songe-hello", Ports: []udprust.PortSpec{{Name: "Clock"}}}
+
+	files, err := udprust.Generate([]byte(sessionProto), opts)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	if _, emitted := byPath["port/zz_generated_clock.rs"]; emitted {
+		t.Errorf("a port with no methods got a stub")
+	}
+
+	if !strings.Contains(byPath["port/mod.rs"], "\npub mod clock;") {
+		t.Errorf("the port layer never mounted the user's file\n%s", byPath["port/mod.rs"])
+	}
+
+	controller := byPath["controller/zz_generated_hello_datagram_controller.rs"]
+	if !strings.Contains(controller, "pub(crate) clock: Arc<dyn Clock + Send + Sync>,") || strings.Contains(controller, "impl Default") {
+		t.Errorf("the controller lacks the port or still derives Default\n%s", controller)
+	}
+}
+
+func TestAControllerPortThatIsNotAPascalIdentOrAMethodThatIsNotASignatureIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec udprust.PortSpec
+		want string
+	}{
+		{name: "a snake name", spec: udprust.PortSpec{Name: "tick_counter"}, want: `"tick_counter" is not a Pascal case Rust ident`},
+		{name: "a method with no self", spec: udprust.PortSpec{Name: "TickCounter", Methods: []string{"fn next() -> u64"}}, want: `is not a Rust signature like fn next(&self) -> u64`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := udprust.Generate([]byte(sessionProto), udprust.Options{Service: "songe-hello", Ports: []udprust.PortSpec{tc.spec}})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("generating reported %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
