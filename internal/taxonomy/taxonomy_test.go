@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 func TestEveryMemberNamesAWireTypeTheClientEnumDeclares(t *testing.T) {
@@ -46,6 +47,17 @@ func TestEveryMemberCarriesARestStatusAGrpcMethodAndAGrpcCode(t *testing.T) {
 
 		if len(m.Fields) == 0 {
 			t.Errorf("member %s declares no field, a vector cannot spell it", m.Variant)
+		}
+	}
+}
+
+func TestTheGrpcMethodAndTheGrpcCodeNameOneStatus(t *testing.T) {
+	for _, m := range taxonomy.All("greeting") {
+		if want := rustname.Pascal(m.GrpcMethod); want != m.GrpcCode {
+			t.Errorf(
+				"member %s builds tonic::Status::%s and a vector asserts tonic::Code::%s, want tonic::Code::%s, the driver and the vector would disagree",
+				m.Variant, m.GrpcMethod, m.GrpcCode, want,
+			)
 		}
 	}
 }
