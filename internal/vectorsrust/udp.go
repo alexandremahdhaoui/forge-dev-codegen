@@ -49,11 +49,14 @@ const (
 )
 
 const (
-	kindReply     = "reply"
-	kindDropped   = "dropped"
-	kindReconnect = "reconnect"
-	kindPush      = "push"
+	kindReply       = "reply"
+	kindDropped     = "dropped"
+	kindReconnect   = "reconnect"
+	kindPush        = "push"
+	kindRequestPush = "request_push"
 )
+
+const drawIdent = "drawn"
 
 type datagramRpc struct {
 	Name    string
@@ -112,37 +115,42 @@ type datagramServiceView struct {
 }
 
 type datagramTestView struct {
-	Name            string
-	Kind            string
-	Session         bool
-	ServicePascal   string
-	ServiceSnake    string
-	ControllerVar   string
-	ControllerError string
-	ExpectMethod    string
-	RpcPascal       string
-	RequestLiteral  string
-	ReplyLiteral    string
-	ExpectedLiteral string
-	SessionLiteral  string
-	SessionLiterals []string
-	HelloLiteral    string
-	HelloIdent      string
-	HelloReply      string
-	GateAdmits      bool
-	Registered      bool
-	IsHello         bool
-	PushVariant     string
-	PushLiteral     string
-	PushEnum        string
-	ClientStruct    string
-	ClientConfig    string
-	DriverStruct    string
-	DriverConfig    string
-	TimeoutMs       int
-	TickIntervalMs  int
-	ClientMethod    string
-	Cell            string
+	Name                string
+	Kind                string
+	Session             bool
+	ServicePascal       string
+	ServiceSnake        string
+	ControllerVar       string
+	ControllerError     string
+	ExpectMethod        string
+	RpcPascal           string
+	RequestLiteral      string
+	ReplyLiteral        string
+	ExpectedLiteral     string
+	SessionLiteral      string
+	SessionLiterals     []string
+	HelloLiteral        string
+	HelloIdent          string
+	HelloReply          string
+	GateAdmits          bool
+	Registered          bool
+	IsHello             bool
+	Silent              bool
+	Seeded              bool
+	SeedLiteral         string
+	AskingIndex         int
+	PushVariant         string
+	PushLiteral         string
+	ExpectedPushLiteral string
+	PushEnum            string
+	ClientStruct        string
+	ClientConfig        string
+	DriverStruct        string
+	DriverConfig        string
+	TimeoutMs           int
+	TickIntervalMs      int
+	ClientMethod        string
+	Cell                string
 }
 
 func readDatagramService(proto []byte, cell, hello string, push []string) (*datagramService, error) {
@@ -375,7 +383,7 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 
 	tv.SessionLiteral = session
 
-	request, err := messageLiteral(rpc.Request, c.Input)
+	request, err := messageLiteral(rpc.Request, c.Input, "")
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading input: %w", c.Case, err)
 	}
@@ -393,12 +401,12 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 		return tv, nil
 	}
 
-	reply, err := messageLiteral(rpc.Reply, c.ControllerReply)
+	reply, err := messageLiteral(rpc.Reply, c.ControllerReply, "")
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading controllerReply: %w", c.Case, err)
 	}
 
-	expected, err := messageLiteral(rpc.Reply, c.ExpectedBody)
+	expected, err := messageLiteral(rpc.Reply, c.ExpectedBody, "")
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
 	}
@@ -446,7 +454,7 @@ func readSessionFlags(c VectorCase, svc *datagramService, tv *datagramTestView) 
 		return nil
 	}
 
-	hello, err := messageLiteral(svc.Hello.Request, c.Hello)
+	hello, err := messageLiteral(svc.Hello.Request, c.Hello, "")
 	if err != nil {
 		return fmt.Errorf("reading vector %q: reading hello: %w", c.Case, err)
 	}
@@ -458,42 +466,170 @@ func readSessionFlags(c VectorCase, svc *datagramService, tv *datagramTestView) 
 	return nil
 }
 
-func buildPushTest(c VectorCase, svc *datagramService, rpc datagramRpc, tv datagramTestView) (datagramTestView, error) {
-	if !rpc.Push {
-		return datagramTestView{}, fmt.Errorf("reading vector %q: expectPush names %s and the cell does not list it under layout.push", c.Case, rpc.Pascal)
+func pushedRpc(c VectorCase, svc *datagramService, operated datagramRpc) (datagramRpc, error) {
+	if operated.Push {
+		if c.ExpectPush.Rpc != "" && rustname.Pascal(c.ExpectPush.Rpc) != operated.Pascal {
+			return datagramRpc{}, fmt.Errorf("reading vector %q: expectPush names rpc %q and the operation names %s", c.Case, c.ExpectPush.Rpc, operated.Pascal)
+		}
+
+		return operated, nil
 	}
 
-	if c.ExpectPush.Rpc != "" && rustname.Pascal(c.ExpectPush.Rpc) != rpc.Pascal {
-		return datagramTestView{}, fmt.Errorf("reading vector %q: expectPush names rpc %q and the operation names %s", c.Case, c.ExpectPush.Rpc, rpc.Pascal)
+	if c.ExpectPush.Rpc == "" {
+		return datagramRpc{}, fmt.Errorf("reading vector %q: operation %q names the inbound rpc, so expectPush needs an rpc, the server to client kind the controller answers with", c.Case, c.Operation)
 	}
 
-	if len(c.Input) > 0 && string(c.Input) != "null" {
-		return datagramTestView{}, fmt.Errorf("reading vector %q: a push case carries no input, the server sends it on a tick", c.Case)
+	for _, name := range sortedKeys(svc.Rpcs) {
+		rpc := svc.Rpcs[name]
+		if rpc.Push && rpc.Pascal == rustname.Pascal(c.ExpectPush.Rpc) {
+			return rpc, nil
+		}
 	}
 
+	return datagramRpc{}, fmt.Errorf("reading vector %q: expectPush names rpc %q and the cell does not list it under layout.push", c.Case, c.ExpectPush.Rpc)
+}
+
+func readPushSessions(c VectorCase, tv *datagramTestView) error {
 	if len(c.ExpectPush.SessionIds) == 0 {
-		return datagramTestView{}, fmt.Errorf("reading vector %q: expectPush needs sessionIds, the registered peers the push must reach", c.Case)
+		return fmt.Errorf("reading vector %q: expectPush needs sessionIds, the registered peers the push must reach", c.Case)
 	}
 
 	for _, id := range c.ExpectPush.SessionIds {
 		if len(id) != sessionIDLength {
-			return datagramTestView{}, fmt.Errorf("reading vector %q: expectPush sessionId %q must be %d bytes, got %d", c.Case, id, sessionIDLength, len(id))
+			return fmt.Errorf("reading vector %q: expectPush sessionId %q must be %d bytes, got %d", c.Case, id, sessionIDLength, len(id))
 		}
 
 		tv.SessionLiterals = append(tv.SessionLiterals, strconv.Quote(id))
 	}
 
-	payload, err := messageLiteral(rpc.Request, c.ExpectPush.Payload)
-	if err != nil {
-		return datagramTestView{}, fmt.Errorf("reading vector %q: reading expectPush.payload: %w", c.Case, err)
+	return nil
+}
+
+func readPushPayload(c VectorCase, pushed datagramRpc, tv *datagramTestView) error {
+	seedExpression := ""
+	seedLiteral := ""
+
+	if c.Seed != nil {
+		seedExpression = drawIdent
+		seedLiteral = strconv.FormatInt(*c.Seed, 10)
 	}
 
-	tv.Kind = kindPush
-	tv.PushVariant = rpc.Pascal
-	tv.PushLiteral = payload
+	sent, drawn, err := seededMessageLiteral(pushed.Request, c.ExpectPush.Payload, "", seedExpression)
+	if err != nil {
+		return fmt.Errorf("reading vector %q: reading expectPush.payload: %w", c.Case, err)
+	}
+
+	expected, _, err := seededMessageLiteral(pushed.Request, c.ExpectPush.Payload, "", seedLiteral)
+	if err != nil {
+		return fmt.Errorf("reading vector %q: reading expectPush.payload: %w", c.Case, err)
+	}
+
+	if c.Seed != nil && !drawn {
+		return fmt.Errorf("reading vector %q: it carries a seed and no field of expectPush.payload reads %s, so the draw would reach nothing", c.Case, seedPlaceholder)
+	}
+
+	tv.PushVariant = pushed.Pascal
+	tv.PushLiteral = sent
+	tv.ExpectedPushLiteral = expected
+	tv.Seeded = c.Seed != nil
+	tv.SeedLiteral = seedLiteral
+
+	return nil
+}
+
+func buildPushTest(c VectorCase, svc *datagramService, rpc datagramRpc, tv datagramTestView) (datagramTestView, error) {
+	pushed, err := pushedRpc(c, svc, rpc)
+	if err != nil {
+		return datagramTestView{}, err
+	}
+
+	if err := readPushSessions(c, &tv); err != nil {
+		return datagramTestView{}, err
+	}
+
+	if err := readPushPayload(c, pushed, &tv); err != nil {
+		return datagramTestView{}, err
+	}
+
 	tv.TimeoutMs = pushTimeoutMs
 
+	if rpc.Push {
+		if len(c.Input) > 0 && string(c.Input) != "null" {
+			return datagramTestView{}, fmt.Errorf("reading vector %q: a push case on a push rpc carries no input, the server sends it on a tick", c.Case)
+		}
+
+		tv.Kind = kindPush
+
+		return tv, nil
+	}
+
+	return buildRequestPushTest(c, rpc, tv)
+}
+
+func buildRequestPushTest(c VectorCase, rpc datagramRpc, tv datagramTestView) (datagramTestView, error) {
+	if rpc.Hello {
+		return datagramTestView{}, fmt.Errorf("reading vector %q: the hello rpc opens the session, name an rpc a registered peer sends and let the push answer it", c.Case)
+	}
+
+	session, err := sessionLiteral(c)
+	if err != nil {
+		return datagramTestView{}, err
+	}
+
+	tv.SessionLiteral = session
+	tv.Kind = kindRequestPush
+	tv.Silent = rpc.Silent
+	tv.AskingIndex = indexOf(tv.SessionLiterals, session)
+
+	request, err := messageLiteral(rpc.Request, c.Input, "")
+	if err != nil {
+		return datagramTestView{}, fmt.Errorf("reading vector %q: reading input: %w", c.Case, err)
+	}
+
+	tv.RequestLiteral = request
+
+	if rpc.Silent {
+		if len(c.ControllerReply) > 0 || len(c.ExpectedBody) > 0 {
+			return datagramTestView{}, fmt.Errorf("reading vector %q: %s answers Nothing, so the push is the whole answer, drop controllerReply and expectedBody", c.Case, rpc.Pascal)
+		}
+
+		tv.ReplyLiteral = rustname.Pascal(rpc.Reply.Name) + " {}"
+
+		return tv, nil
+	}
+
+	if len(c.ControllerReply) == 0 {
+		return datagramTestView{}, fmt.Errorf("reading vector %q: %s answers %s, so the case needs controllerReply, what the mocked controller answers the caller", c.Case, rpc.Pascal, rustname.Pascal(rpc.Reply.Name))
+	}
+
+	reply, err := messageLiteral(rpc.Reply, c.ControllerReply, "")
+	if err != nil {
+		return datagramTestView{}, fmt.Errorf("reading vector %q: reading controllerReply: %w", c.Case, err)
+	}
+
+	expected := reply
+
+	if len(c.ExpectedBody) > 0 {
+		expected, err = messageLiteral(rpc.Reply, c.ExpectedBody, "")
+		if err != nil {
+			return datagramTestView{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
+		}
+	}
+
+	tv.ReplyLiteral = reply
+	tv.ExpectedLiteral = expected
+
 	return tv, nil
+}
+
+func indexOf(literals []string, wanted string) int {
+	for i, literal := range literals {
+		if literal == wanted {
+			return i
+		}
+	}
+
+	return -1
 }
 
 func sessionLiteral(c VectorCase) (string, error) {
@@ -519,36 +655,75 @@ func sessionLiteral(c VectorCase) (string, error) {
 	return strconv.Quote(value), nil
 }
 
-func messageLiteral(m grpcrust.Message, raw json.RawMessage) (string, error) {
+func messageLiteral(m grpcrust.Message, raw json.RawMessage, typesPrefix string) (string, error) {
+	literal, _, err := seededMessageLiteral(m, raw, typesPrefix, "")
+
+	return literal, err
+}
+
+func seededMessageLiteral(m grpcrust.Message, raw json.RawMessage, typesPrefix, seedExpression string) (string, bool, error) {
 	if string(raw) == "null" {
 		raw = nil
 	}
 
 	fields, err := parseInput(raw)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	parts := make([]string, 0, len(m.Fields))
+	drawn := false
 
 	for _, f := range m.Fields {
 		if f.Kind != grpcrust.FieldScalar {
-			return "", fmt.Errorf("field %q holds a message, a datagram vector reads scalar fields only", f.Name)
+			return "", false, fmt.Errorf("field %q holds a message, a datagram vector reads scalar fields only", f.Name)
+		}
+
+		if isSeedPlaceholder(fields[f.Name]) {
+			if seedExpression == "" {
+				return "", false, fmt.Errorf("field %q reads %s and the case carries no seed", f.Name, seedPlaceholder)
+			}
+
+			drawn = true
+
+			parts = append(parts, rustname.RustIdent(f.Name)+": "+seedExpression)
+
+			continue
 		}
 
 		literal, err := scalarLiteral(f, fields[f.Name])
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 
 		parts = append(parts, rustname.RustIdent(f.Name)+": "+literal)
 	}
 
-	if len(parts) == 0 {
-		return rustname.Pascal(m.Name) + " {}", nil
+	name := typesPrefix + rustname.Pascal(m.Name)
+	if typesPrefix != "" {
+		name = typesPrefix + "::" + rustname.Pascal(m.Name)
 	}
 
-	return rustname.Pascal(m.Name) + " { " + strings.Join(parts, ", ") + " }", nil
+	if len(parts) == 0 {
+		return name + " {}", drawn, nil
+	}
+
+	return name + " { " + strings.Join(parts, ", ") + " }", drawn, nil
+}
+
+const seedPlaceholder = "<seed>"
+
+func isSeedPlaceholder(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+
+	return value == seedPlaceholder
 }
 
 func scalarLiteral(f grpcrust.Field, raw json.RawMessage) (string, error) {

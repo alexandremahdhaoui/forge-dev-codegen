@@ -17,13 +17,13 @@ package vectorsrust
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 )
 
 type VectorsFile struct {
-	Cases    []VectorCase `json:"cases"`
-	UdpCases []VectorCase `json:"-"`
+	Cases     []VectorCase `json:"cases"`
+	UdpCases  []VectorCase `json:"-"`
+	GrpcCases []VectorCase `json:"-"`
 }
 
 type VectorCase struct {
@@ -42,6 +42,7 @@ type VectorCase struct {
 	Reconnect              bool            `json:"reconnect"`
 	ExpectDropped          bool            `json:"expectDropped"`
 	ExpectPush             *ExpectPush     `json:"expectPush"`
+	Seed                   *int64          `json:"seed"`
 }
 
 type ExpectPush struct {
@@ -56,7 +57,34 @@ func (c VectorCase) IsPush() bool {
 
 var rustTestIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) bool) (*VectorsFile, error) {
+type declared struct {
+	operation func(string) bool
+	datagram  func(string) bool
+	grpc      func(string) bool
+	rng       *rngPort
+}
+
+func checkSeed(c VectorCase, rng *rngPort) error {
+	if c.Seed == nil {
+		return nil
+	}
+
+	if *c.Seed < 0 {
+		return fmt.Errorf("reading vector %q: seed %d is below zero, a seed is the number the mocked rng port answers", c.Case, *c.Seed)
+	}
+
+	if rng == nil {
+		return fmt.Errorf("reading vector %q: it carries a seed and the cell names no rng port under layout.rng, name the trait, its module and its one method there", c.Case)
+	}
+
+	if !c.IsPush() {
+		return fmt.Errorf("reading vector %q: seed belongs to a case whose controller pushes, the mocked controller draws from the rng port while it answers", c.Case)
+	}
+
+	return nil
+}
+
+func parseVectors(doc []byte, d declared) (*VectorsFile, error) {
 	var v VectorsFile
 	if err := json.Unmarshal(doc, &v); err != nil {
 		return nil, fmt.Errorf("parsing the vectors document: %w", err)
@@ -69,6 +97,7 @@ func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) b
 	seen := map[string]bool{}
 	kept := make([]VectorCase, 0, len(v.Cases))
 	datagrams := []VectorCase{}
+	calls := []VectorCase{}
 
 	for i, c := range v.Cases {
 		if c.Case == "" {
@@ -89,7 +118,21 @@ func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) b
 			return nil, fmt.Errorf("reading vector %q: operation is required, it names the operationId the vector exercises", c.Case)
 		}
 
-		if declaresDatagram(c.Operation) {
+		if err := checkSeed(c, d.rng); err != nil {
+			return nil, err
+		}
+
+		if d.grpc(c.Operation) {
+			if err := checkCall(c); err != nil {
+				return nil, err
+			}
+
+			calls = append(calls, c)
+
+			continue
+		}
+
+		if d.datagram(c.Operation) {
 			if c.IsPush() || c.ExpectDropped {
 				datagrams = append(datagrams, c)
 
@@ -109,10 +152,8 @@ func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) b
 			continue
 		}
 
-		if !declaresOperation(c.Operation) {
-			log.Printf("vectors-rust: skipping vector %q: operation %q is neither an OpenAPI operation nor a datagram rpc, it belongs to another transport", c.Case, c.Operation)
-
-			continue
+		if !d.operation(c.Operation) {
+			return nil, fmt.Errorf("reading vector %q: operation %q names no operationId of the OpenAPI document, no udp_<rpc> of the datagram service and no grpc_<Rpc> of the grpc service", c.Case, c.Operation)
 		}
 
 		if c.ExpectedStatus == 0 {
@@ -128,6 +169,27 @@ func parseVectors(doc []byte, declaresOperation, declaresDatagram func(string) b
 
 	v.Cases = kept
 	v.UdpCases = datagrams
+	v.GrpcCases = calls
 
 	return &v, nil
+}
+
+func checkCall(c VectorCase) error {
+	if len(c.ControllerReply) == 0 && c.ExpectedErrorSubstring == "" {
+		return fmt.Errorf("reading vector %q: a grpc case needs controllerReply, the reply the mocked controller answers, or expectedErrorSubstring, the text the status carries", c.Case)
+	}
+
+	if len(c.ControllerReply) > 0 && c.ExpectedErrorSubstring != "" {
+		return fmt.Errorf("reading vector %q: a grpc case answers a reply or a status, never both, drop controllerReply or expectedErrorSubstring", c.Case)
+	}
+
+	if c.ExpectedStatus != 0 {
+		return fmt.Errorf("reading vector %q: expectedStatus is an HTTP status and a grpc case carries none, use expectedErrorSubstring for a refusal", c.Case)
+	}
+
+	if len(c.ExpectedBody) > 0 {
+		return fmt.Errorf("reading vector %q: a grpc case reads controllerReply back over the wire, drop expectedBody", c.Case)
+	}
+
+	return nil
 }

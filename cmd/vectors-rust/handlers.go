@@ -44,14 +44,27 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
 			}
 
+			grpcProto, err := readLayoutFile(input, "grpcProto")
+			if err != nil {
+				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
+			}
+
+			rng, err := readRng(input.Layout)
+			if err != nil {
+				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
+			}
+
 			files, err := vectorsrust.Generate([]byte(input.OpenapiSpec), vectors, vectorsrust.Options{
-				Service:  input.Name,
-				CrateDir: layoutString(input.Layout, "crateDir"),
-				Cell:     layoutString(input.Layout, "cell"),
-				RestCell: layoutString(input.Layout, "restCell"),
-				Proto:    []byte(input.ProtoSpec),
-				Hello:    layoutString(input.Layout, "hello"),
-				Push:     push,
+				Service:   input.Name,
+				CrateDir:  layoutString(input.Layout, "crateDir"),
+				Cell:      layoutString(input.Layout, "cell"),
+				RestCell:  layoutString(input.Layout, "restCell"),
+				GrpcCell:  layoutString(input.Layout, "grpcCell"),
+				Proto:     []byte(input.ProtoSpec),
+				GrpcProto: grpcProto,
+				Hello:     layoutString(input.Layout, "hello"),
+				Push:      push,
+				Rng:       rng,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the vectors of %q: %w", input.Name, err)
@@ -83,6 +96,41 @@ func readVectors(input GenerateInput) ([]byte, error) {
 	}
 
 	return doc, nil
+}
+
+func readLayoutFile(input GenerateInput, key string) ([]byte, error) {
+	rel := layoutString(input.Layout, key)
+	if rel == "" {
+		return nil, nil
+	}
+
+	doc, err := os.ReadFile(filepath.Join(input.SrcDir, rel))
+	if err != nil {
+		return nil, fmt.Errorf("reading the document layout.%s names, %s: %w", key, rel, err)
+	}
+
+	return doc, nil
+}
+
+func readRng(layout map[string]interface{}) (*vectorsrust.RngPort, error) {
+	raw, ok := layout["rng"]
+	if !ok {
+		return nil, nil
+	}
+
+	fields, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading layout.rng: it names the rng port with trait, module, method and returns, not %v", raw)
+	}
+
+	port := vectorsrust.RngPort{
+		Trait:   layoutString(fields, "trait"),
+		Module:  layoutString(fields, "module"),
+		Method:  layoutString(fields, "method"),
+		Returns: layoutString(fields, "returns"),
+	}
+
+	return &port, nil
 }
 
 func layoutString(layout map[string]interface{}, key string) string {

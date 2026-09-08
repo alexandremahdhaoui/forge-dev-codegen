@@ -44,7 +44,7 @@ components:
           description: The raw proto3 document of the datagram service. Absent means the vectors carry no datagram case. Its service block names every rpc a udp_<rpc> case may exercise.
         vectors:
           type: string
-          description: The vectors document, inline. A JSON object with one "cases" array, each case naming an operationId, an input, either a controllerReply or an expectedErrorSubstring, an expectedStatus and an optional expectedBody. Absent means the engine reads the file that layout.vectors names.
+          description: The vectors document, inline. A JSON object with one "cases" array, each case naming an operationId, a udp_<rpc> or a grpc_<Rpc>, an input, either a controllerReply or an expectedErrorSubstring, an expectedStatus and an optional expectedBody. A push case adds expectPush, a seeded case adds seed. An operation the engine cannot map is refused by name. Absent means the engine reads the file that layout.vectors names.
         checksum:
           type: string
           description: The source checksum forge-dev computed. Unused here.
@@ -54,7 +54,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. crateDir names the crate root relative to srcDir and defaults to srcDir itself, vectors names the vectors document relative to srcDir, cell names the udp module directory, which defaults to udp, restCell names the rest module directory, which defaults to rest, hello names the rpc a udp session opens with and push lists the rpcs the udp server sends to a client, both as the udp cell names them.
+          description: The kind's layout. crateDir names the crate root relative to srcDir and defaults to srcDir itself, vectors names the vectors document relative to srcDir, cell names the udp module directory, which defaults to udp, restCell names the rest module directory, which defaults to rest, grpcCell names the grpc module directory, which defaults to grpc, grpcProto names the proto3 document of the grpc service relative to srcDir, hello names the rpc a udp session opens with and push lists the rpcs the udp server sends to a client, both as the udp cell names them, and rng names the port a seeded case draws from with trait, module, method and returns.
       required:
         - name
         - kind

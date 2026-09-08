@@ -300,25 +300,17 @@ func TestAnErrorCaseChoosesTheControllerErrorVariantThatMatchesTheDeclaredStatus
 	}
 }
 
-func TestAVectorWhoseOperationBelongsToAnotherTransportIsSkippedAndTheRestStillEmit(t *testing.T) {
+func TestAVectorWhoseOperationTheEngineCannotMapIsRefusedInsteadOfSkipped(t *testing.T) {
 	mixedCases := `{"cases": [
 		{"case": "get_existing_id", "operation": "getGreeting", "input": {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, "controllerReply": {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "name": "Songe", "count": 0}, "expectedStatus": 200},
 		{"case": "udp_echo_returns_the_payload", "operation": "udp_echo", "input": {"payload": "songe"}, "expectedStatus": 200, "expectedBody": {"payload": "songe"}}
 	]}`
 
-	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(mixedCases), vectorsrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(mixedCases), vectorsrust.Options{Service: "songe-hello"})
 
-	content := files[0].Content
-
-	if !strings.Contains(content, "async fn get_existing_id()") {
-		t.Fatalf("the OpenAPI vector lost its test\n%s", content)
-	}
-
-	if strings.Contains(content, "udp_echo_returns_the_payload") {
-		t.Fatalf("the vector of another transport reached the emitted file\n%s", content)
+	want := `reading vector "udp_echo_returns_the_payload": operation "udp_echo" names no operationId of the OpenAPI document, no udp_<rpc> of the datagram service and no grpc_<Rpc> of the grpc service`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
 	}
 }
 
@@ -691,13 +683,11 @@ func TestADatagramVectorWithoutAControllerReplyIsRefused(t *testing.T) {
 	}
 }
 
-func TestWithoutAProtoADatagramVectorIsSkippedLikeAnyOtherTransport(t *testing.T) {
-	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(datagramCases+""), vectorsrust.Options{Service: "songe-hello"})
-	if err != nil {
-		t.Fatalf("generating: %v", err)
-	}
+func TestWithoutAProtoADatagramVectorIsRefusedByName(t *testing.T) {
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(datagramCases), vectorsrust.Options{Service: "songe-hello"})
 
-	if strings.Contains(files[0].Content, "UdpDriver") {
-		t.Fatalf("a datagram test was emitted with no proto:\n%s", files[0].Content)
+	want := `no udp_<rpc> of the datagram service`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
 	}
 }

@@ -104,6 +104,30 @@ const sessionUdpCases = `
         "sessionIds": ["0123456789abcdef", "fedcba9876543210"],
         "payload": { "tick": 3 }
       }
+    },
+    {
+      "case": "udp_a_tick_pushes_the_count_the_seeded_rng_port_answers",
+      "operation": "udp_counter",
+      "input": null,
+      "hello": { "secret": "open" },
+      "seed": 7,
+      "expectPush": {
+        "rpc": "Counter",
+        "sessionIds": ["0123456789abcdef"],
+        "payload": { "tick": "<seed>" }
+      }
+    },
+    {
+      "case": "udp_an_echo_answers_the_caller_and_pushes_the_counter_to_both_sessions",
+      "operation": "udp_echo",
+      "input": { "sessionId": "0123456789abcdef", "payload": "songe" },
+      "hello": { "secret": "open" },
+      "controllerReply": { "payload": "songe" },
+      "expectPush": {
+        "rpc": "Counter",
+        "sessionIds": ["0123456789abcdef", "fedcba9876543210"],
+        "payload": { "tick": 9 }
+      }
     }`
 
 const sessionCases = `{
@@ -111,12 +135,20 @@ const sessionCases = `{
   ]
 }`
 
+var sessionPorts = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+
 func sessionOptions() vectorsrust.Options {
 	return vectorsrust.Options{
 		Service: "songe-hello",
 		Proto:   []byte(sessionProto),
 		Hello:   "Hello",
 		Push:    []string{"Counter"},
+		Rng: &vectorsrust.RngPort{
+			Trait:   "TickCounter",
+			Module:  "udp::port::tick_counter",
+			Method:  "next",
+			Returns: "u64",
+		},
 	}
 }
 
@@ -200,7 +232,7 @@ func TestAPushCaseIsRefusedWhenItCarriesInputNamesAnotherRpcOrNoSession(t *testi
 		{
 			name: "input on a push",
 			body: `{"case": "c", "operation": "udp_counter", "input": {"tick": 1}, "expectPush": {"sessionIds": ["0123456789abcdef"]}}`,
-			want: `a push case carries no input`,
+			want: `a push case on a push rpc carries no input`,
 		},
 		{
 			name: "no session ids",
@@ -218,9 +250,29 @@ func TestAPushCaseIsRefusedWhenItCarriesInputNamesAnotherRpcOrNoSession(t *testi
 			want: `expectPush names rpc "Echo" and the operation names Counter`,
 		},
 		{
-			name: "a push on an inbound rpc",
+			name: "a push on an inbound rpc naming no push kind",
 			body: `{"case": "c", "operation": "udp_echo", "expectPush": {"sessionIds": ["0123456789abcdef"]}}`,
-			want: `expectPush names Echo and the cell does not list it under layout.push`,
+			want: `operation "udp_echo" names the inbound rpc, so expectPush needs an rpc`,
+		},
+		{
+			name: "a push on an inbound rpc naming an inbound kind",
+			body: `{"case": "c", "operation": "udp_echo", "expectPush": {"rpc": "Hello", "sessionIds": ["0123456789abcdef"]}}`,
+			want: `expectPush names rpc "Hello" and the cell does not list it under layout.push`,
+		},
+		{
+			name: "a request driven push with no session id",
+			body: `{"case": "c", "operation": "udp_echo", "input": {"payload": "songe"}, "controllerReply": {"payload": "songe"}, "expectPush": {"rpc": "Counter", "sessionIds": ["0123456789abcdef"]}}`,
+			want: `input needs a sessionId`,
+		},
+		{
+			name: "a request driven push with no controller reply",
+			body: `{"case": "c", "operation": "udp_echo", "input": {"sessionId": "0123456789abcdef", "payload": "songe"}, "expectPush": {"rpc": "Counter", "sessionIds": ["0123456789abcdef"]}}`,
+			want: `Echo answers Echo, so the case needs controllerReply`,
+		},
+		{
+			name: "a request driven push on the hello rpc",
+			body: `{"case": "c", "operation": "udp_hello", "input": {"sessionId": "0123456789abcdef", "secret": "open"}, "controllerReply": {"greeting": "welcome"}, "expectPush": {"rpc": "Counter", "sessionIds": ["0123456789abcdef"]}}`,
+			want: `the hello rpc opens the session`,
 		},
 		{
 			name: "a request on a push rpc",
@@ -279,8 +331,10 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
     }
 
     fn on_tick(&self) -> Result<(), HelloDatagramControllerError> {
+        let tick = self.tick_counter.next();
+
         self.hello_datagram_broadcast
-            .send_all(HelloDatagramPush::Counter(Counter { tick: 3 }))
+            .send_all(HelloDatagramPush::Counter(Counter { tick }))
             .map(|_| ())
             .map_err(|source| HelloDatagramControllerError::Broadcast {
                 kind: "Counter".to_string(),
@@ -303,7 +357,7 @@ func buildSessionCargoWorkspace(t *testing.T) (string, string) {
 		t.Fatalf("generating the rest cell: %v", err)
 	}
 
-	udpFiles, err := udprust.Generate([]byte(sessionProto), udprust.Options{Service: "songe-hello", Hello: "Hello", Push: []string{"Counter"}})
+	udpFiles, err := udprust.Generate([]byte(sessionProto), udprust.Options{Service: "songe-hello", Hello: "Hello", Push: []string{"Counter"}, Ports: sessionPorts})
 	if err != nil {
 		t.Fatalf("generating the udp cell: %v", err)
 	}
@@ -368,7 +422,13 @@ func TestTheSessionVectorsPassAgainstTheGeneratedSessionCellAndAMockedGate(t *te
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
 
-	if !strings.Contains(string(out), "udp_counter_reaches_two_sessions_on_a_tick ... ok") {
-		t.Fatalf("the push vector never ran\n%s", out)
+	for _, want := range []string{
+		"udp_counter_reaches_two_sessions_on_a_tick ... ok",
+		"udp_a_tick_pushes_the_count_the_seeded_rng_port_answers ... ok",
+		"udp_an_echo_answers_the_caller_and_pushes_the_counter_to_both_sessions ... ok",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("the vector %q never ran\n%s", want, out)
+		}
 	}
 }

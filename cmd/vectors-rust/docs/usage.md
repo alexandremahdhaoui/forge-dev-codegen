@@ -140,8 +140,10 @@ The engine folds every method name the way udp-rust does and refuses two
 rpcs that fold to one byte. A datagram vector reads strings, numbers and
 booleans only.
 
-Without a `proto:` a `udp_` case is skipped with a log line, like any other
-transport.
+An operation the engine cannot map is refused by name. Naming a `udp_` case
+without a `proto:`, a `grpc_` case without a `grpcProto:`, or an
+`operationId` the OpenAPI document never declares fails the build and names
+the case and the operation. There is no skip.
 
 An error case is armed by matching `expectedStatus` against the operation's
 declared shape: 404 arms `NotFound`, the operation's declared invalid status
@@ -202,6 +204,109 @@ controller, and asserts each peer receives the decoded push. The mocked
 controller's `on_tick` sends the push through the real peer table. An
 operation naming a push rpc carries `expectPush` and no `input`. Every
 other datagram case carries `input` and a 16 byte `sessionId`.
+
+## Request driven push cases
+
+A push may answer a request instead of a tick. Name the inbound rpc as
+`operation`, carry its `input`, and name the server to client kind under
+`expectPush.rpc`.
+
+```json
+{
+  "case": "udp_an_echo_answers_the_caller_and_pushes_the_counter",
+  "operation": "udp_echo",
+  "input": { "sessionId": "0123456789abcdef", "payload": "songe" },
+  "hello": { "secret": "open" },
+  "controllerReply": { "payload": "songe" },
+  "expectPush": {
+    "rpc": "Counter",
+    "sessionIds": ["0123456789abcdef", "fedcba9876543210"],
+    "payload": { "tick": 9 }
+  }
+}
+```
+
+`controllerReply` is what the mocked controller answers the caller.
+`expectPush` is what the same mock sends through the real
+`<Service>Broadcast` while it answers. The test registers every session in
+`sessionIds` with a hello, sends the inbound datagram from the asking
+session's own socket, then reads the push on every socket and the reply on
+the asking one. The asking `sessionId` may sit in `sessionIds` or not. An
+rpc answering `Nothing` carries no `controllerReply` and the test asserts
+the driver sent no reply. The hello rpc is refused here because it opens
+the session.
+
+## Seeded cases
+
+A push case may carry `seed`, the number a mocked rng port answers, so a
+roll is deterministic. The vectors cell names that port under `layout.rng`.
+
+```yaml
+layout:
+  cell: udp
+  hello: Hello
+  push: [Counter]
+  rng:
+    trait: TickCounter
+    module: udp::port::tick_counter
+    method: next
+    returns: u64
+```
+
+```json
+{
+  "case": "udp_a_tick_pushes_the_count_the_seeded_rng_port_answers",
+  "operation": "udp_counter",
+  "input": null,
+  "hello": { "secret": "open" },
+  "seed": 7,
+  "expectPush": {
+    "rpc": "Counter",
+    "sessionIds": ["0123456789abcdef"],
+    "payload": { "tick": "<seed>" }
+  }
+}
+```
+
+The engine emits a `mockall::mock!` for the port and a
+`seeded_<trait>(seed)` builder armed to answer the seed. The mocked
+controller draws from it while it answers and puts the draw where the
+payload reads `<seed>`. The assertion pins the received push to the seed
+value, so the draw has to reach the wire.
+
+A seed with no `layout.rng`, a seed on a case that never pushes, a seed no
+payload field reads, and a `<seed>` with no seed are each refused by name.
+
+## gRPC cases
+
+A cell that names a `grpcProto` reads the grpc service block. A case whose
+`operation` is `grpc_<Rpc>` becomes a test that binds the generated
+`<Service>GrpcDriver` on a free port over a mocked `<Service>Controller`
+and calls it through the generated `<Service>GrpcClient`.
+
+```yaml
+layout:
+  crateDir: .
+  grpcCell: grpc
+  grpcProto: ../.forge/spec-cache/hello.v1.proto
+```
+
+```json
+{
+  "case": "grpc_ping_answers_the_count_raised_by_one",
+  "operation": "grpc_Ping",
+  "input": { "message": "songe", "count": 7 },
+  "controllerReply": { "message": "songe", "count": 8 }
+}
+```
+
+`operation` spells the rpc as the proto does, after `grpc_`.
+`controllerReply` is what the mocked controller answers and what the client
+must read back. An error case carries `expectedErrorSubstring` instead, the
+mock answers `Invalid` with that text in its field, and the test asserts the
+status message the client reads carries it. A grpc case carries no
+`expectedStatus` and no `expectedBody`, both are refused. The test runs on a
+multi thread runtime because the generated client blocks inside tokio.
 
 ## How the mock is built
 

@@ -40,8 +40,23 @@ type view struct {
 	Datagram         datagramServiceView
 	DatagramTests    []datagramTestView
 	HasPush          bool
+	HasRequestPush   bool
 	HasReconnect     bool
 	NeedsRegister    bool
+	HasCalls         bool
+	Call             callServiceView
+	CallTests        []callTestView
+	HasRng           bool
+	Rng              rngPortView
+	DrawIdent        string
+}
+
+type rngPortView struct {
+	Trait   string
+	Module  string
+	Method  string
+	Returns string
+	Builder string
 }
 
 type importView struct {
@@ -147,12 +162,24 @@ func paramArgType(kind string) string {
 	return "i64"
 }
 
-func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, opts Options) (view, error) {
+func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, calls *callService, rng *rngPort, opts Options) (view, error) {
 	v := view{
-		Header:   header,
-		Crate:    rustname.Snake(opts.Service),
-		RestCell: opts.RestCell,
-		Auth:     spec.Auth,
+		Header:    header,
+		Crate:     rustname.Snake(opts.Service),
+		RestCell:  opts.RestCell,
+		Auth:      spec.Auth,
+		DrawIdent: drawIdent,
+	}
+
+	if rng != nil {
+		v.HasRng = true
+		v.Rng = rngPortView{
+			Trait:   rng.Trait,
+			Module:  rng.Module,
+			Method:  rng.Method,
+			Returns: rng.Returns,
+			Builder: "seeded_" + rustname.Snake(rng.Trait),
+		}
 	}
 
 	opsByID := map[string]restrust.Operation{}
@@ -221,9 +248,24 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 
 			v.DatagramTests = append(v.DatagramTests, tv)
 
-			v.HasPush = v.HasPush || tv.Kind == kindPush
+			v.HasPush = v.HasPush || tv.Kind == kindPush || tv.Kind == kindRequestPush
+			v.HasRequestPush = v.HasRequestPush || tv.Kind == kindRequestPush
 			v.HasReconnect = v.HasReconnect || tv.Kind == kindReconnect
-			v.NeedsRegister = v.NeedsRegister || tv.Kind == kindPush || tv.Kind == kindReconnect || (tv.Registered && !tv.IsHello)
+			v.NeedsRegister = v.NeedsRegister || tv.Kind == kindPush || tv.Kind == kindRequestPush || tv.Kind == kindReconnect || (tv.Registered && !tv.IsHello)
+		}
+	}
+
+	if calls != nil && len(vectors.GrpcCases) > 0 {
+		v.HasCalls = true
+		v.Call = buildCallServiceView(calls)
+
+		for _, c := range vectors.GrpcCases {
+			tv, err := buildCallTest(c, calls, v.Call)
+			if err != nil {
+				return view{}, err
+			}
+
+			v.CallTests = append(v.CallTests, tv)
 		}
 	}
 
