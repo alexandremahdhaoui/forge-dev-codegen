@@ -25,6 +25,7 @@ func TestTheDerivedKeySetHoldsEveryObjectAndArrayKeyOfTheSchema(t *testing.T) {
 		"provides.drivers[].config.*":  kindMap,
 		"provides.adapters":            kindList,
 		"provides.adapters[]":          kindMap,
+		"provides.adapters[].ports":    kindList,
 		"provides.adapters[].config":   kindMap,
 		"provides.adapters[].config.*": kindMap,
 		"provides.controllers":         kindList,

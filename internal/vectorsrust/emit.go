@@ -145,6 +145,9 @@ use {{ .Crate }}::{{ .RestCell }}::driver::http_driver::{HttpDriver, HttpDriverC
 {{ range .Controllers -}}
 use {{ $.Crate }}::{{ $.RestCell }}::controller::{{ .Pascal }}ControllerError;
 {{ end -}}
+{{ if .Auth -}}
+use {{ .Crate }}::{{ .RestCell }}::port::ticket_verifier::TicketVerifierError;
+{{ end -}}
 {{ range .TypeImports -}}
 use {{ $.Crate }}::{{ $.RestCell }}::types::{{ .Snake }}::{{ .Name }};
 {{ end }}
@@ -236,6 +239,18 @@ fn is_uuid_v4(value: &str) -> bool {
     shaped && bytes[14] == b'4' && matches!(bytes[19], b'8' | b'9' | b'a' | b'A' | b'b' | b'B')
 }
 {{ end }}
+{{- if .HasStream }}
+fn first_event(body: &[u8]) -> serde_json::Value {
+    let text = String::from_utf8_lossy(body);
+
+    let data = text
+        .lines()
+        .find_map(|line| line.strip_prefix("data:"))
+        .expect("an event stream carries one data line");
+
+    serde_json::from_str(data.trim_start()).expect("the event data is JSON")
+}
+{{ end }}
 {{ range .Controllers }}{{ $c := . }}
 mockall::mock! {
     pub {{ $c.Pascal }}Controller {}
@@ -243,6 +258,14 @@ mockall::mock! {
 {{- range $c.Ops }}
         fn {{ .Ident }}(&self{{ if .TraitArgs }}, {{ .TraitArgs }}{{ end }}) -> Result<{{ .ReturnType }}, {{ $c.Pascal }}ControllerError>;
 {{- end }}
+    }
+}
+{{ end }}
+{{- if .Auth }}
+mockall::mock! {
+    pub TicketVerifier {}
+    impl {{ .Crate }}::{{ .RestCell }}::port::ticket_verifier::TicketVerifier for TicketVerifier {
+        fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;
     }
 }
 {{ end }}
@@ -604,9 +627,12 @@ async fn {{ .Name }}() {
 {{- end }}
 {{ end }}
 {{ range .Tests }}
-#[tokio::test]
+#[tokio::test{{ if .Stream }}(flavor = "multi_thread"){{ end }}]
 async fn {{ .Name }}() {
     let mut {{ .ArmVar }} = Mock{{ .ArmController }}Controller::new();
+{{- if .ControllerNever }}
+    {{ .ArmVar }}.{{ .ArmExpectMethod }}().never();
+{{- else }}
     {{ .ArmVar }}
         .{{ .ArmExpectMethod }}()
 {{- if .HasWith }}
@@ -614,12 +640,33 @@ async fn {{ .Name }}() {
 {{- end }}
         .times(1)
         .returning(|{{ .ArmClosureParams }}| {{ .ArmReturning }});
+{{- end }}
+{{- if $.Auth }}
+
+    let mut ticket_verifier = MockTicketVerifier::new();
+{{- if .HasSubject }}
+    ticket_verifier
+        .expect_verify()
+        .with(mockall::predicate::eq({{ .BearerLiteral }}))
+        .returning(|_token| Ok(Subject { id: {{ .SubjectLiteral }}.to_string() }));
+{{- else if .HasBearer }}
+    ticket_verifier
+        .expect_verify()
+        .with(mockall::predicate::eq({{ .BearerLiteral }}))
+        .returning(|_token| Err(TicketVerifierError::Refused { reason: {{ if .HasExpectedSubstring }}{{ .ExpectedSubstringLiteral }}{{ else }}"refused by vectors-rust"{{ end }}.to_string() }));
+{{- else }}
+    ticket_verifier.expect_verify().never();
+{{- end }}
+{{- end }}
 
     let driver = HttpDriver::new(HttpDriverConfig::default(){{ range .DriverArgs }}, {{ . }}{{ end }});
 
     let request = Request::builder()
         .method("{{ .Method }}")
         .uri("{{ .URI }}")
+{{- if .HasBearer }}
+        .header("authorization", format!("Bearer {}", {{ .BearerLiteral }}))
+{{- end }}
 {{- if .HasBody }}
         .header("content-type", "application/json")
         .body(Body::from({{ .BodyLiteral }}))
@@ -631,10 +678,20 @@ async fn {{ .Name }}() {
     let response = driver.router().oneshot(request).await.unwrap();
 
     assert_eq!(response.status().as_u16(), {{ .ExpectedStatus }});
+{{- if and .Stream (not .HasExpectedSubstring) }}
+    assert_eq!(
+        response.headers().get("content-type").and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+{{- end }}
 
     let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
 {{- if .HasExpectedBody }}
+{{- if .Stream }}
+    let got: serde_json::Value = first_event(&body_bytes);
+{{- else }}
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");
+{{- end }}
     let want: serde_json::Value = serde_json::from_str({{ .ExpectedBodyLiteral }}).expect("expectedBody is valid JSON");
     assert!(body_matches(&want, &got), "body {got} does not match {want}");
 {{- end }}

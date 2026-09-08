@@ -64,6 +64,7 @@ type Adapter struct {
 	Module     string                 `json:"module" yaml:"module"`
 	Implements string                 `json:"implements" yaml:"implements"`
 	Fallible   bool                   `json:"fallible,omitempty" yaml:"fallible,omitempty"`
+	Ports      []string               `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Config     map[string]ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
@@ -406,6 +407,16 @@ func (a Adapter) validate(cell string) error {
 
 	if !rustIdentPattern.MatchString(a.Implements) {
 		return fmt.Errorf("%s implements %q which is not a Rust ident", owner, a.Implements)
+	}
+
+	for _, trait := range a.Ports {
+		if !rustIdentPattern.MatchString(trait) {
+			return fmt.Errorf("%s consumes port %q which is not a Rust ident", owner, trait)
+		}
+
+		if trait == a.Implements {
+			return fmt.Errorf("%s consumes the port %q it implements", owner, trait)
+		}
 	}
 
 	return validateConfig(owner, a.Config)

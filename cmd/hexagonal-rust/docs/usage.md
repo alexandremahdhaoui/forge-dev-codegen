@@ -105,5 +105,11 @@ each driver its flag enables. A driver is built with its config and the
 controllers it requires, bound, announced and spawned. Main refuses to
 run with every driver disabled and then joins the ones it started.
 
+An adapter a manifest lists with `ports` consumes those ports. Main
+builds them first and hands them to `new` after the config struct, so a
+generated REST client receives its `TokenSource`. A port only such an
+adapter consumes still needs a candidate in the wiring. Two adapters
+whose ports form a cycle are refused by name.
+
 The crate needs `anyhow`, `tokio` and `songe-common`, whose
 `error::chain` main uses to render a driver failure.

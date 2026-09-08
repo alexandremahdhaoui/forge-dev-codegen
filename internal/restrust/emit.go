@@ -35,6 +35,18 @@ const DefaultAddress = "127.0.0.1:0"
 
 const DefaultStorePath = ":memory:"
 
+const DefaultBaseURL = "http://127.0.0.1:8080"
+
+const (
+	SideServer = "server"
+	SideClient = "client"
+	SideBoth   = "both"
+)
+
+const TicketVerifierPort = "TicketVerifier"
+
+const TokenSourcePort = "TokenSource"
+
 var Layers = []string{"adapter", "controller", "driver", "port", "types"}
 
 var allowingLayers = map[string]bool{"adapter": true, "driver": true}
@@ -42,6 +54,7 @@ var allowingLayers = map[string]bool{"adapter": true, "driver": true}
 type Options struct {
 	Service   string
 	Cell      string
+	Side      string
 	Header    string
 	Generator string
 }
@@ -64,6 +77,15 @@ type layerMod struct {
 	UserMods []string
 }
 
+func checkSide(side string) error {
+	switch side {
+	case SideServer, SideClient, SideBoth:
+		return nil
+	default:
+		return fmt.Errorf("emitting the rest cell: side %q is not one of %s, %s and %s", side, SideServer, SideClient, SideBoth)
+	}
+}
+
 func Generate(doc []byte, opts Options) ([]File, error) {
 	if opts.Service == "" {
 		return nil, fmt.Errorf("emitting the rest cell: the service name is required")
@@ -79,6 +101,14 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 	if !rustname.IsModuleName(opts.Cell) {
 		return nil, fmt.Errorf("emitting the rest cell: cell %q is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter", opts.Cell)
+	}
+
+	if opts.Side == "" {
+		opts.Side = SideServer
+	}
+
+	if err := checkSide(opts.Side); err != nil {
+		return nil, err
 	}
 
 	spec, err := Parse(doc)
@@ -105,73 +135,31 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil
 	}
 
-	entries := map[string][]modEntry{
-		"driver": {
-			{Module: "zz_generated_wire", Alias: "wire"},
-			{Module: "zz_generated_http_driver", Alias: "http_driver"},
-		},
-	}
+	entries := map[string][]modEntry{}
 	userMods := map[string][]string{}
 
 	mount := func(layer string, entry modEntry) {
 		entries[layer] = append(entries[layer], entry)
 	}
 
-	for _, t := range v.Types {
-		mount("types", modEntry{Module: "zz_generated_" + t.Snake, Alias: t.Snake})
-	}
-
-	for _, s := range v.Stores {
-		mount("port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
-		mount("adapter", modEntry{Module: "zz_generated_" + s.Module, Alias: s.Module})
-	}
-
-	for _, c := range v.Controllers {
-		mount("controller", modEntry{
-			Module: "zz_generated_" + c.Snake + "_controller",
-			Exports: []string{
-				c.Pascal + "Controller",
-				c.Pascal + "ControllerError",
-				c.Pascal + "ControllerImpl",
-			},
-		})
-		userMods["controller"] = append(userMods["controller"], c.Snake+"_controller")
-	}
-
-	steps := []func() error{
-		func() error { return add(path.Join("driver", "zz_generated_wire.rs"), "wire", v) },
-		func() error {
-			return add(path.Join("driver", "zz_generated_http_driver.rs"), "http_driver", v)
-		},
-	}
+	steps := []func() error{}
 
 	for _, t := range v.Types {
 		t := t
+
+		mount("types", modEntry{Module: "zz_generated_" + t.Snake, Alias: t.Snake})
 
 		steps = append(steps, func() error {
 			return add(path.Join("types", "zz_generated_"+t.Snake+".rs"), "type", map[string]any{"Header": v.Header, "Type": t})
 		})
 	}
 
-	for _, s := range v.Stores {
-		s := s
-
-		steps = append(steps,
-			func() error {
-				return add(path.Join("port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
-			},
-			func() error {
-				return add(path.Join("adapter", "zz_generated_"+s.Module+".rs"), "sqlite", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
-			},
-		)
+	if v.Server {
+		steps = append(steps, serverSteps(v, add, mount, userMods)...)
 	}
 
-	for _, c := range v.Controllers {
-		c := c
-
-		steps = append(steps, func() error {
-			return add(path.Join("controller", "zz_generated_"+c.Snake+"_controller.rs"), "controller", map[string]any{"Header": v.Header, "Controller": c, "CratePath": v.CratePath})
-		})
+	if v.Client {
+		steps = append(steps, clientSteps(v, add, mount)...)
 	}
 
 	for _, layer := range Layers {
@@ -218,6 +206,112 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	return files, nil
 }
 
+type adder func(p, name string, data any) error
+
+type mounter func(layer string, entry modEntry)
+
+func serverSteps(v view, add adder, mount mounter, userMods map[string][]string) []func() error {
+	mount("driver", modEntry{Module: "zz_generated_wire", Alias: "wire"})
+	mount("driver", modEntry{Module: "zz_generated_http_driver", Alias: "http_driver"})
+
+	steps := []func() error{
+		func() error { return add(path.Join("driver", "zz_generated_wire.rs"), "wire", v) },
+		func() error {
+			return add(path.Join("driver", "zz_generated_http_driver.rs"), "http_driver", v)
+		},
+	}
+
+	if v.Auth {
+		mount("types", modEntry{Module: "zz_generated_subject", Alias: "subject"})
+		mount("port", modEntry{Module: "zz_generated_ticket_verifier", Alias: "ticket_verifier"})
+
+		steps = append(steps,
+			func() error {
+				return add(path.Join("types", "zz_generated_subject.rs"), "subject", map[string]any{"Header": v.Header})
+			},
+			func() error {
+				return add(path.Join("port", "zz_generated_ticket_verifier.rs"), "ticket_verifier_port", map[string]any{"Header": v.Header, "CratePath": v.CratePath})
+			},
+		)
+	}
+
+	for _, s := range v.Stores {
+		s := s
+
+		mount("port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
+		mount("adapter", modEntry{Module: "zz_generated_" + s.Module, Alias: s.Module})
+
+		steps = append(steps,
+			func() error {
+				return add(path.Join("port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
+			},
+			func() error {
+				return add(path.Join("adapter", "zz_generated_"+s.Module+".rs"), "sqlite", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
+			},
+		)
+	}
+
+	for _, e := range v.Events {
+		e := e
+
+		mount("port", modEntry{Module: "zz_generated_" + e.PortSnake, Alias: e.PortSnake})
+
+		steps = append(steps, func() error {
+			return add(path.Join("port", "zz_generated_"+e.PortSnake+".rs"), "subscribe_port", map[string]any{"Header": v.Header, "Event": e, "CratePath": v.CratePath})
+		})
+	}
+
+	for _, c := range v.Controllers {
+		c := c
+
+		mount("controller", modEntry{
+			Module: "zz_generated_" + c.Snake + "_controller",
+			Exports: []string{
+				c.Pascal + "Controller",
+				c.Pascal + "ControllerError",
+				c.Pascal + "ControllerImpl",
+			},
+		})
+		userMods["controller"] = append(userMods["controller"], c.Snake+"_controller")
+
+		steps = append(steps, func() error {
+			return add(path.Join("controller", "zz_generated_"+c.Snake+"_controller.rs"), "controller", map[string]any{"Header": v.Header, "Controller": c, "CratePath": v.CratePath})
+		})
+	}
+
+	return steps
+}
+
+func clientSteps(v view, add adder, mount mounter) []func() error {
+	mount("adapter", modEntry{Module: "zz_generated_wire", Alias: "wire"})
+	mount("port", modEntry{Module: "zz_generated_token_source", Alias: "token_source"})
+
+	steps := []func() error{
+		func() error { return add(path.Join("adapter", "zz_generated_wire.rs"), "wire", v) },
+		func() error {
+			return add(path.Join("port", "zz_generated_token_source.rs"), "token_source_port", map[string]any{"Header": v.Header})
+		},
+	}
+
+	for _, c := range v.Clients {
+		c := c
+
+		mount("port", modEntry{Module: "zz_generated_" + c.PortModule, Alias: c.PortModule})
+		mount("adapter", modEntry{Module: "zz_generated_" + c.Module, Alias: c.Module})
+
+		steps = append(steps,
+			func() error {
+				return add(path.Join("port", "zz_generated_"+c.PortModule+".rs"), "client_port", map[string]any{"Header": v.Header, "Client": c, "CratePath": v.CratePath})
+			},
+			func() error {
+				return add(path.Join("adapter", "zz_generated_"+c.Module+".rs"), "rest_client", map[string]any{"Header": v.Header, "Client": c, "CratePath": v.CratePath, "DefaultBaseURL": v.DefaultBaseURL})
+			},
+		)
+	}
+
+	return steps
+}
+
 func BuildManifest(v view) cellmanifest.Manifest {
 	m := cellmanifest.Manifest{
 		Version:   cellmanifest.Version,
@@ -225,6 +319,18 @@ func BuildManifest(v view) cellmanifest.Manifest {
 		Generator: Generator,
 	}
 
+	if v.Server {
+		addServerToManifest(&m, v)
+	}
+
+	if v.Client {
+		addClientToManifest(&m, v)
+	}
+
+	return m
+}
+
+func addServerToManifest(m *cellmanifest.Manifest, v view) {
 	requires := make([]string, 0, len(v.Controllers))
 
 	for _, c := range v.Controllers {
@@ -243,12 +349,18 @@ func BuildManifest(v view) cellmanifest.Manifest {
 		requires = append(requires, c.Pascal+"Controller")
 	}
 
+	driverPorts := []string{}
+	if v.Auth {
+		driverPorts = append(driverPorts, TicketVerifierPort)
+	}
+
 	if len(v.Controllers) > 0 {
 		m.Provides.Drivers = append(m.Provides.Drivers, cellmanifest.Driver{
 			Name:     v.DriverName,
 			Type:     "HttpDriver",
 			Module:   v.ModulePrefix + "driver::http_driver",
 			Requires: requires,
+			Ports:    driverPorts,
 			Config: map[string]cellmanifest.ConfigField{
 				"addr": {
 					Type:        cellmanifest.FieldTypeString,
@@ -257,6 +369,14 @@ func BuildManifest(v view) cellmanifest.Manifest {
 				},
 			},
 		})
+	}
+
+	if v.Auth {
+		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+			Trait:  TicketVerifierPort,
+			Module: v.ModulePrefix + "port::ticket_verifier",
+		})
+		m.Requires.Ports = append(m.Requires.Ports, TicketVerifierPort)
 	}
 
 	for _, s := range v.Stores {
@@ -281,7 +401,42 @@ func BuildManifest(v view) cellmanifest.Manifest {
 		})
 	}
 
-	return m
+	for _, e := range v.Events {
+		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+			Trait:  e.Port,
+			Module: v.ModulePrefix + "port::" + e.PortSnake,
+		})
+		m.Requires.Ports = append(m.Requires.Ports, e.Port)
+	}
+}
+
+func addClientToManifest(m *cellmanifest.Manifest, v view) {
+	m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+		Trait:  TokenSourcePort,
+		Module: v.ModulePrefix + "port::token_source",
+	})
+
+	for _, c := range v.Clients {
+		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+			Trait:  c.Trait,
+			Module: v.ModulePrefix + "port::" + c.PortModule,
+		})
+
+		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+			Name:       c.AdapterName,
+			Type:       c.Struct,
+			Module:     v.ModulePrefix + "adapter::" + c.Module,
+			Implements: c.Trait,
+			Ports:      []string{TokenSourcePort},
+			Config: map[string]cellmanifest.ConfigField{
+				"base_url": {
+					Type:        cellmanifest.FieldTypeString,
+					Default:     DefaultBaseURL,
+					Description: "The base url the " + c.Snake + " rest client calls",
+				},
+			},
+		})
+	}
 }
 
 func render(name string, data any) (string, error) {
@@ -339,6 +494,15 @@ pub struct {{ .Type.Name }} {
 }
 {{ end -}}
 
+{{- define "subject" -}}
+{{ .Header }}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subject {
+    pub id: String,
+}
+{{ end -}}
+
 {{- define "port" -}}
 {{ .Header }}
 
@@ -367,6 +531,99 @@ pub trait {{ .Store.Port }}: Send + Sync {
 }
 {{ end -}}
 
+{{- define "subscribe_port" -}}
+{{ .Header }}
+
+use {{ .CratePath }}types::{{ .Event.Snake }}::{{ .Event.Name }};
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .Event.Port }}Error {
+    #[error("subscribing to {{ .Event.Snake }} events for {key:?}")]
+    Subscribe {
+        key: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .Event.Port }}: Send + Sync {
+    fn subscribe(&self, key: &str) -> Result<std::sync::mpsc::Receiver<{{ .Event.Name }}>, {{ .Event.Port }}Error>;
+}
+{{ end -}}
+
+{{- define "ticket_verifier_port" -}}
+{{ .Header }}
+
+use {{ .CratePath }}types::subject::Subject;
+
+#[derive(Debug, thiserror::Error)]
+pub enum TicketVerifierError {
+    #[error("verifying the ticket: refused: {reason}")]
+    Refused { reason: String },
+    #[error("verifying the ticket")]
+    Verify {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait TicketVerifier: Send + Sync {
+    fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;
+}
+{{ end -}}
+
+{{- define "token_source_port" -}}
+{{ .Header }}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TokenSourceError {
+    #[error("reading the current token: {reason}")]
+    Unavailable { reason: String },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait TokenSource: Send + Sync {
+    fn token(&self) -> Result<String, TokenSourceError>;
+}
+{{ end -}}
+
+{{- define "client_port" -}}
+{{ .Header }}
+{{ $c := .Client }}
+{{ range $c.TypeImports -}}
+use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
+{{ end }}
+#[derive(Debug, thiserror::Error)]
+pub enum {{ $c.Error }} {
+    #[error("calling {operation:?}: {message}")]
+    Runtime {
+        operation: String,
+        message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+    #[error("calling {operation:?}: authentication refused: {message}")]
+    Authentication { operation: String, message: String },
+    #[error("calling {operation:?}: authorization refused: {message}")]
+    Authorization { operation: String, message: String },
+    #[error("calling {operation:?}: validation failed: {message}")]
+    Validation { operation: String, message: String },
+    #[error("calling {operation:?}: {message}")]
+    Semantic { operation: String, message: String },
+    #[error("calling {operation:?}: rate limited: {message}")]
+    RateLimiting { operation: String, message: String },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ $c.Trait }}: Send + Sync {
+{{- range $c.Ops }}
+    fn {{ .Ident }}(&self{{ if .ClientArgs }}, {{ .ClientArgs }}{{ end }}) -> Result<{{ .ClientReturn }}, {{ $c.Error }}>;
+{{- end }}
+}
+{{ end -}}
+
 {{- define "controller" -}}
 {{ .Header }}
 {{ $c := .Controller }}
@@ -375,13 +632,16 @@ use std::sync::Arc;
 {{ range $c.Ports -}}
 use {{ $.CratePath }}port::{{ .PortSnake }}::{{ "{" }}{{ .Port }}, {{ .Port }}Error{{ "}" }};
 {{ end -}}
+{{ if $c.Auth -}}
+use {{ $.CratePath }}types::subject::Subject;
+{{ end -}}
 {{ range $c.TypeImports -}}
 use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
 {{ end }}
 #[derive(Debug, thiserror::Error)]
 pub enum {{ $c.Pascal }}ControllerError {
 {{- range $c.Ports }}
-    #[error("reaching {{ .Snake }} store for {id:?}")]
+    #[error("{{ .Reaching }} {id:?}")]
     {{ .Port }} {
         id: String,
         #[source]
@@ -562,7 +822,13 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 {{ range .Types -}}
 use {{ $v.CratePath }}types::{{ .Snake }}::{{ .Name }};
 {{ end }}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RejectionWire {
+    pub r#type: String,
+    pub message: String,
+}
 {{- range .Types }}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct {{ .Name }}Wire {
 {{- range .Fields }}
@@ -595,7 +861,7 @@ impl From<{{ .Name }}> for {{ .Name }}Wire {
         }
     }
 }
-{{ end -}}
+{{- end }}
 {{ end -}}
 
 {{- define "http_driver" -}}
@@ -603,23 +869,35 @@ impl From<{{ .Name }}> for {{ .Name }}Wire {
 {{ $v := . }}
 use std::sync::Arc;
 
+{{ if .HasStream -}}
+use axum::body::{Body, Bytes};
+{{ end -}}
 use axum::extract::{Json, {{ if .UsesPath }}Path, {{ end }}State};
+{{ if .Auth -}}
+use axum::http::HeaderMap;
+{{ end -}}
 use axum::http::StatusCode;
+{{ if .HasStream -}}
+use axum::http::{header, HeaderValue};
+use axum::response::Response;
+{{ end -}}
 use axum::routing;
 use axum::Router;
 
 {{ range .Controllers -}}
 use {{ $v.CratePath }}controller::{{ "{" }}{{ .Pascal }}Controller, {{ .Pascal }}ControllerError{{ "}" }};
 {{ end -}}
+{{ if .Auth -}}
+use {{ .CratePath }}port::ticket_verifier::{TicketVerifier, TicketVerifierError};
+use {{ .CratePath }}types::subject::Subject;
+{{ end -}}
+{{ range .Events -}}
+use {{ $v.CratePath }}types::{{ .Snake }}::{{ .Name }};
+{{ end -}}
+use super::wire::RejectionWire;
 {{- range .WireImports }}
 use super::wire::{{ . }}Wire;
 {{- end }}
-
-#[derive(Debug, serde::Serialize)]
-pub struct RejectionWire {
-    pub r#type: String,
-    pub message: String,
-}
 
 type Rejection = (StatusCode, Json<RejectionWire>);
 
@@ -674,6 +952,9 @@ pub struct HttpState {
 {{- range .Controllers }}
     pub(crate) {{ .Snake }}_controller: Arc<dyn {{ .Pascal }}Controller + Send + Sync>,
 {{- end }}
+{{- if .Auth }}
+    pub(crate) ticket_verifier: Arc<dyn TicketVerifier + Send + Sync>,
+{{- end }}
 }
 
 pub struct HttpDriver {
@@ -683,10 +964,10 @@ pub struct HttpDriver {
 }
 
 impl HttpDriver {
-    pub fn new(config: HttpDriverConfig{{ range .Controllers }}, {{ .Snake }}_controller: Arc<dyn {{ .Pascal }}Controller + Send + Sync>{{ end }}) -> Self {
+    pub fn new(config: HttpDriverConfig{{ range .Controllers }}, {{ .Snake }}_controller: Arc<dyn {{ .Pascal }}Controller + Send + Sync>{{ end }}{{ if .Auth }}, ticket_verifier: Arc<dyn TicketVerifier + Send + Sync>{{ end }}) -> Self {
         Self {
             config,
-            state: HttpState {{ "{" }}{{ range $i, $c := .Controllers }}{{ if $i }},{{ end }} {{ $c.Snake }}_controller{{ end }} {{ "}" }},
+            state: HttpState {{ "{" }}{{ range $i, $c := .Controllers }}{{ if $i }},{{ end }} {{ $c.Snake }}_controller{{ end }}{{ if .Auth }}, ticket_verifier{{ end }} {{ "}" }},
             listener: None,
         }
     }
@@ -748,6 +1029,76 @@ impl HttpDriver {
             .map_err(|source| HttpDriverError::Serve { address, source })
     }
 }
+{{- if .Auth }}
+
+fn authenticate(state: &HttpState, headers: &HeaderMap) -> Result<Subject, Rejection> {
+    let token = bearer_token(headers).ok_or_else(|| {
+        reject(
+            StatusCode::UNAUTHORIZED,
+            "authentication",
+            "missing bearer token in the authorization header".to_string(),
+        )
+    })?;
+
+    state.ticket_verifier.verify(token).map_err(|error| match error {
+        TicketVerifierError::Refused { .. } => {
+            reject(StatusCode::UNAUTHORIZED, "authentication", error.to_string())
+        }
+        TicketVerifierError::Verify { .. } => {
+            eprintln!("{error:?}");
+            reject(StatusCode::INTERNAL_SERVER_ERROR, "runtime", "internal error".to_string())
+        }
+    })
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+
+    if token.is_empty() {
+        return None;
+    }
+
+    Some(token)
+}
+{{- end }}
+{{- if .HasStream }}
+
+const EVENT_STREAM_BUFFER: usize = 16;
+
+fn event_stream<T, W>(events: std::sync::mpsc::Receiver<T>) -> Response
+where
+    T: Send + 'static,
+    W: From<T> + serde::Serialize + 'static,
+{
+    let (mut sender, body) = http_body_util::channel::Channel::<Bytes>::new(EVENT_STREAM_BUFFER);
+    let handle = tokio::runtime::Handle::current();
+
+    tokio::task::spawn_blocking(move || {
+        while let Ok(event) = events.recv() {
+            let Ok(json) = serde_json::to_string(&W::from(event)) else {
+                break;
+            };
+
+            let frame = Bytes::from(format!("data: {json}\n\n"));
+
+            if handle.block_on(sender.send_data(frame)).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut response = Response::new(Body::new(body));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+
+    response
+}
+{{- end }}
 {{ range .Controllers }}{{ $c := . }}
 fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusCode) -> Rejection {
     match error {
@@ -765,7 +1116,15 @@ fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusC
 {{ end }}
 {{- range .Routes }}
 async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
-{{- if .Response }}
+{{- if .Auth }}
+    let subject = authenticate(&state, &headers)?;
+{{- end }}
+{{- if .Stream }}
+    let events = state
+        .{{ .ControllerSnake }}_controller
+        .{{ .Ident }}({{ .ControllerCall }})
+        .map_err(|error| reject_{{ .ControllerSnake }}(error, {{ .InvalidStatusExpr }}))?;
+{{- else if .Response }}
     let out = state
         .{{ .ControllerSnake }}_controller
         .{{ .Ident }}({{ .ControllerCall }})
@@ -779,5 +1138,206 @@ async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
     Ok({{ .OkExpr }})
 }
 {{ end -}}
+{{ end -}}
+
+{{- define "rest_client" -}}
+{{ .Header }}
+{{ $c := .Client }}
+use std::sync::Arc;
+
+use serde::de::DeserializeOwned;
+
+use {{ .CratePath }}port::token_source::TokenSource;
+use {{ .CratePath }}port::{{ $c.PortModule }}::{{ "{" }}{{ $c.Trait }}, {{ $c.Error }}{{ "}" }};
+{{ range $c.TypeImports -}}
+use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
+{{ end -}}
+use super::wire::RejectionWire;
+{{- range $c.TypeImports }}
+use super::wire::{{ .Name }}Wire;
+{{- end }}
+
+pub struct {{ $c.Config }} {
+    pub base_url: String,
+}
+
+impl Default for {{ $c.Config }} {
+    fn default() -> Self {
+        Self {
+            base_url: "{{ .DefaultBaseURL }}".to_string(),
+        }
+    }
+}
+
+pub struct {{ $c.Struct }} {
+    base_url: String,
+    client: reqwest::Client,
+    token_source: Arc<dyn TokenSource + Send + Sync>,
+}
+
+impl {{ $c.Struct }} {
+    pub fn new(config: {{ $c.Config }}, token_source: Arc<dyn TokenSource + Send + Sync>) -> Self {
+        Self {
+            base_url: config.base_url.trim_end_matches('/').to_string(),
+            client: reqwest::Client::new(),
+            token_source,
+        }
+    }
+
+    fn bearer(&self, operation: &str) -> Result<String, {{ $c.Error }}> {
+        self.token_source
+            .token()
+            .map_err(|source| {{ $c.Error }}::Authentication {
+                operation: operation.to_string(),
+                message: source.to_string(),
+            })
+    }
+
+    fn block<T>(&self, future: impl std::future::Future<Output = T>) -> T {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+    }
+}
+
+async fn send(operation: &str, request: reqwest::RequestBuilder) -> Result<reqwest::Response, {{ $c.Error }}> {
+    let response = request
+        .send()
+        .await
+        .map_err(|source| transport(operation, source))?;
+
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    Err(rejection(operation, response).await)
+}
+
+#[allow(dead_code)]
+async fn answer<W: DeserializeOwned>(operation: &str, request: reqwest::RequestBuilder) -> Result<W, {{ $c.Error }}> {
+    send(operation, request)
+        .await?
+        .json::<W>()
+        .await
+        .map_err(|source| transport(operation, source))
+}
+
+#[allow(dead_code)]
+async fn accept(operation: &str, request: reqwest::RequestBuilder) -> Result<(), {{ $c.Error }}> {
+    send(operation, request).await.map(|_response| ())
+}
+
+fn transport(operation: &str, source: reqwest::Error) -> {{ $c.Error }} {
+    {{ $c.Error }}::Runtime {
+        operation: operation.to_string(),
+        message: "transport failure".to_string(),
+        source: Some(Box::new(source)),
+    }
+}
+
+async fn rejection(operation: &str, response: reqwest::Response) -> {{ $c.Error }} {
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    let operation = operation.to_string();
+
+    let Ok(wire) = serde_json::from_str::<RejectionWire>(&text) else {
+        return {{ $c.Error }}::Runtime {
+            operation,
+            message: format!("{status}: {text}"),
+            source: None,
+        };
+    };
+
+    match wire.r#type.as_str() {
+        "authentication" => {{ $c.Error }}::Authentication { operation, message: wire.message },
+        "authorization" => {{ $c.Error }}::Authorization { operation, message: wire.message },
+        "validation" => {{ $c.Error }}::Validation { operation, message: wire.message },
+        "semantic" => {{ $c.Error }}::Semantic { operation, message: wire.message },
+        "rateLimiting" => {{ $c.Error }}::RateLimiting { operation, message: wire.message },
+        "runtime" => {{ $c.Error }}::Runtime {
+            operation,
+            message: wire.message,
+            source: None,
+        },
+        other => {{ $c.Error }}::Runtime {
+            operation,
+            message: format!("{status}: unknown error type {other:?}: {}", wire.message),
+            source: None,
+        },
+    }
+}
+{{- if $c.HasStream }}
+
+async fn stream_events<W, T>(operation: &str, request: reqwest::RequestBuilder) -> Result<std::sync::mpsc::Receiver<T>, {{ $c.Error }}>
+where
+    W: DeserializeOwned + Send + 'static,
+    T: From<W> + Send + 'static,
+{
+    let response = send(operation, request).await?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    tokio::spawn(forward_events::<W, T>(response, sender));
+
+    Ok(receiver)
+}
+
+async fn forward_events<W, T>(mut response: reqwest::Response, sender: std::sync::mpsc::Sender<T>)
+where
+    W: DeserializeOwned + Send + 'static,
+    T: From<W> + Send + 'static,
+{
+    let mut buffer: Vec<u8> = Vec::new();
+
+    while let Ok(Some(chunk)) = response.chunk().await {
+        buffer.extend_from_slice(&chunk);
+
+        while let Some(end) = frame_end(&buffer) {
+            let frame: Vec<u8> = buffer.drain(..end + 2).collect();
+
+            for event in parse_frame::<W>(&frame) {
+                if sender.send(T::from(event)).is_err() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn frame_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(2).position(|pair| pair == b"\n\n")
+}
+
+fn parse_frame<W: DeserializeOwned>(frame: &[u8]) -> Vec<W> {
+    String::from_utf8_lossy(frame)
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|data| serde_json::from_str::<W>(data.trim_start()).ok())
+        .collect()
+}
+{{- end }}
+
+impl {{ $c.Trait }} for {{ $c.Struct }} {
+{{- range $c.Ops }}
+    fn {{ .Ident }}(&self{{ if .ClientArgs }}, {{ .ClientArgs }}{{ end }}) -> Result<{{ .ClientReturn }}, {{ $c.Error }}> {
+        let operation = "{{ .ID }}";
+        let request = self
+            .client
+            .request(reqwest::Method::{{ .Method }}, {{ .URLExpr }}){{ if .Body }}
+            .json(&{{ .Body }}Wire::from(body)){{ end }}{{ if .Stream }}
+            .header("accept", "text/event-stream"){{ end }};
+{{- if .Auth }}
+        let request = request.bearer_auth(self.bearer(operation)?);
+{{- end }}
+{{- if .Stream }}
+
+        self.block(stream_events::<{{ .Response }}Wire, {{ .Response }}>(operation, request))
+{{- else if .Response }}
+
+        self.block(answer::<{{ .Response }}Wire>(operation, request)).map({{ .Response }}::from)
+{{- else }}
+
+        self.block(accept(operation, request))
+{{- end }}
+    }
+{{- end }}
+}
 {{ end -}}
 `))

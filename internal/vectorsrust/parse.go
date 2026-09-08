@@ -34,6 +34,8 @@ type VectorCase struct {
 	ExpectedStatus         int             `json:"expectedStatus"`
 	ExpectedBody           json.RawMessage `json:"expectedBody"`
 	ExpectedErrorSubstring string          `json:"expectedErrorSubstring"`
+	Bearer                 string          `json:"bearer"`
+	Subject                string          `json:"subject"`
 	Gate                   string          `json:"gate"`
 	Session                string          `json:"session"`
 	Hello                  json.RawMessage `json:"hello"`

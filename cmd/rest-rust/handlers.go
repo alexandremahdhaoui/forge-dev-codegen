@@ -35,6 +35,7 @@ func NewHandlers() Handlers {
 			files, err := restrust.Generate([]byte(input.OpenapiSpec), restrust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
+				Side:    layoutString(input.Layout, "side"),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the rest cell of %q: %w", input.Name, err)

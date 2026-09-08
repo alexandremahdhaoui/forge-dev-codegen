@@ -30,6 +30,8 @@ type view struct {
 	Header           string
 	Crate            string
 	RestCell         string
+	Auth             bool
+	HasStream        bool
 	Controllers      []controllerView
 	TypeImports      []importView
 	Tests            []testView
@@ -89,6 +91,7 @@ type testView struct {
 	ArmExpectMethod          string
 	ArmClosureParams         string
 	ArmReturning             string
+	ControllerNever          bool
 	HasWith                  bool
 	WithPredicates           string
 	DriverArgs               []string
@@ -96,6 +99,11 @@ type testView struct {
 	URI                      string
 	HasBody                  bool
 	BodyLiteral              string
+	HasBearer                bool
+	BearerLiteral            string
+	HasSubject               bool
+	SubjectLiteral           string
+	Stream                   bool
 	ExpectedStatus           int
 	HasExpectedBody          bool
 	ExpectedBodyLiteral      string
@@ -107,6 +115,15 @@ func buildOpSignature(op restrust.Operation) opSignature {
 	sig := opSignature{Ident: op.Ident, ReturnType: "()"}
 	if op.Response != "" {
 		sig.ReturnType = op.Response
+	}
+
+	if op.Stream {
+		sig.ReturnType = "std::sync::mpsc::Receiver<" + op.Response + ">"
+	}
+
+	if op.Auth {
+		sig.ArgNames = append(sig.ArgNames, "subject")
+		sig.ArgTypes = append(sig.ArgTypes, "Subject")
 	}
 
 	for _, p := range op.Params {
@@ -135,6 +152,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 		Header:   header,
 		Crate:    rustname.Snake(opts.Service),
 		RestCell: opts.RestCell,
+		Auth:     spec.Auth,
 	}
 
 	opsByID := map[string]restrust.Operation{}
@@ -161,6 +179,10 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 		v.Controllers = append(v.Controllers, cv)
 	}
 
+	if spec.Auth {
+		usedTypes["Subject"] = true
+	}
+
 	for _, name := range sortedStrings(usedTypes) {
 		v.TypeImports = append(v.TypeImports, importView{Snake: rustname.Snake(name), Name: name})
 	}
@@ -182,11 +204,13 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 	}
 
 	for i := range v.Tests {
-		v.Tests[i].DriverArgs = driverArgs(v.Controllers, v.Tests[i].ArmController, v.Tests[i].ArmVar)
+		v.Tests[i].DriverArgs = driverArgs(v.Controllers, v.Tests[i].ArmController, v.Tests[i].ArmVar, spec.Auth)
 
 		if v.Tests[i].HasExpectedBody {
 			v.NeedsBodyMatcher = true
 		}
+
+		v.HasStream = v.HasStream || v.Tests[i].Stream
 	}
 
 	if datagrams != nil && len(vectors.UdpCases) > 0 {
@@ -217,6 +241,7 @@ const (
 	armKindNotFound
 	armKindInvalid
 	armKindNotImplemented
+	armKindUnauthenticated
 )
 
 type arm struct {
@@ -240,6 +265,10 @@ func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
 		return arm{kind: armKindOK}, nil
 	}
 
+	if c.ExpectedStatus == 401 && op.Auth {
+		return arm{kind: armKindUnauthenticated, id: c.ExpectedErrorSubstring}, nil
+	}
+
 	switch c.ExpectedStatus {
 	case 404:
 		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}, nil
@@ -249,21 +278,41 @@ func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
 		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}, nil
 	default:
 		return arm{}, fmt.Errorf(
-			"reading vector %q: expectedStatus %d matches none of NotFound (404), Invalid (%d) or NotImplemented (501), vectors-rust cannot choose which controller error to mock",
+			"reading vector %q: expectedStatus %d matches none of NotFound (404), Invalid (%d), NotImplemented (501) or a refused bearer on an x-auth operation (401), vectors-rust cannot choose which controller error to mock",
 			c.Case, c.ExpectedStatus, op.InvalidStatus,
 		)
 	}
 }
 
+func checkBearer(c VectorCase, op restrust.Operation) error {
+	if !op.Auth && (c.Bearer != "" || c.Subject != "") {
+		return fmt.Errorf("reading vector %q: bearer and subject belong to an x-auth operation, and %q carries no x-auth", c.Case, op.ID)
+	}
+
+	if c.Subject != "" && c.Bearer == "" {
+		return fmt.Errorf("reading vector %q: subject names what the verifier answers for bearer, and there is no bearer", c.Case)
+	}
+
+	if op.Auth && len(c.ControllerReply) > 0 && c.Subject == "" {
+		return fmt.Errorf("reading vector %q: a success case on the x-auth operation %q needs a bearer and the subject the verifier answers for it", c.Case, op.ID)
+	}
+
+	return nil
+}
+
 func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (testView, error) {
 	sig := buildOpSignature(op)
+
+	if err := checkBearer(c, op); err != nil {
+		return testView{}, err
+	}
 
 	uri, hasBody, bodyLiteral, err := buildRequest(op, c.Input)
 	if err != nil {
 		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
-	withPredicates, err := buildWithPredicates(op, c.Input)
+	withPredicates, err := buildWithPredicates(op, c)
 	if err != nil {
 		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
@@ -285,12 +334,18 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (
 		ArmExpectMethod:      "expect_" + sig.Ident,
 		ArmClosureParams:     sig.ClosureParams(),
 		ArmReturning:         returning,
+		ControllerNever:      chosen.kind == armKindUnauthenticated,
 		HasWith:              len(withPredicates) > 0,
 		WithPredicates:       strings.Join(withPredicates, ", "),
 		Method:               op.Method,
 		URI:                  uri,
 		HasBody:              hasBody,
 		BodyLiteral:          bodyLiteral,
+		HasBearer:            c.Bearer != "",
+		BearerLiteral:        strconv.Quote(c.Bearer),
+		HasSubject:           c.Subject != "",
+		SubjectLiteral:       strconv.Quote(c.Subject),
+		Stream:               op.Stream,
 		ExpectedStatus:       c.ExpectedStatus,
 		HasExpectedBody:      len(c.ExpectedBody) > 0,
 		HasExpectedSubstring: c.ExpectedErrorSubstring != "",
@@ -341,13 +396,19 @@ func buildRequest(op restrust.Operation, input json.RawMessage) (uri string, has
 	return uri, true, strconv.Quote(compact), nil
 }
 
-func buildWithPredicates(op restrust.Operation, input json.RawMessage) ([]string, error) {
+func buildWithPredicates(op restrust.Operation, c VectorCase) ([]string, error) {
+	input := c.Input
+
 	inputMap, err := parseInput(input)
 	if err != nil {
 		return nil, err
 	}
 
-	preds := make([]string, 0, len(op.Params)+1)
+	preds := make([]string, 0, len(op.Params)+2)
+
+	if op.Auth {
+		preds = append(preds, "mockall::predicate::eq(Subject { id: "+strconv.Quote(c.Subject)+".to_string() })")
+	}
 
 	for _, p := range op.Params {
 		value, err := paramValue(p, inputMap)
@@ -421,7 +482,15 @@ func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.C
 			return "", fmt.Errorf("reading controllerReply: %w", err)
 		}
 
-		return fmt.Sprintf("Ok(serde_json::from_str::<%s>(%s).expect(\"decoding controllerReply\"))", op.Response, strconv.Quote(compact)), nil
+		decoded := fmt.Sprintf("serde_json::from_str::<%s>(%s).expect(\"decoding controllerReply\")", op.Response, strconv.Quote(compact))
+
+		if op.Stream {
+			return "{ let (sender, receiver) = std::sync::mpsc::channel(); sender.send(" + decoded + ").expect(\"sending the event\"); Ok(receiver) }", nil
+		}
+
+		return "Ok(" + decoded + ")", nil
+	case armKindUnauthenticated:
+		return "", nil
 	case armKindNotFound:
 		return fmt.Sprintf("Err(%sControllerError::NotFound { id: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	case armKindInvalid:
@@ -433,8 +502,8 @@ func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.C
 	}
 }
 
-func driverArgs(controllers []controllerView, armedPascal, armedVar string) []string {
-	args := make([]string, 0, len(controllers))
+func driverArgs(controllers []controllerView, armedPascal, armedVar string, auth bool) []string {
+	args := make([]string, 0, len(controllers)+1)
 
 	for _, c := range controllers {
 		if c.Pascal == armedPascal {
@@ -444,6 +513,10 @@ func driverArgs(controllers []controllerView, armedPascal, armedVar string) []st
 		}
 
 		args = append(args, "std::sync::Arc::new(Mock"+c.Pascal+"Controller::new())")
+	}
+
+	if auth {
+		args = append(args, "std::sync::Arc::new(ticket_verifier)")
 	}
 
 	return args

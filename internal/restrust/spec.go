@@ -77,6 +77,8 @@ type operation struct {
 	Summary     string   `json:"summary"`
 	Controller  string   `json:"x-controller"`
 	Ports       []string `json:"x-ports"`
+	Auth        string   `json:"x-auth"`
+	Stream      string   `json:"x-stream"`
 	Parameters  []struct {
 		Name   string `json:"name"`
 		In     string `json:"in"`
@@ -131,6 +133,8 @@ type Operation struct {
 	InvalidStatus int
 	Controller    string
 	Ports         []string
+	Auth          bool
+	Stream        bool
 }
 
 type Controller struct {
@@ -144,13 +148,27 @@ type Controller struct {
 type Spec struct {
 	Types       []TypeDef
 	Stores      []TypeDef
+	Events      []TypeDef
 	Controllers []Controller
 	Operations  []Operation
+	Auth        bool
 }
 
 var methods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
 const forgeDevSpecSchema = "Spec"
+
+const AuthBearer = "bearer"
+
+const StreamEvents = "events"
+
+const StorePortSuffix = "Store"
+
+const SubscribePortSuffix = "Subscribe"
+
+const eventStreamContent = "text/event-stream"
+
+const jsonContent = "application/json"
 
 func checkName(what, name string) error {
 	if rustname.IsSnakeIdent(rustname.Snake(name)) {
@@ -185,12 +203,41 @@ func Parse(doc []byte) (*Spec, error) {
 		return nil, err
 	}
 
+	events := eventTypes(operations, types)
+	auth := false
+
+	for _, op := range operations {
+		auth = auth || op.Auth
+	}
+
 	return &Spec{
 		Types:       types,
 		Stores:      stores,
+		Events:      events,
 		Controllers: groupControllers(operations),
 		Operations:  operations,
+		Auth:        auth,
 	}, nil
+}
+
+func eventTypes(operations []Operation, types []TypeDef) []TypeDef {
+	streamed := map[string]bool{}
+
+	for _, op := range operations {
+		if op.Stream {
+			streamed[op.Response] = true
+		}
+	}
+
+	events := []TypeDef{}
+
+	for _, t := range types {
+		if streamed[t.Name] {
+			events = append(events, t)
+		}
+	}
+
+	return events
 }
 
 func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
@@ -382,13 +429,14 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, fmt.Errorf("reading %s: %w", where, err)
 	}
 
-	ports := append([]string{}, op.Ports...)
-	sort.Strings(ports)
+	auth, err := parseAuth(where, op)
+	if err != nil {
+		return Operation{}, err
+	}
 
-	for _, port := range ports {
-		if !storeNames[port] {
-			return Operation{}, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema", where, port)
-		}
+	stream, err := parseStream(where, method, op)
+	if err != nil {
+		return Operation{}, err
 	}
 
 	params, err := parseParams(where, path, op)
@@ -401,7 +449,20 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, err
 	}
 
-	response, status, err := parseResponse(where, op, schemas)
+	if stream && body != "" {
+		return Operation{}, fmt.Errorf("reading %s: an x-stream operation takes no request body", where)
+	}
+
+	response, status, err := parseResponse(where, op, schemas, stream)
+	if err != nil {
+		return Operation{}, err
+	}
+
+	if stream && response == "" {
+		return Operation{}, fmt.Errorf("reading %s: an x-stream operation needs a 2xx response with a %s schema, it is the event type", where, eventStreamContent)
+	}
+
+	ports, err := parsePorts(where, op, stream, response, storeNames)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -420,7 +481,64 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		InvalidStatus: invalidStatus(op),
 		Controller:    op.Controller,
 		Ports:         ports,
+		Auth:          auth,
+		Stream:        stream,
 	}, nil
+}
+
+func parseAuth(where string, op operation) (bool, error) {
+	switch op.Auth {
+	case "":
+		return false, nil
+	case AuthBearer:
+		return true, nil
+	default:
+		return false, fmt.Errorf("reading %s: x-auth is %q, the only value is %q", where, op.Auth, AuthBearer)
+	}
+}
+
+func parseStream(where, method string, op operation) (bool, error) {
+	switch op.Stream {
+	case "":
+		return false, nil
+	case StreamEvents:
+		if method != "get" {
+			return false, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
+		}
+
+		return true, nil
+	default:
+		return false, fmt.Errorf("reading %s: x-stream is %q, the only value is %q", where, op.Stream, StreamEvents)
+	}
+}
+
+func parsePorts(where string, op operation, stream bool, response string, storeNames map[string]bool) ([]string, error) {
+	subscribe := ""
+	if stream {
+		subscribe = response + SubscribePortSuffix
+	}
+
+	ports := append([]string{}, op.Ports...)
+
+	for _, port := range ports {
+		if storeNames[port] || (subscribe != "" && port == subscribe) {
+			continue
+		}
+
+		if strings.HasSuffix(port, SubscribePortSuffix) {
+			return nil, fmt.Errorf("reading %s: x-ports names %q, a subscribe port is %s of an x-stream operation's response", where, port, "<Event>"+SubscribePortSuffix)
+		}
+
+		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema", where, port)
+	}
+
+	if subscribe != "" {
+		ports = union(ports, []string{subscribe})
+	}
+
+	sort.Strings(ports)
+
+	return ports, nil
 }
 
 func parseParams(where, path string, op operation) ([]Param, error) {
@@ -458,7 +576,7 @@ func parseParams(where, path string, op operation) ([]Param, error) {
 }
 
 func parseBody(where string, op operation, schemas map[string]schema) (string, error) {
-	c, ok := op.RequestBody.Content["application/json"]
+	c, ok := op.RequestBody.Content[jsonContent]
 	if !ok {
 		return "", nil
 	}
@@ -475,8 +593,13 @@ func parseBody(where string, op operation, schemas map[string]schema) (string, e
 	return name, nil
 }
 
-func parseResponse(where string, op operation, schemas map[string]schema) (string, int, error) {
+func parseResponse(where string, op operation, schemas map[string]schema, stream bool) (string, int, error) {
 	codes := sortedKeys(op.Responses)
+
+	contentType := jsonContent
+	if stream {
+		contentType = eventStreamContent
+	}
 
 	for _, code := range codes {
 		var status int
@@ -484,7 +607,7 @@ func parseResponse(where string, op operation, schemas map[string]schema) (strin
 			continue
 		}
 
-		c, ok := op.Responses[code].Content["application/json"]
+		c, ok := op.Responses[code].Content[contentType]
 		if !ok {
 			return "", status, nil
 		}

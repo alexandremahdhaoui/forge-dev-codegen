@@ -35,14 +35,14 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cell names the module directory and defaults to rest.
+          description: The kind's layout. cell names the module directory and defaults to rest. side is server, client or both and defaults to server. The server side is the axum driver, the controller traits and the store ports. The client side is one client port per controller, a reqwest adapter per port and the TokenSource port the adapter reads its bearer token from.
         runtime:
           type: object
           additionalProperties: true
           description: The runnable inputs. Unused here.
         openapiSpec:
           type: string
-          description: The raw OpenAPI document. Its schemas, x-store, paths, x-controller and x-ports decide everything emitted.
+          description: The raw OpenAPI document. Its schemas, x-store, paths, x-controller, x-ports, x-auth and x-stream decide everything emitted.
         checksum:
           type: string
           description: The source checksum forge-dev computed.

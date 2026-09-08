@@ -57,6 +57,8 @@ type candidatePlan struct {
 	ConfigType string
 	Fallible   bool
 	Fields     []fieldPlan
+	Ports      []string
+	PortVars   []string
 }
 
 type fieldPlan struct {
@@ -351,49 +353,143 @@ func planPorts(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[s
 		byName[entry.Adapter.Name] = entry
 	}
 
-	for _, trait := range sortedKeys(consumed) {
-		block, err := portBlock(trait, consumed[trait][0], wiring, merged)
+	planned := map[string]portPlan{}
+	needs := map[string][]string{}
+	queue := sortedKeys(consumed)
+
+	for len(queue) > 0 {
+		trait := queue[0]
+		queue = queue[1:]
+
+		if _, done := planned[trait]; done {
+			continue
+		}
+
+		pp, err := planPort(p, trait, consumed[trait][0], wiring, merged, byName, imports)
 		if err != nil {
 			return err
 		}
 
-		portEntry, provided := merged.Ports[trait]
-		if !provided {
-			return fmt.Errorf(
-				"wiring port %q: no cell manifest declares that port trait",
-				trait,
-			)
-		}
+		planned[trait] = pp
 
-		pp := portPlan{
-			Trait:     trait,
-			Var:       rustname.Snake(trait),
-			ConfigVar: configKey(trait),
-			Names:     list(candidateNames(block)),
-		}
-
-		imports[p.Crate+"::"+portEntry.Port.Module+"::"+trait] = true
-
-		for _, name := range candidateNames(block) {
-			cp, err := planCandidate(p, trait, name, block.Adapters[name], byName, imports)
-			if err != nil {
-				return err
+		for _, cp := range pp.Candidates {
+			for _, needed := range cp.Ports {
+				consumed[needed] = append(consumed[needed], fmt.Sprintf("adapter %q", cp.Name))
+				needs[trait] = append(needs[trait], needed)
+				queue = append(queue, needed)
 			}
-
-			pp.Candidates = append(pp.Candidates, cp)
 		}
+	}
 
-		p.Keys = append(p.Keys, specKey{
-			Key:         configKey(trait),
-			Type:        "string",
-			Default:     block.Default,
-			Description: "Which " + trait + " adapter to build, one of " + pp.Names,
-		})
+	order, err := orderPorts(planned, needs)
+	if err != nil {
+		return err
+	}
 
-		p.Ports = append(p.Ports, pp)
+	for _, trait := range order {
+		p.Ports = append(p.Ports, planned[trait])
 	}
 
 	return nil
+}
+
+func planPort(
+	p *plan,
+	trait, consumer string,
+	wiring Wiring,
+	merged cellmanifest.Merged,
+	byName map[string]cellmanifest.AdapterEntry,
+	imports map[string]bool,
+) (portPlan, error) {
+	block, err := portBlock(trait, consumer, wiring, merged)
+	if err != nil {
+		return portPlan{}, err
+	}
+
+	portEntry, provided := merged.Ports[trait]
+	if !provided {
+		return portPlan{}, fmt.Errorf(
+			"wiring port %q: no cell manifest declares that port trait",
+			trait,
+		)
+	}
+
+	pp := portPlan{
+		Trait:     trait,
+		Var:       rustname.Snake(trait),
+		ConfigVar: configKey(trait),
+		Names:     list(candidateNames(block)),
+	}
+
+	imports[p.Crate+"::"+portEntry.Port.Module+"::"+trait] = true
+
+	for _, name := range candidateNames(block) {
+		cp, err := planCandidate(p, trait, name, block.Adapters[name], byName, imports)
+		if err != nil {
+			return portPlan{}, err
+		}
+
+		pp.Candidates = append(pp.Candidates, cp)
+	}
+
+	p.Keys = append(p.Keys, specKey{
+		Key:         configKey(trait),
+		Type:        "string",
+		Default:     block.Default,
+		Description: "Which " + trait + " adapter to build, one of " + pp.Names,
+	})
+
+	return pp, nil
+}
+
+func orderPorts(planned map[string]portPlan, needs map[string][]string) ([]string, error) {
+	order := []string{}
+	built := map[string]bool{}
+
+	for len(order) < len(planned) {
+		progressed := false
+
+		for _, trait := range sortedKeys(planned) {
+			if built[trait] || !allBuilt(needs[trait], built) {
+				continue
+			}
+
+			built[trait] = true
+			order = append(order, trait)
+			progressed = true
+		}
+
+		if !progressed {
+			return nil, fmt.Errorf(
+				"wiring the ports: the adapters of %s consume each other in a cycle, an adapter cannot need the port it answers",
+				list(unbuilt(planned, built)),
+			)
+		}
+	}
+
+	return order, nil
+}
+
+func allBuilt(traits []string, built map[string]bool) bool {
+	for _, trait := range traits {
+		if !built[trait] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func unbuilt(planned map[string]portPlan, built map[string]bool) []string {
+	out := []string{}
+
+	for _, trait := range sortedKeys(planned) {
+		if !built[trait] {
+			out = append(out, trait)
+		}
+	}
+
+	return out
 }
 
 func portBlock(trait, consumer string, wiring Wiring, merged cellmanifest.Merged) (WiringPort, error) {
@@ -461,6 +557,11 @@ func planCandidate(
 			Type:       entry.Adapter.Type,
 			ConfigType: entry.Adapter.Type + "Config",
 			Fallible:   entry.Adapter.Fallible,
+			Ports:      append([]string{}, entry.Adapter.Ports...),
+		}
+
+		for _, port := range entry.Adapter.Ports {
+			cp.PortVars = append(cp.PortVars, rustname.Snake(port))
 		}
 
 		imports[p.Crate+"::"+entry.Adapter.Module+"::{"+cp.Type+", "+cp.ConfigType+"}"] = true

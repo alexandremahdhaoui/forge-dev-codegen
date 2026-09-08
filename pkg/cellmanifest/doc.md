@@ -21,7 +21,10 @@ The manifest lists what the cell provides and what it needs.
   it consumes under `ports`, its config fields. hexagonal-rust hands the
   controllers to `new` first and the ports after them, in manifest order
 - `provides.adapters` an adapter, the port it implements, whether its `new` is
-  fallible, its config fields
+  fallible, the port traits it consumes under `ports`, its config fields.
+  hexagonal-rust builds a consumed port before the adapter and hands it to
+  `new` after the config, in manifest order. An adapter never consumes the
+  port it implements
 - `provides.controllers` a controller trait, its impl struct, its ports
 - `provides.ports` a port trait the cell declares
 - `requires.ports` a port trait the cell needs somebody else to declare

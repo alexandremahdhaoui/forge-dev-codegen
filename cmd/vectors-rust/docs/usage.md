@@ -64,6 +64,44 @@ to `app`. It may sit at the top level of the model or under `layout`.
 
 A case needs `controllerReply` or `expectedErrorSubstring`, never neither.
 
+## Guarded cases
+
+An operation marked `x-auth: bearer` takes two more fields.
+
+| Field | Meaning |
+|---|---|
+| `bearer` | The token sent as `Authorization: Bearer <bearer>`. Absent means no header, and the driver answers 401 before the verifier runs. |
+| `subject` | The subject id the mocked `TicketVerifier` answers for `bearer`. Absent with a `bearer` means the verifier refuses it. |
+
+A success case on a guarded operation needs both. The mocked controller
+then expects `Subject { id: subject }` as its first argument. A 401 case
+carries `expectedErrorSubstring` and no `controllerReply`. The refusal
+the mocked verifier answers embeds that substring, and the missing header
+message names the bearer. The controller is armed with `never()`. Both
+fields are refused on an operation without `x-auth`.
+
+```json
+{
+  "case": "count_with_a_valid_ticket_adds_one",
+  "operation": "countGreeting",
+  "input": { "id": "g1" },
+  "bearer": "open",
+  "subject": "friend",
+  "controllerReply": { "id": "g1", "name": "Songe", "count": 1 },
+  "expectedStatus": 200,
+  "expectedBody": { "id": "g1", "name": "Songe", "count": 1 }
+}
+```
+
+## Stream cases
+
+An operation marked `x-stream: events` answers `text/event-stream`.
+`controllerReply` is one event. The mocked controller answers a receiver
+holding that one event and closes it. The test asserts the status, the
+content type, and matches `expectedBody` against the first `data:` frame
+of the body as JSON. The test runs on a multi thread runtime because the
+driver bridges the receiver on a blocking thread.
+
 ## Datagram cases
 
 A cell that also declares `proto:` reads the datagram service block. A case

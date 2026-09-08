@@ -218,6 +218,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 	driverWithABadPort := exampleManifest()
 	driverWithABadPort.Provides.Drivers[0].Ports = []string{"session-gate"}
 
+	adapterWithABadPort := exampleManifest()
+	adapterWithABadPort.Provides.Adapters[0].Ports = []string{"token-source"}
+
+	adapterConsumingItsOwnPort := exampleManifest()
+	adapterConsumingItsOwnPort.Provides.Adapters[0].Ports = []string{adapterConsumingItsOwnPort.Provides.Adapters[0].Implements}
+
 	driverWithoutModule := exampleManifest()
 	driverWithoutModule.Provides.Drivers[0].Module = ""
 
@@ -303,6 +309,16 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			name:     "a port a driver consumes that is not a Rust ident is refused",
 			manifest: driverWithABadPort,
 			message:  `driver "grpc" in cell "grpc" consumes port "session-gate" which is not a Rust ident`,
+		},
+		{
+			name:     "a port an adapter consumes that is not a Rust ident is refused",
+			manifest: adapterWithABadPort,
+			message:  `adapter "hello_grpc_client" in cell "grpc" consumes port "token-source" which is not a Rust ident`,
+		},
+		{
+			name:     "an adapter that consumes the port it implements is refused",
+			manifest: adapterConsumingItsOwnPort,
+			message:  `adapter "hello_grpc_client" in cell "grpc" consumes the port "HelloClient" it implements`,
 		},
 		{
 			name:     "a cell name that is not snake case is refused",

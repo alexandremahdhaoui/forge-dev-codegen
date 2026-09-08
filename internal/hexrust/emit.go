@@ -434,7 +434,7 @@ async fn run() -> anyhow::Result<()> {
 {{- range .Fields }}
                 {{ .Name }}: {{ .Expr }},
 {{- end }}
-            })
+            }{{ range .PortVars }}, {{ . }}.clone(){{ end }})
 {{- if .Fallible }}
             .context("building the {{ .Name }} adapter of {{ $.Binary }}")?,
 {{- else }},

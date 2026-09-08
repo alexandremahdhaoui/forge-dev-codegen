@@ -95,6 +95,7 @@
         "module": { "$ref": "#/$defs/modulePath" },
         "implements": { "$ref": "#/$defs/rustIdent" },
         "fallible": { "type": "boolean" },
+        "ports": { "$ref": "#/$defs/traitList" },
         "config": { "$ref": "#/$defs/config" }
       }
     },
