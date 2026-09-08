@@ -6,10 +6,11 @@ the frame and key types, a `Screen` port and a `Keyboard` port, one
 crossterm adapter for each, a controller trait the user implements, and
 a driver that owns the terminal loop.
 
-The driver puts the terminal in raw mode on `bind`, announces, and in
-`serve` runs the loop. Read a key. Call the controller. Draw what the
-controller returns. Stop when the controller says quit. The terminal is
-restored on every exit path, a clean quit, an error, and a panic.
+The driver prints its announcement, then puts the terminal in raw mode
+on `bind`, and in `serve` runs the loop. Read a key. Call the
+controller. Draw what the controller returns. Stop when the controller
+says quit. The terminal is restored on every exit path, a clean quit, an
+error, a panic, and a driver dropped after `bind` without `serve`.
 
 ## The cell file
 
@@ -123,11 +124,20 @@ trait, a supertrait of the controller, hands them to the driver. The
 user never touches them. The day a manifest driver may name ports of its
 own, the supertrait goes away and nothing the user wrote changes.
 
-`bind` calls `Screen::enter`. `announce` prints `TUI <width>x<height>`.
-`serve` draws the first frame and loops. A controller error ends `serve`
-with the input named. A keyboard error ends it with the tick named. In
-every case `Screen::leave` runs before the error comes back, and a guard
-runs it again on a panic that unwinds through the loop.
+`bind` refuses a `tick_ms` below 1 naming the key, prints
+`TUI <width>x<height>` while the shell still owns the screen, then calls
+`Screen::enter`. `announce` only refuses a driver that is not bound.
+`serve` moves the driver into a blocking tokio task, draws the first
+frame and loops there, so the async runtime keeps serving the other
+drivers. A controller error ends `serve` with the input named. A
+keyboard error ends it with the tick named. In every case
+`Screen::leave` runs before the error comes back. The driver's `Drop`
+runs `Screen::leave` when the screen is still open, so a panic inside
+the loop and a driver dropped after `bind` both restore the terminal.
+The crossterm screen turns raw mode off again when the alternate screen
+cannot be entered, and shows the cursor at the end of the prompt line
+while the prompt is open. `error_chain` in the driver module is public,
+a main joins an error chain with it.
 
 ## The manifest
 
@@ -159,9 +169,10 @@ drivers:
 
 ## What the crate needs
 
-`crossterm` and `thiserror`, plus `mockall` under dev. The driver's
-`bind` and `serve` are async so main awaits them like every other
-driver. They never await inside, so the loop blocks the task it runs on.
+`crossterm`, `thiserror` and `tokio` with `rt`, plus `mockall` under
+dev. The driver's `bind` and `serve` are async so main awaits them like
+every other driver. `serve` awaits one blocking task that holds the
+loop.
 
 The consumer's own `lib.rs` mounts the cell with one plain line, which
 hexagonal-rust writes from `layout.cells`:

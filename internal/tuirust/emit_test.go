@@ -228,7 +228,11 @@ func TestTheDriverBindsTheGridSizeTheTickAndTheViKeysFromTheSpec(t *testing.T) {
 		"pub fn announce(&self) -> Result<(), TuiDriverError> {",
 		"pub async fn serve(self) -> Result<(), TuiDriverError> {",
 		"Some(Input::Interrupt) => Next::Quit,",
-		"impl Drop for Restore {",
+		"impl Drop for TuiDriver {",
+		"tokio::task::spawn_blocking(move || {",
+		"pub fn error_chain(error: &dyn std::error::Error) -> String {",
+		"if self.config.tick_ms < 1 {",
+		"println!(\"TUI {WIDTH}x{HEIGHT}\");",
 	} {
 		if !strings.Contains(driver, want) {
 			t.Fatalf("the driver never carried %q:\n%s", want, driver)
@@ -271,8 +275,10 @@ func TestTheAdaptersWriteToStdoutThroughCrosstermAndRestoreTheTerminal(t *testin
 
 	for _, want := range []string{
 		"terminal::enable_raw_mode().map_err(entering)?;",
-		"execute!(stdout(), EnterAlternateScreen, cursor::Hide).map_err(entering)",
+		"if let Err(source) = execute!(stdout(), EnterAlternateScreen, cursor::Hide) {\n            terminal::disable_raw_mode().map_err(entering)?;",
 		"execute!(stdout(), cursor::Show, LeaveAlternateScreen).map_err(leaving)?;",
+		"Print(text),\n                cursor::Show\n            )",
+		"Prompt::Closed => queue!(out, cursor::Hide).map_err(&failing)?,",
 		"terminal::disable_raw_mode().map_err(leaving)",
 		"pub struct CrosstermScreenConfig {}",
 		"pub fn new(config: CrosstermScreenConfig) -> Self {",

@@ -403,8 +403,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_panic_inside_the_loop_still_leaves_the_screen() {
+    #[tokio::test]
+    async fn a_panic_inside_the_loop_still_leaves_the_screen_and_comes_back_as_a_join_error() {
         let (screen, recording) = recording_screen();
 
         let mut keyboard = MockKeyboard::new();
@@ -412,15 +412,43 @@ mod tests {
             .expect_read()
             .returning(|_| panic!("the keyboard exploded"));
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("a runtime");
+        let error = play(screen, keyboard).await.expect_err("a join error");
 
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            runtime.block_on(play(screen, keyboard))
-        }));
-
-        assert!(outcome.is_err());
+        assert!(matches!(error, TuiDriverError::Join { .. }));
         assert_eq!(*recording.left.lock().expect("the leave count"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_driver_bound_and_dropped_without_serve_restores_the_terminal() {
+        let (screen, recording) = recording_screen();
+        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(
+            BoardControllerImpl::new(Arc::new(screen), Arc::new(MockKeyboard::new())),
+        );
+
+        let mut driver = TuiDriver::new(TuiDriverConfig::default(), controller);
+        driver.bind().await.expect("a bound driver");
+
+        drop(driver);
+
+        assert_eq!(*recording.left.lock().expect("the leave count"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_tick_of_zero_is_refused_at_bind_naming_the_key() {
+        let mut screen = MockScreen::new();
+        screen.expect_enter().never();
+
+        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(
+            BoardControllerImpl::new(Arc::new(screen), Arc::new(MockKeyboard::new())),
+        );
+
+        let mut driver = TuiDriver::new(TuiDriverConfig { tick_ms: 0 }, controller);
+
+        let error = driver.bind().await.expect_err("a refusal");
+
+        assert_eq!(
+            error.to_string(),
+            "reading tick_ms for the tui driver: 0 is below 1 ms"
+        );
     }
 }

@@ -3,7 +3,9 @@ use std::sync::Arc;
 use demo_tui_rust::tui::adapter::crossterm_keyboard::{CrosstermKeyboard, CrosstermKeyboardConfig};
 use demo_tui_rust::tui::adapter::crossterm_screen::{CrosstermScreen, CrosstermScreenConfig};
 use demo_tui_rust::tui::controller::{BoardController, BoardControllerImpl};
-use demo_tui_rust::tui::driver::tui_driver::{TuiDriver, TuiDriverConfig, TuiDriverError};
+use demo_tui_rust::tui::driver::tui_driver::{
+    error_chain, TuiDriver, TuiDriverConfig, TuiDriverError,
+};
 
 #[tokio::main]
 async fn main() {
@@ -24,16 +26,4 @@ async fn run() -> Result<(), TuiDriverError> {
     driver.bind().await?;
     driver.announce()?;
     driver.serve().await
-}
-
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut parts = vec![error.to_string()];
-    let mut source = error.source();
-
-    while let Some(current) = source {
-        parts.push(current.to_string());
-        source = current.source();
-    }
-
-    parts.join(": ")
 }

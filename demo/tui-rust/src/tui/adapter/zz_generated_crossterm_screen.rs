@@ -46,7 +46,13 @@ impl Screen for CrosstermScreen {
     fn enter(&self) -> Result<(), ScreenError> {
         terminal::enable_raw_mode().map_err(entering)?;
 
-        execute!(stdout(), EnterAlternateScreen, cursor::Hide).map_err(entering)
+        if let Err(source) = execute!(stdout(), EnterAlternateScreen, cursor::Hide) {
+            terminal::disable_raw_mode().map_err(entering)?;
+
+            return Err(entering(source));
+        }
+
+        Ok(())
     }
 
     fn draw(&self, frame: &Frame, prompt: &Prompt) -> Result<(), ScreenError> {
@@ -64,9 +70,16 @@ impl Screen for CrosstermScreen {
         queue!(out, cursor::MoveTo(0, below), Print(&frame.status)).map_err(&failing)?;
         queue!(out, cursor::MoveTo(0, below + 1), Print(&frame.message)).map_err(&failing)?;
 
-        if let Prompt::Open(text) = prompt {
-            queue!(out, cursor::MoveTo(0, below + 2), Print("> "), Print(text))
-                .map_err(&failing)?;
+        match prompt {
+            Prompt::Open(text) => queue!(
+                out,
+                cursor::MoveTo(0, below + 2),
+                Print("> "),
+                Print(text),
+                cursor::Show
+            )
+            .map_err(&failing)?,
+            Prompt::Closed => queue!(out, cursor::Hide).map_err(&failing)?,
         }
 
         out.flush().map_err(&failing)

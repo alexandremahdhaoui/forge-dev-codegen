@@ -54,6 +54,13 @@ pub enum TuiDriverError {
         #[source]
         source: BoardControllerError,
     },
+    #[error("reading {key} for the tui driver: {value} is below 1 ms")]
+    Tick { key: String, value: i64 },
+    #[error("joining the tui loop task")]
+    Join {
+        #[source]
+        source: tokio::task::JoinError,
+    },
     #[error("using the tui driver: it is not bound yet")]
     NotBound,
 }
@@ -68,7 +75,7 @@ enum Next {
 pub struct TuiDriver {
     config: TuiDriverConfig,
     controller: Arc<dyn BoardController + Send + Sync>,
-    bound: bool,
+    screen_open: bool,
 }
 
 impl TuiDriver {
@@ -79,60 +86,67 @@ impl TuiDriver {
         Self {
             config,
             controller,
-            bound: false,
+            screen_open: false,
         }
     }
 
     pub async fn bind(&mut self) -> Result<(), TuiDriverError> {
+        if self.config.tick_ms < 1 {
+            return Err(TuiDriverError::Tick {
+                key: "tick_ms".to_string(),
+                value: self.config.tick_ms,
+            });
+        }
+
+        println!("TUI {WIDTH}x{HEIGHT}");
+
         self.controller
             .screen()
             .enter()
             .map_err(|source| TuiDriverError::Enter { source })?;
 
-        self.bound = true;
+        self.screen_open = true;
 
         Ok(())
     }
 
     pub fn announce(&self) -> Result<(), TuiDriverError> {
-        if !self.bound {
+        if !self.screen_open {
             return Err(TuiDriverError::NotBound);
         }
-
-        print!("TUI {WIDTH}x{HEIGHT}\r\n");
 
         Ok(())
     }
 
     pub async fn serve(self) -> Result<(), TuiDriverError> {
-        if !self.bound {
+        if !self.screen_open {
             return Err(TuiDriverError::NotBound);
         }
 
-        let screen = self.controller.screen();
-        let keyboard = self.controller.keyboard();
+        let (mut driver, outcome) = tokio::task::spawn_blocking(move || {
+            let outcome = self.run();
+            (self, outcome)
+        })
+        .await
+        .map_err(|source| TuiDriverError::Join { source })?;
 
-        let mut restore = Restore {
-            screen: screen.clone(),
-            armed: true,
-        };
+        driver.screen_open = false;
 
-        let outcome = self.run(&*screen, &*keyboard);
-
-        restore.armed = false;
-
-        let left = screen
+        let left = driver
+            .controller
+            .screen()
             .leave()
             .map_err(|source| TuiDriverError::Leave { source });
 
         outcome.and(left)
     }
 
-    fn run(
-        &self,
-        screen: &(dyn Screen + Send + Sync),
-        keyboard: &(dyn Keyboard + Send + Sync),
-    ) -> Result<(), TuiDriverError> {
+    fn run(&self) -> Result<(), TuiDriverError> {
+        let screen = self.controller.screen();
+        let keyboard = self.controller.keyboard();
+        let screen: &(dyn Screen + Send + Sync) = &*screen;
+        let keyboard: &(dyn Keyboard + Send + Sync) = &*keyboard;
+
         let tick_ms = self.config.tick_ms.unsigned_abs();
         let tick = Duration::from_millis(tick_ms);
 
@@ -268,27 +282,22 @@ pub fn bind_key(input: &Input) -> Option<Key> {
     }
 }
 
-struct Restore {
-    screen: Arc<dyn Screen + Send + Sync>,
-    armed: bool,
-}
-
-impl Drop for Restore {
+impl Drop for TuiDriver {
     fn drop(&mut self) {
-        if !self.armed {
+        if !self.screen_open {
             return;
         }
 
-        if let Err(error) = self.screen.leave() {
+        if let Err(error) = self.controller.screen().leave() {
             eprintln!(
-                "leaving the terminal after a panic in the tui driver: {}",
+                "leaving the terminal of the tui driver dropped while its screen was open: {}",
                 error_chain(&error)
             );
         }
     }
 }
 
-fn error_chain(error: &dyn std::error::Error) -> String {
+pub fn error_chain(error: &dyn std::error::Error) -> String {
     let mut parts = vec![error.to_string()];
     let mut source = error.source();
 
