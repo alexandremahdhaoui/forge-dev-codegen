@@ -37,6 +37,22 @@ func ServiceFromMap(m map[string]interface{}) (*Service, error) {
 	}
 
 	s := &Service{}
+
+	// A key the schema does not name is refused, by name, with the keys
+	// it could have been. A spec that silently dropped it read as
+	// configuration that took effect: forge's own ldflags on go-build was
+	// exactly that for weeks.
+	for key := range m {
+		switch key {
+		case "addrEnv":
+		case "binary":
+		case "env":
+		case "name":
+		case "readyTimeoutSeconds":
+		default:
+			return nil, fmt.Errorf("field %s: not a key of Service; the keys are addrEnv, binary, env, name, readyTimeoutSeconds", key)
+		}
+	}
 	// Parse addrEnv
 	if v, ok := m["addrEnv"]; ok && v != nil {
 		if val, ok := v.(string); ok {
@@ -101,6 +117,18 @@ func SpecFromMap(m map[string]interface{}) (*Spec, error) {
 	}
 
 	s := &Spec{}
+
+	// A key the schema does not name is refused, by name, with the keys
+	// it could have been. A spec that silently dropped it read as
+	// configuration that took effect: forge's own ldflags on go-build was
+	// exactly that for weeks.
+	for key := range m {
+		switch key {
+		case "services":
+		default:
+			return nil, fmt.Errorf("field %s: not a key of Spec; the keys are services", key)
+		}
+	}
 	// Parse services
 	if v, ok := m["services"]; ok && v != nil {
 		if arr, ok := v.([]interface{}); ok {
