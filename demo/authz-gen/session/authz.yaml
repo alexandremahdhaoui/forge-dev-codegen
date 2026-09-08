@@ -1,15 +1,12 @@
 module: session
 types:
   - name: account
-    relations:
-      - name: self
-        subjects: [account]
-      - name: create_session
-        expression: self
   - name: character
     relations:
       - name: owner
         subjects: [account]
+      - name: create_session
+        expression: owner
       - name: delete_character
         expression: owner
   - name: session
@@ -61,13 +58,17 @@ vectors:
         relation: delete_character
         object: character:alice
         expected: false
-  - name: an account may create a session
+  - name: the owner may create a session with their character and another may not
     tuples:
       - user: account:a1
-        relation: self
-        object: account:a1
+        relation: owner
+        object: character:alice
     checks:
       - user: account:a1
         relation: create_session
-        object: account:a1
+        object: character:alice
         expected: true
+      - user: account:a2
+        relation: create_session
+        object: character:alice
+        expected: false

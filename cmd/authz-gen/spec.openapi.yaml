@@ -25,7 +25,7 @@ components:
           description: The cell description. Unused here.
         kind:
           type: string
-          description: What the program is. This engine fills the authz kind only.
+          description: What the program is. This engine fills the authz kind and the combine kind.
         language:
           type: string
           description: The cell's language. Unused here. The module is an OpenFGA document, not a program.
@@ -35,24 +35,23 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. Unused here.
+          description: The kind's layout. The combine kind reads layout.modules, the list of paths to a zz_generated_authz.json, each relative to this cell. The authz kind reads nothing here.
         runtime:
           type: object
           additionalProperties: true
           description: The runnable inputs. Unused here.
         wiringSpec:
           type: string
-          description: The authz.yaml document, the text of the file wiring.specPath names. It carries the module name, the types with their relations, the conditions, the references, the extensions and the vectors.
+          description: The authz.yaml document, the text of the file wiring.specPath names. It carries the module name, the types with their relations, the conditions, the references, the extensions and the vectors. The authz kind needs it. The combine kind has none.
         checksum:
           type: string
           description: The source checksum forge-dev computed. Unused here.
         srcDir:
           type: string
-          description: The cell directory. Every emitted path is relative to it.
+          description: The cell directory. Every emitted path is relative to it. The combine kind resolves every module path against it.
       required:
         - name
         - kind
-        - wiringSpec
     GeneratedFile:
       type: object
       properties:

@@ -1,0 +1,4 @@
+modules:
+  - ../session/zz_generated_authz.json
+  - ../chat/zz_generated_authz.json
+  - ../play/zz_generated_authz.json

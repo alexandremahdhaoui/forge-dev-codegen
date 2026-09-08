@@ -1,7 +1,7 @@
 name: authz-gen
 kind: mcp-server
 version: 0.1.0
-description: Emits the OpenFGA module of one service from its authz.yaml. It writes the module file in the modular DSL, the fga.yaml test file holding every vector, and a manifest a spec repo combines into fga.mod.
+description: Emits the OpenFGA module of one service from its authz.yaml. It writes the module file in the modular DSL, the fga.yaml test file holding every vector, and a manifest. Its combine kind reads those manifests and writes the fga.mod and the merged fga.yaml the fga CLI runs.
 openapi:
   specPath: ./spec.openapi.yaml
 generate:

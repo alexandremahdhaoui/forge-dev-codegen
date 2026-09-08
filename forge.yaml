@@ -242,6 +242,10 @@ build:
     src: ./demo/authz-gen/play
     engine: forge://forge-dev
 
+  - name: gen-demo-authz-combined
+    src: ./demo/authz-gen/combined
+    engine: forge://forge-dev
+
   - name: gen-windows-allow
     src: ./cmd/windows-allow
     engine: forge://forge-dev
@@ -257,6 +261,12 @@ test:
 
   - name: unit
     runner: forge://go-test
+
+  - name: demo-authz-fga
+    runner: forge://generic-test-runner
+    spec:
+      command: fga
+      args: ["model", "test", "--tests", "demo/authz-gen/combined/zz_generated_fga.yaml"]
 
   - name: demo-tui-rust
     runner: forge://generic-test-runner

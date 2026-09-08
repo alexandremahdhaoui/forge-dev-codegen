@@ -221,6 +221,47 @@ conditions:
 `, `condition "alive" parameter "hp" has type "number"`, "list<T> or map<T>")
 }
 
+func conditionTyped(parameterType string) string {
+	return `module: play
+conditions:
+  - name: alive
+    parameters:
+      - name: hp
+        type: ` + parameterType + `
+    expression: hp > 0
+`
+}
+
+func TestAConditionParameterTypedAnyIsRefusedNamingTheParameterTheTypeAndTheAllowedTypes(t *testing.T) {
+	refused(t, conditionTyped("any"),
+		`condition "alive" parameter "hp" has type "any"`,
+		"use bool, string, int, uint, double, duration, timestamp, ipaddress, list<T> or map<T>",
+	)
+}
+
+func TestAConditionParameterTypedBytesIsRefusedBecauseTheDslGrammarNamesNoBytes(t *testing.T) {
+	refused(t, conditionTyped("bytes"), `condition "alive" parameter "hp" has type "bytes"`)
+}
+
+func TestAListOfAnyIsRefusedWhileAListOfAScalarIsAccepted(t *testing.T) {
+	refused(t, conditionTyped("list<any>"), `parameter "hp" has type "list<any>"`)
+
+	if _, err := authzgen.ParseSpec([]byte(conditionTyped("list<string>"))); err != nil {
+		t.Fatalf("parsing a list of string: %v", err)
+	}
+}
+
+func TestEveryScalarTheDslGrammarNamesIsAcceptedAsAConditionParameterType(t *testing.T) {
+	for _, parameterType := range []string{
+		"bool", "string", "int", "uint", "double", "duration", "timestamp", "ipaddress",
+		"list<int>", "map<string>",
+	} {
+		if _, err := authzgen.ParseSpec([]byte(conditionTyped(parameterType))); err != nil {
+			t.Errorf("parsing a parameter typed %s: %v", parameterType, err)
+		}
+	}
+}
+
 func TestAConditionWithoutAnExpressionIsRefused(t *testing.T) {
 	refused(t, `module: play
 conditions:

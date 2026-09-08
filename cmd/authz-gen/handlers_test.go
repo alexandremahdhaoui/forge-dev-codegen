@@ -29,16 +29,65 @@ types:
         subjects: [account]
 `
 
-func TestTheEngineFillsTheAuthzCellOnly(t *testing.T) {
+func TestTheEngineFillsTheAuthzCellAndTheCombineCellOnly(t *testing.T) {
 	generate := NewHandlers().Generate
 
-	if _, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "hexagonal", WiringSpec: smallSpec}); err == nil {
-		t.Error("the hexagonal kind must be refused")
+	_, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "hexagonal", WiringSpec: smallSpec})
+	if err == nil {
+		t.Fatal("the hexagonal kind must be refused")
+	}
+
+	if !strings.Contains(err.Error(), "authz-gen fills the authz and combine cells only") {
+		t.Fatalf("the refusal %q never named both kinds", err)
 	}
 
 	out, err := generate(context.Background(), GenerateInput{Name: "svc", Kind: "authz", WiringSpec: smallSpec})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
+	}
+
+	if len(out.Files) != 3 {
+		t.Fatalf("want three files, got %d", len(out.Files))
+	}
+}
+
+func TestACombineCellWithoutACombineDocumentIsRefusedNamingTheFix(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{Name: "spec", Kind: "combine"})
+	if err == nil {
+		t.Fatal("an empty combine spec was accepted")
+	}
+
+	for _, want := range []string{`emitting the combined model of "spec"`, "combine.yaml", "wiring.specPath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal %q never named %q", err, want)
+		}
+	}
+}
+
+func TestACombineDocumentThatDoesNotReadIsRefusedWithTheCellNamed(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "spec", Kind: "combine", WiringSpec: "modules: session\n",
+	})
+	if err == nil {
+		t.Fatal("a module list that is a string was accepted")
+	}
+
+	for _, want := range []string{`emitting the combined model of "spec"`, "combine.yaml modules: expected a list"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal %q never named %q", err, want)
+		}
+	}
+}
+
+func TestACombineCellReadsItsModulesRelativeToTheCellDirectory(t *testing.T) {
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name:       "demo-authz-combined",
+		Kind:       "combine",
+		SrcDir:     "../../demo/authz-gen/combined",
+		WiringSpec: "modules:\n  - ../session/zz_generated_authz.json\n",
+	})
+	if err != nil {
+		t.Fatalf("combining: %v", err)
 	}
 
 	if len(out.Files) != 3 {

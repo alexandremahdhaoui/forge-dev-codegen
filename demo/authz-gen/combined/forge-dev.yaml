@@ -1,0 +1,10 @@
+name: demo-authz-combined
+kind: combine
+version: 0.1.0
+description: The combination of the three authz demo modules. It reads their manifests, copies every module file beside one fga.mod and merges every vector into one fga.yaml. The living proof that the fga CLI runs what authz-gen emits.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/authz-gen
+wiring:
+  specPath: ./combine.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main

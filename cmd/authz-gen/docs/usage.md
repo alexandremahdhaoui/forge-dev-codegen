@@ -1,10 +1,16 @@
 # authz-gen
 
-A forge-dev generator that turns one service's `authz.yaml` into its
-OpenFGA module. It answers three files. The module in the modular DSL.
-The test file holding every vector. A manifest a spec repo combines
-into `fga.mod`. The internal model is backend neutral. A Cedar emitter
-lands beside the Cedar adapter.
+A forge-dev generator with two kinds.
+
+| Kind | Reads | Writes |
+|---|---|---|
+| `authz` | one service's `authz.yaml` | the OpenFGA module, its test file, its manifest |
+| `combine` | the manifests of several modules | `zz_generated_fga.mod`, one merged `zz_generated_fga.yaml`, a copy of every module file |
+
+The internal model is backend neutral. A Cedar emitter lands beside the
+Cedar adapter.
+
+## The authz kind
 
 The cell is one directory in the spec repo with `forge-dev.yaml` and
 `authz.yaml` side by side.
@@ -45,9 +51,23 @@ relation from others with `or`, `and`, `but not`, parentheses and
 `relation from tupleset`. One operator per level. Group the rest with
 parentheses. A relation with both renders as `[subjects] or expression`.
 
-A condition parameter type is one of `int`, `uint`, `double`, `bool`,
-`bytes`, `string`, `duration`, `timestamp`, `ipaddress`, `any`,
-`list<T>` or `map<T>`.
+A condition parameter type is one of `bool`, `string`, `int`, `uint`,
+`double`, `duration`, `timestamp`, `ipaddress`, `list<T>` or `map<T>`,
+where `T` is one of those scalars. That is the set `CONDITION_PARAM_TYPE`
+and `CONDITION_PARAM_CONTAINER` name in `OpenFGALexer.g4` at
+github.com/openfga/language. Anything else is refused with the parameter,
+the type given and the allowed types. There is no `any` and no `bytes`.
+
+Every key is refused by name when its shape is wrong. A `types` written
+as a mapping answers `reading authz.yaml types: expected a list of
+types, got a mapping`. A list entry is named by its `name` when it has
+one, so a bad subject list reads
+`authz.yaml types.session.relations.member.subjects`.
+
+A relation whose expression reaches itself is refused with the cycle
+path. `a: a` and the pair `b: c` and `c: b` are both refused. A
+`relation from tupleset` reads through another type and is never a
+cycle.
 
 A tuple is `user`, `relation`, `object` and an optional `condition` with
 a `name` and a `context`. A check is `user`, `relation`, `object`,
@@ -55,11 +75,16 @@ a `name` and a `context`. A check is `user`, `relation`, `object`,
 one user, never a wildcard.
 
 The engine refuses, each with a message naming the fix. A module name
-that is not a lower case identifier. An unknown subject type. An
-expression naming an unknown relation. A `from` relation through a
-computed relation. A case naming an unknown type or relation. A check
-without `expected`. An unknown condition. An extension repeating a
-relation of the referenced type. An unknown key.
+that is not a lower case identifier. A key whose shape is wrong. An
+unknown subject type. An expression naming an unknown relation. A
+relation computed from itself. A `from` relation through a computed
+relation. A case naming an unknown type or relation. A check without
+`expected`. An unknown condition. An unknown condition parameter type.
+An extension repeating a relation of the referenced type. An unknown
+key.
+
+`self` and `this` are reserved words in OpenFGA. Never name a relation
+either one.
 
 ## Three modules
 
@@ -69,15 +94,12 @@ A base module. Accounts own characters. A session has a host and members.
 module: session
 types:
   - name: account
-    relations:
-      - name: self
-        subjects: [account]
-      - name: create_session
-        expression: self
   - name: character
     relations:
       - name: owner
         subjects: [account]
+      - name: create_session
+        expression: owner
       - name: delete_character
         expression: owner
   - name: session
@@ -215,7 +237,7 @@ The three live under `demo/authz-gen` with their generated output.
 
 `zz_generated_<module>.fga` is the module. The `module` line, the types,
 the `extend type` blocks, the conditions. No `model` block. The schema
-version lives in `fga.mod`.
+version lives in `zz_generated_fga.mod`.
 
 ```
 module play
@@ -237,12 +259,13 @@ condition monster_alive(hp: int) {
 ```
 
 `zz_generated_<module>.fga.yaml` is the test file. `model_file` names
-`fga.mod`, so it runs once the modules are combined. One entry under
-`tests` per vector with its tuples and one check per assertion.
+`zz_generated_fga.mod`, the file the combine kind writes, so it runs
+once the modules are combined. One entry under `tests` per vector with
+its tuples and one check per assertion.
 
 ```yaml
 name: "play"
-model_file: "fga.mod"
+model_file: "zz_generated_fga.mod"
 tests:
   - name: "a dead monster refuses attack"
     tuples:
@@ -259,9 +282,8 @@ tests:
           "attack": false
 ```
 
-`zz_generated_authz.json` is the manifest. The combining step in
-`songe-authz-spec` reads one per module to write `fga.mod` and one
-merged test file.
+`zz_generated_authz.json` is the manifest. The combine kind reads one
+per module.
 
 ```json
 {
@@ -276,11 +298,49 @@ merged test file.
 }
 ```
 
-## Running the vectors in a spec repo
+## The combine kind
 
-The `fga` CLI runs the tests. It is a toolchain binary the factory
-provisions. The combining step copies every module file beside one
-`fga.mod` and one merged `fga.yaml` under `.forge/authz`.
+One model holds every module. The `fga` CLI reads one `fga.mod` and one
+test file, and it refuses a `contents` entry that climbs out of the
+directory the `fga.mod` sits in. So the combine cell copies every module
+file beside its own `fga.mod`.
+
+The cell is one directory with `forge-dev.yaml` and `combine.yaml` side
+by side. It lives at a tracked path, `authz/` in `songe-authz-spec`,
+never under `.forge/`, which the spec repos ignore. How that cell reaches
+another repo's module is open. Today the only answer is a path, so the
+combination of several repos waits on a decision.
+
+```yaml
+name: songe-authz-combined
+kind: combine
+version: 0.1.0
+description: The combined OpenFGA model of every songe module.
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/authz-gen
+wiring:
+  specPath: ./combine.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/songe-authz-spec/refs/heads/main
+```
+
+`combine.yaml` names one manifest per module, each path relative to the
+cell. `demo/authz-gen/combined` names three sibling cells.
+
+```yaml
+modules:
+  - ../session/zz_generated_authz.json
+  - ../chat/zz_generated_authz.json
+  - ../play/zz_generated_authz.json
+```
+
+A base module comes before the modules that reference or extend it. The
+engine refuses a module whose reference is not listed, a module listed
+twice, a manifest that is not on disk and two modules on different
+schemas.
+
+The cell answers `zz_generated_fga.mod`, one merged
+`zz_generated_fga.yaml` and a copy of every module file.
 
 ```yaml
 schema: "1.2"
@@ -290,7 +350,20 @@ contents:
   - zz_generated_play.fga
 ```
 
-The test stage runs `fga model test` on the merged file.
+The merged test file names the `fga.mod` beside it. Every case carries
+its module, so two modules may name a case the same way.
+
+```yaml
+name: "songe-authz-combined"
+model_file: "zz_generated_fga.mod"
+tests:
+  - name: "session: a member may join"
+```
+
+## Running the vectors in a spec repo
+
+The `fga` CLI runs the tests. It is a toolchain binary the factory
+provisions. The test stage runs `fga model test` on the merged file.
 
 ```yaml
 test:
@@ -298,11 +371,17 @@ test:
     runner: forge://generic-test-runner
     spec:
       command: fga
-      args: ["model", "test", "--tests", ".forge/authz/fga.yaml"]
+      args: ["model", "test", "--tests", "authz/zz_generated_fga.yaml"]
 ```
 
 The same command by hand.
 
 ```sh
-fga model test --tests .forge/authz/fga.yaml
+fga model test --tests authz/zz_generated_fga.yaml
 ```
+
+`demo/authz-gen/combined` is the living proof. Its stage is
+`demo-authz-fga`.
+
+A module change reaches the combination on `forge build --force`. forge
+tracks `combine.yaml`, not the manifests it names.

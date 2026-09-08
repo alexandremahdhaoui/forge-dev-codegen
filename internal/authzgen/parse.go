@@ -25,19 +25,25 @@ import (
 var ident = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 var parameterTypes = map[string]bool{
-	"int": true, "uint": true, "double": true, "bool": true, "bytes": true, "string": true,
-	"duration": true, "timestamp": true, "ipaddress": true, "any": true,
+	"bool": true, "string": true, "int": true, "uint": true,
+	"double": true, "duration": true, "timestamp": true, "ipaddress": true,
 }
+
+const parameterTypeList = "bool, string, int, uint, double, duration, timestamp, ipaddress, list<T> or map<T>"
 
 func ParseSpec(doc []byte) (Module, error) {
 	var m Module
 
+	if err := checkDocumentShape(doc); err != nil {
+		return Module{}, err
+	}
+
 	if err := yaml.UnmarshalStrict(doc, &m); err != nil {
-		return Module{}, fmt.Errorf("reading authz.yaml: %w", err)
+		return Module{}, fmt.Errorf("reading %s: %w", specFile, err)
 	}
 
 	if err := m.validate(); err != nil {
-		return Module{}, fmt.Errorf("reading authz.yaml: %w", err)
+		return Module{}, fmt.Errorf("reading %s: %w", specFile, err)
 	}
 
 	return m, nil
@@ -104,6 +110,10 @@ func (m Module) validate() error {
 		}
 	}
 
+	if err := m.validateCycles(); err != nil {
+		return err
+	}
+
 	return m.validateVectors(s)
 }
 
@@ -162,7 +172,10 @@ func validateParameters(c Condition) error {
 		params[p.Name] = true
 
 		if !isParameterType(p.Type) {
-			return fmt.Errorf("condition %q parameter %q has type %q, use int, uint, double, bool, bytes, string, duration, timestamp, ipaddress, any, list<T> or map<T>", c.Name, p.Name, p.Type)
+			return fmt.Errorf(
+				"condition %q parameter %q has type %q, use %s",
+				c.Name, p.Name, p.Type, parameterTypeList,
+			)
 		}
 	}
 
