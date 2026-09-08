@@ -17,6 +17,7 @@ package restrust
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
@@ -40,11 +41,13 @@ type view struct {
 	Stores           []storeView
 	UsedStores       []storeView
 	Events           []eventView
+	HandPorts        []handPortView
 	Controllers      []controllerView
 	Clients          []clientView
 	Routes           []opView
 	WireImports      []string
 	UsesPath         bool
+	UsesQuery        bool
 	UsesJson         bool
 }
 
@@ -92,6 +95,21 @@ type portView struct {
 	Reaching  string
 }
 
+type handMethodView struct {
+	Ident  string
+	Args   string
+	Return string
+}
+
+type handPortView struct {
+	Name      string
+	Snake     string
+	PortSnake string
+	Error     string
+	Imports   []importView
+	Methods   []handMethodView
+}
+
 type paramView struct {
 	Ident    string
 	CoreType string
@@ -110,6 +128,9 @@ type opView struct {
 	MethodLower       string
 	Path              string
 	Params            []paramView
+	HasQuery          bool
+	QueryLines        []string
+	ClientQueryLines  []string
 	Body              string
 	Response          string
 	Auth              bool
@@ -154,6 +175,7 @@ type clientView struct {
 	TypeImports []importView
 	Auth        bool
 	HasStream   bool
+	HasQuery    bool
 	UsesJson    bool
 }
 
@@ -225,6 +247,17 @@ func buildView(spec *Spec, opts Options) view {
 		}
 	}
 
+	for _, h := range spec.HandPorts {
+		hv := buildHandPortView(h)
+		v.HandPorts = append(v.HandPorts, hv)
+		portsByName[hv.Name] = portView{
+			Port:      hv.Name,
+			PortSnake: hv.PortSnake,
+			Snake:     hv.Snake,
+			Reaching:  "calling the " + hv.Snake + " port for",
+		}
+	}
+
 	used := map[string]bool{}
 
 	for _, c := range spec.Controllers {
@@ -270,6 +303,10 @@ func buildView(spec *Spec, opts Options) view {
 
 		if len(r.Params) > 0 {
 			v.UsesPath = true
+		}
+
+		if r.HasQuery {
+			v.UsesQuery = true
 		}
 
 		v.HasStream = v.HasStream || r.Stream
@@ -372,6 +409,39 @@ func convert(expr string, ft fieldType, optional bool) (string, bool) {
 	}
 }
 
+func buildHandPortView(h HandPort) handPortView {
+	hv := handPortView{
+		Name:      h.Name,
+		Snake:     h.Snake,
+		PortSnake: h.Snake,
+		Error:     h.Name + "Error",
+	}
+
+	imports := map[string]bool{}
+
+	for _, m := range h.Methods {
+		mv := handMethodView{Ident: m.Ident, Return: "()"}
+
+		if m.Request != "" {
+			mv.Args = "request: " + m.Request
+			imports[m.Request] = true
+		}
+
+		if m.Reply != "" {
+			mv.Return = m.Reply
+			imports[m.Reply] = true
+		}
+
+		hv.Methods = append(hv.Methods, mv)
+	}
+
+	for _, name := range sortedKeys(imports) {
+		hv.Imports = append(hv.Imports, importView{Snake: rustname.Snake(name), Name: name})
+	}
+
+	return hv
+}
+
 func buildControllerView(c Controller, portsByName map[string]portView) controllerView {
 	cv := controllerView{Name: c.Name, Snake: c.Snake, Pascal: c.Pascal}
 
@@ -431,6 +501,7 @@ func buildClientView(c Controller, cv controllerView, cell string) clientView {
 	for _, op := range cv.Ops {
 		client.Auth = client.Auth || op.Auth
 		client.HasStream = client.HasStream || op.Stream
+		client.HasQuery = client.HasQuery || op.HasQuery
 		client.UsesJson = client.UsesJson || op.Body != "" || (op.Response != "" && !op.Stream)
 	}
 
@@ -509,6 +580,21 @@ func buildOpView(op Operation, c Controller, portsByName map[string]portView) op
 		extractors = append(extractors, fmt.Sprintf("Path((%s)): Path<(%s)>", strings.Join(pathIdents, ", "), strings.Join(pathTypes, ", ")))
 	}
 
+	if len(op.Query) > 0 {
+		ov.HasQuery = true
+
+		extractors = append(extractors, "Query(query): Query<QueryMap>")
+	}
+
+	for _, q := range op.Query {
+		traitArgs = append(traitArgs, q.Ident+": "+queryArgType(q))
+		clientArgs = append(clientArgs, q.Ident+": "+queryArgType(q))
+		controllerCall = append(controllerCall, queryCall(q))
+		ov.QueryLines = append(ov.QueryLines, queryLine(q, ov.InvalidStatusExpr))
+	}
+
+	ov.ClientQueryLines = clientQueryLines(op.Query)
+
 	if op.Body != "" {
 		traitArgs = append(traitArgs, "body: "+op.Body)
 		clientArgs = append(clientArgs, "body: "+op.Body)
@@ -521,6 +607,10 @@ func buildOpView(op Operation, c Controller, portsByName map[string]portView) op
 	ov.Extractors = strings.Join(extractors, ", ")
 	ov.ControllerCall = strings.Join(controllerCall, ", ")
 	ov.URLExpr = urlExpr(op.Path, pathIdents)
+
+	if ov.HasQuery {
+		ov.URLExpr = "with_query(" + ov.URLExpr + ", query)"
+	}
 
 	switch {
 	case op.Stream:
@@ -535,6 +625,81 @@ func buildOpView(op Operation, c Controller, portsByName map[string]portView) op
 	}
 
 	return ov
+}
+
+func queryArgType(q QueryParam) string {
+	if q.Required && q.Kind == "string" {
+		return "&str"
+	}
+
+	if q.Required {
+		return scalarType(q.Kind)
+	}
+
+	return "Option<" + scalarType(q.Kind) + ">"
+}
+
+func queryCall(q QueryParam) string {
+	if q.Required && q.Kind == "string" {
+		return "&" + q.Ident
+	}
+
+	return q.Ident
+}
+
+func queryLine(q QueryParam, invalid string) string {
+	name := strconv.Quote(q.Name)
+
+	switch {
+	case q.Required && q.Kind == "string":
+		return fmt.Sprintf("let %s = required_query(&query, %s, %s)?;", q.Ident, name, invalid)
+	case q.Required:
+		return fmt.Sprintf("let %s = required_integer(&query, %s, %s)?;", q.Ident, name, invalid)
+	case q.Kind == "string":
+		return fmt.Sprintf("let %s = query.get(%s).cloned();", q.Ident, name)
+	default:
+		return fmt.Sprintf("let %s = optional_integer(&query, %s, %s)?;", q.Ident, name, invalid)
+	}
+}
+
+func clientQueryLines(query []QueryParam) []string {
+	if len(query) == 0 {
+		return nil
+	}
+
+	required := []string{}
+	optional := []string{}
+
+	for _, q := range query {
+		name := strconv.Quote(q.Name)
+
+		if q.Required {
+			required = append(required, "("+name+", "+q.Ident+".to_string())")
+
+			continue
+		}
+
+		pushed := "value.to_string()"
+		if q.Kind == "string" {
+			pushed = "value"
+		}
+
+		optional = append(optional, fmt.Sprintf(
+			"if let Some(value) = %s {\n            query.push((%s, %s));\n        }",
+			q.Ident, name, pushed,
+		))
+	}
+
+	declaration := "let mut query: Vec<(&str, String)> = Vec::new();"
+
+	switch {
+	case len(required) > 0 && len(optional) > 0:
+		declaration = "let mut query: Vec<(&str, String)> = vec![" + strings.Join(required, ", ") + "];"
+	case len(required) > 0:
+		declaration = "let query: Vec<(&str, String)> = vec![" + strings.Join(required, ", ") + "];"
+	}
+
+	return append([]string{declaration}, optional...)
 }
 
 func urlExpr(path string, idents []string) string {

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,6 +147,11 @@ func buildOpSignature(op restrust.Operation) opSignature {
 		sig.ArgTypes = append(sig.ArgTypes, paramArgType(p.Kind))
 	}
 
+	for _, q := range op.Query {
+		sig.ArgNames = append(sig.ArgNames, q.Ident)
+		sig.ArgTypes = append(sig.ArgTypes, queryArgType(q))
+	}
+
 	if op.Body != "" {
 		sig.ArgNames = append(sig.ArgNames, "body")
 		sig.ArgTypes = append(sig.ArgTypes, op.Body)
@@ -160,6 +166,18 @@ func paramArgType(kind string) string {
 	}
 
 	return "i64"
+}
+
+func queryArgType(q restrust.QueryParam) string {
+	if q.Required {
+		return paramArgType(q.Kind)
+	}
+
+	if q.Kind == "string" {
+		return "Option<String>"
+	}
+
+	return "Option<i64>"
 }
 
 func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, calls *callService, rng *rngPort, opts Options) (view, error) {
@@ -280,6 +298,11 @@ const (
 	armKindInvalid
 	armKindNotImplemented
 	armKindUnauthenticated
+	armKindAuthentication
+	armKindAuthorization
+	armKindSemantic
+	armKindRateLimited
+	armKindMissingQuery
 )
 
 type arm struct {
@@ -287,7 +310,7 @@ type arm struct {
 	id   string
 }
 
-func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
+func chooseArm(c VectorCase, op restrust.Operation, missingQuery []string) (arm, error) {
 	isOK := len(c.ControllerReply) > 0
 	is2xx := c.ExpectedStatus >= 200 && c.ExpectedStatus < 300
 
@@ -299,6 +322,18 @@ func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
 		return arm{}, fmt.Errorf("reading vector %q: expectedStatus is %d but no controllerReply is present, a 2xx status needs a success case", c.Case, c.ExpectedStatus)
 	}
 
+	if len(missingQuery) > 0 {
+		if isOK {
+			return arm{}, fmt.Errorf("reading vector %q: input names no value for the required query parameter %s, and the driver refuses before the controller answers", c.Case, strings.Join(missingQuery, ", "))
+		}
+
+		if c.ExpectedStatus != op.InvalidStatus {
+			return arm{}, fmt.Errorf("reading vector %q: input names no value for the required query parameter %s, so the driver answers %d, not %d", c.Case, strings.Join(missingQuery, ", "), op.InvalidStatus, c.ExpectedStatus)
+		}
+
+		return arm{kind: armKindMissingQuery}, nil
+	}
+
 	if isOK {
 		return arm{kind: armKindOK}, nil
 	}
@@ -308,15 +343,23 @@ func chooseArm(c VectorCase, op restrust.Operation) (arm, error) {
 	}
 
 	switch c.ExpectedStatus {
+	case 401:
+		return arm{kind: armKindAuthentication, id: c.ExpectedErrorSubstring}, nil
+	case 403:
+		return arm{kind: armKindAuthorization, id: c.ExpectedErrorSubstring}, nil
 	case 404:
 		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}, nil
 	case op.InvalidStatus:
 		return arm{kind: armKindInvalid, id: c.ExpectedErrorSubstring}, nil
+	case 409:
+		return arm{kind: armKindSemantic, id: c.ExpectedErrorSubstring}, nil
+	case 429:
+		return arm{kind: armKindRateLimited, id: c.ExpectedErrorSubstring}, nil
 	case 501:
 		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}, nil
 	default:
 		return arm{}, fmt.Errorf(
-			"reading vector %q: expectedStatus %d matches none of NotFound (404), Invalid (%d), NotImplemented (501) or a refused bearer on an x-auth operation (401), vectors-rust cannot choose which controller error to mock",
+			"reading vector %q: expectedStatus %d matches none of Authentication (401), Authorization (403), NotFound (404), Invalid (%d), Semantic (409), RateLimited (429), NotImplemented (501) or a refused bearer on an x-auth operation (401), vectors-rust cannot choose which controller error to mock",
 			c.Case, c.ExpectedStatus, op.InvalidStatus,
 		)
 	}
@@ -345,19 +388,28 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (
 		return testView{}, err
 	}
 
+	missingQuery, err := missingRequiredQuery(op, c.Input)
+	if err != nil {
+		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+	}
+
 	uri, hasBody, bodyLiteral, err := buildRequest(op, c.Input)
 	if err != nil {
 		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
-	withPredicates, err := buildWithPredicates(op, c)
-	if err != nil {
-		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
-	}
-
-	chosen, err := chooseArm(c, op)
+	chosen, err := chooseArm(c, op, missingQuery)
 	if err != nil {
 		return testView{}, err
+	}
+
+	withPredicates := []string{}
+
+	if chosen.kind != armKindMissingQuery {
+		withPredicates, err = buildWithPredicates(op, c)
+		if err != nil {
+			return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+		}
 	}
 
 	returning, err := buildReturning(chosen, c, op, owner)
@@ -372,7 +424,7 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (
 		ArmExpectMethod:      "expect_" + sig.Ident,
 		ArmClosureParams:     sig.ClosureParams(),
 		ArmReturning:         returning,
-		ControllerNever:      chosen.kind == armKindUnauthenticated,
+		ControllerNever:      chosen.kind == armKindUnauthenticated || chosen.kind == armKindMissingQuery,
 		HasWith:              len(withPredicates) > 0,
 		WithPredicates:       strings.Join(withPredicates, ", "),
 		Method:               op.Method,
@@ -422,6 +474,13 @@ func buildRequest(op restrust.Operation, input json.RawMessage) (uri string, has
 		uri = strings.ReplaceAll(uri, "{"+p.Name+"}", value)
 	}
 
+	query, err := buildQuery(op, inputMap)
+	if err != nil {
+		return "", false, "", err
+	}
+
+	uri += query
+
 	if op.Body == "" {
 		return uri, false, "", nil
 	}
@@ -461,6 +520,15 @@ func buildWithPredicates(op restrust.Operation, c VectorCase) ([]string, error) 
 		}
 	}
 
+	for _, q := range op.Query {
+		pred, err := queryPredicate(q, inputMap)
+		if err != nil {
+			return nil, err
+		}
+
+		preds = append(preds, pred)
+	}
+
 	if op.Body != "" {
 		compact, err := compactJSON(input)
 		if err != nil {
@@ -488,6 +556,98 @@ func parseInput(input json.RawMessage) (map[string]json.RawMessage, error) {
 	}
 
 	return inputMap, nil
+}
+
+func missingRequiredQuery(op restrust.Operation, input json.RawMessage) ([]string, error) {
+	inputMap, err := parseInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	missing := []string{}
+
+	for _, q := range op.Query {
+		if _, named := inputMap[q.Name]; !named && q.Required {
+			missing = append(missing, strconv.Quote(q.Name))
+		}
+	}
+
+	return missing, nil
+}
+
+func buildQuery(op restrust.Operation, inputMap map[string]json.RawMessage) (string, error) {
+	pairs := []string{}
+
+	for _, q := range op.Query {
+		value, named, err := queryValue(q, inputMap)
+		if err != nil {
+			return "", err
+		}
+
+		if !named {
+			continue
+		}
+
+		pairs = append(pairs, url.QueryEscape(q.Name)+"="+url.QueryEscape(value))
+	}
+
+	if len(pairs) == 0 {
+		return "", nil
+	}
+
+	return "?" + strings.Join(pairs, "&"), nil
+}
+
+func queryValue(q restrust.QueryParam, inputMap map[string]json.RawMessage) (string, bool, error) {
+	raw, named := inputMap[q.Name]
+	if !named {
+		return "", false, nil
+	}
+
+	if q.Kind != "string" {
+		var number int64
+		if err := json.Unmarshal(raw, &number); err != nil {
+			return "", false, fmt.Errorf("reading input: query parameter %q must be a JSON integer: %w", q.Name, err)
+		}
+
+		return strconv.FormatInt(number, 10), true, nil
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false, fmt.Errorf("reading input: query parameter %q must be a JSON string: %w", q.Name, err)
+	}
+
+	return value, true, nil
+}
+
+func queryPredicate(q restrust.QueryParam, inputMap map[string]json.RawMessage) (string, error) {
+	value, named, err := queryValue(q, inputMap)
+	if err != nil {
+		return "", err
+	}
+
+	if q.Required {
+		if q.Kind == "string" {
+			return "mockall::predicate::eq(" + strconv.Quote(value) + ")", nil
+		}
+
+		return "mockall::predicate::eq(" + value + "i64)", nil
+	}
+
+	if q.Kind == "string" {
+		if !named {
+			return "mockall::predicate::eq(None::<String>)", nil
+		}
+
+		return "mockall::predicate::eq(Some(" + strconv.Quote(value) + ".to_string()))", nil
+	}
+
+	if !named {
+		return "mockall::predicate::eq(None::<i64>)", nil
+	}
+
+	return "mockall::predicate::eq(Some(" + value + "i64))", nil
 }
 
 func paramValue(p restrust.Param, inputMap map[string]json.RawMessage) (string, error) {
@@ -527,12 +687,20 @@ func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.C
 		}
 
 		return "Ok(" + decoded + ")", nil
-	case armKindUnauthenticated:
+	case armKindUnauthenticated, armKindMissingQuery:
 		return "", nil
+	case armKindAuthentication:
+		return fmt.Sprintf("Err(%sControllerError::Authentication { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
+	case armKindAuthorization:
+		return fmt.Sprintf("Err(%sControllerError::Authorization { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	case armKindNotFound:
 		return fmt.Sprintf("Err(%sControllerError::NotFound { id: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	case armKindInvalid:
 		return fmt.Sprintf("Err(%sControllerError::Invalid { field: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
+	case armKindSemantic:
+		return fmt.Sprintf("Err(%sControllerError::Semantic { resource: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
+	case armKindRateLimited:
+		return fmt.Sprintf("Err(%sControllerError::RateLimited { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	case armKindNotImplemented:
 		return fmt.Sprintf("Err(%sControllerError::NotImplemented { operation: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
 	default:

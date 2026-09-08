@@ -395,7 +395,7 @@ func TestAnErrorStatusThatMatchesNoKnownControllerErrorIsRefused(t *testing.T) {
 	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": "x"}, "expectedStatus": 500, "expectedErrorSubstring": "boom"}]}`
 
 	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), `expectedStatus 500 matches none of NotFound (404), Invalid (422), NotImplemented (501) or a refused bearer on an x-auth operation (401)`) {
+	if err == nil || !strings.Contains(err.Error(), `expectedStatus 500 matches none of Authentication (401), Authorization (403), NotFound (404), Invalid (422), Semantic (409), RateLimited (429), NotImplemented (501) or a refused bearer on an x-auth operation (401)`) {
 		t.Fatalf("want a refusal naming the case and the unmatched status, got %v", err)
 	}
 }

@@ -61,6 +61,28 @@ its Pascal case. The crates are named `<name>-core` and `<name>-app`
 from the model's `name`, matching hexagonal-rust, so the two engines
 can fill the same pair of crates.
 
+## The error taxonomy on the wire
+
+`<Service>ControllerError` carries the taxonomy CLAUDE.md section 7
+names, the same one the rest cell uses, so a player mistake and a
+runtime failure never look alike over gRPC. The driver maps each arm to
+its gRPC status code.
+
+| Controller error | gRPC status | Why |
+|---|---|---|
+| `Runtime` | `internal` | the caller did nothing wrong and learns nothing, the chain goes to stderr |
+| `Authentication` | `unauthenticated` | the request carries no valid credential |
+| `Authorization` | `permission_denied` | the caller is known and may not do this |
+| `NotFound` | `not_found` | the named entity does not exist |
+| `Invalid` | `invalid_argument` | the request itself is wrong, whatever the state |
+| `Semantic` | `failed_precondition` | the request is well formed and the state refuses it |
+| `RateLimited` | `resource_exhausted` | a quota ran out |
+| `NotImplemented` | `unimplemented` | the rpc is not served |
+
+Only `Runtime` hides its message. Every other arm sends
+`error.to_string()` as the status message, so the caller reads what it
+did wrong.
+
 ## Where the prost types live
 
 `zz_generated_build.rs` compiles the proto with `protox`, a pure

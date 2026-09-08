@@ -244,6 +244,16 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		})
 	}
 
+	for _, h := range v.HandPorts {
+		h := h
+
+		mount("port", modEntry{Module: "zz_generated_" + h.PortSnake, Alias: h.PortSnake})
+
+		steps = append(steps, func() error {
+			return add(path.Join("port", "zz_generated_"+h.PortSnake+".rs"), "hand_port", map[string]any{"Header": v.Header, "Port": h, "CratePath": v.CratePath})
+		})
+	}
+
 	for _, c := range v.Controllers {
 		c := c
 
@@ -382,6 +392,14 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Module: v.ModulePrefix + "port::" + e.PortSnake,
 		})
 		m.Requires.Ports = append(m.Requires.Ports, e.Port)
+	}
+
+	for _, h := range v.HandPorts {
+		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
+			Trait:  h.Name,
+			Module: v.ModulePrefix + "port::" + h.PortSnake,
+		})
+		m.Requires.Ports = append(m.Requires.Ports, h.Name)
 	}
 }
 
@@ -525,6 +543,32 @@ pub trait {{ .Event.Port }}: Send + Sync {
 }
 {{ end -}}
 
+{{- define "hand_port" -}}
+{{ .Header }}
+{{ $p := .Port }}
+{{ range $p.Imports -}}
+use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
+{{ end }}
+#[derive(Debug, thiserror::Error)]
+pub enum {{ $p.Error }} {
+    #[error("calling {method:?} on the {{ $p.Snake }} port: refused: {reason}")]
+    Refused { method: String, reason: String },
+    #[error("calling {method:?} on the {{ $p.Snake }} port")]
+    Call {
+        method: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ $p.Name }}: Send + Sync {
+{{- range $p.Methods }}
+    fn {{ .Ident }}(&self{{ if .Args }}, {{ .Args }}{{ end }}) -> Result<{{ .Return }}, {{ $p.Error }}>;
+{{- end }}
+}
+{{ end -}}
+
 {{- define "client_port" -}}
 {{ .Header }}
 {{ $c := .Client }}
@@ -584,10 +628,18 @@ pub enum {{ $c.Pascal }}ControllerError {
         source: {{ .Port }}Error,
     },
 {{- end }}
+    #[error("authenticating {subject:?}: {reason}")]
+    Authentication { subject: String, reason: String },
+    #[error("authorizing {subject:?}: {reason}")]
+    Authorization { subject: String, reason: String },
     #[error("finding {{ $c.Snake }} {id:?}: not found")]
     NotFound { id: String },
     #[error("validating {field:?}: {reason}")]
     Invalid { field: String, reason: String },
+    #[error("reconciling {resource:?}: {reason}")]
+    Semantic { resource: String, reason: String },
+    #[error("rate limiting {subject:?}: {reason}")]
+    RateLimited { subject: String, reason: String },
     #[error("running {operation:?}: not implemented")]
     NotImplemented { operation: String },
 }
@@ -808,7 +860,7 @@ use std::sync::Arc;
 {{ if .HasStream -}}
 use axum::body::{Body, Bytes};
 {{ end -}}
-use axum::extract::{Json, {{ if .UsesPath }}Path, {{ end }}State};
+use axum::extract::{Json, {{ if .UsesPath }}Path, {{ end }}{{ if .UsesQuery }}Query, {{ end }}State};
 {{ if .Auth -}}
 use axum::http::HeaderMap;
 {{ end -}}
@@ -847,6 +899,44 @@ fn reject(status: StatusCode, kind: &str, message: String) -> Rejection {
     )
 }
 
+{{- if .UsesQuery }}
+type QueryMap = std::collections::HashMap<String, String>;
+
+#[allow(dead_code)]
+fn required_query(query: &QueryMap, name: &str, invalid: StatusCode) -> Result<String, Rejection> {
+    query.get(name).cloned().ok_or_else(|| {
+        reject(
+            invalid,
+            "validation",
+            format!("validating {name:?}: the query parameter is required"),
+        )
+    })
+}
+
+#[allow(dead_code)]
+fn required_integer(query: &QueryMap, name: &str, invalid: StatusCode) -> Result<i64, Rejection> {
+    parse_integer(name, &required_query(query, name, invalid)?, invalid)
+}
+
+#[allow(dead_code)]
+fn optional_integer(query: &QueryMap, name: &str, invalid: StatusCode) -> Result<Option<i64>, Rejection> {
+    query
+        .get(name)
+        .map(|raw| parse_integer(name, raw, invalid))
+        .transpose()
+}
+
+#[allow(dead_code)]
+fn parse_integer(name: &str, raw: &str, invalid: StatusCode) -> Result<i64, Rejection> {
+    raw.parse().map_err(|_| {
+        reject(
+            invalid,
+            "validation",
+            format!("validating {name:?}: {raw:?} is not an integer"),
+        )
+    })
+}
+{{ end }}
 pub struct HttpDriverConfig {
     pub addr: String,
 }
@@ -1059,8 +1149,12 @@ fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusC
             reject(StatusCode::INTERNAL_SERVER_ERROR, "runtime", "internal error".to_string())
         }
 {{- end }}
+        {{ $c.Pascal }}ControllerError::Authentication { .. } => reject(StatusCode::UNAUTHORIZED, "authentication", error.to_string()),
+        {{ $c.Pascal }}ControllerError::Authorization { .. } => reject(StatusCode::FORBIDDEN, "authorization", error.to_string()),
         {{ $c.Pascal }}ControllerError::NotFound { .. } => reject(StatusCode::NOT_FOUND, "semantic", error.to_string()),
         {{ $c.Pascal }}ControllerError::Invalid { .. } => reject(invalid, "validation", error.to_string()),
+        {{ $c.Pascal }}ControllerError::Semantic { .. } => reject(StatusCode::CONFLICT, "semantic", error.to_string()),
+        {{ $c.Pascal }}ControllerError::RateLimited { .. } => reject(StatusCode::TOO_MANY_REQUESTS, "rateLimiting", error.to_string()),
         {{ $c.Pascal }}ControllerError::NotImplemented { .. } => reject(StatusCode::NOT_IMPLEMENTED, "runtime", error.to_string()),
     }
 }
@@ -1069,6 +1163,9 @@ fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusC
 async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
 {{- if .Auth }}
     let subject = authenticate(&state, &headers)?;
+{{- end }}
+{{- range .QueryLines }}
+    {{ . }}
 {{- end }}
 {{- if .Stream }}
     let events = state
@@ -1159,6 +1256,37 @@ impl {{ $c.Struct }} {
     }
 }
 
+{{- if $c.HasQuery }}
+fn encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(char::from(*byte))
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+
+    out
+}
+
+fn with_query(url: String, pairs: Vec<(&str, String)>) -> String {
+    if pairs.is_empty() {
+        return url;
+    }
+
+    let query = pairs
+        .iter()
+        .map(|(name, value)| format!("{}={}", encode_query(name), encode_query(value)))
+        .collect::<Vec<String>>()
+        .join("&");
+
+    format!("{url}?{query}")
+}
+
+{{ end -}}
 async fn send(operation: &str, request: reqwest::RequestBuilder) -> Result<reqwest::Response, {{ $c.Error }}> {
     let response = request
         .send()
@@ -1300,6 +1428,9 @@ impl {{ $c.Trait }} for {{ $c.Struct }} {
 {{- range $c.Ops }}
     fn {{ .Ident }}(&self{{ if .ClientArgs }}, {{ .ClientArgs }}{{ end }}) -> Result<{{ .ClientReturn }}, {{ $c.Error }}> {
         let operation = "{{ .ID }}";
+{{- range .ClientQueryLines }}
+        {{ . }}
+{{- end }}
         let request = self
             .client
             .request(reqwest::Method::{{ .Method }}, {{ .URLExpr }}){{ if .Body }}

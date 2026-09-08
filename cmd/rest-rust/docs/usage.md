@@ -10,8 +10,9 @@ marked `x-store` also becomes a store port and a sqlite adapter. An
 operation names its controller with `x-controller` and the ports that
 controller consumes with `x-ports`. An operation marked `x-auth: bearer`
 is guarded by a ticket verifier. A GET operation marked
-`x-stream: events` answers an event stream. The paths become the axum
-router.
+`x-stream: events` answers an event stream. A parameter declared
+`in: path` or `in: query` becomes an argument of the controller method
+and of the client method. The paths become the axum router.
 
 This file sits inside the cell, at `src/rest/forge-dev.yaml`. The build
 step that runs it points `src` at the cell.
@@ -47,6 +48,7 @@ writes above it.
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
 | `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
+| `port/zz_generated_<hand>.rs` | server | one hand port per `kind: hand` entry of `x-ports`, its error enum and its trait under mockall |
 | `driver/zz_generated_wire.rs` | server | one wire struct per schema, `RejectionWire`, and the mapping both ways |
 | `driver/zz_generated_http_driver.rs` | server | `HttpDriver`, `HttpDriverConfig`, the router, and one handler per operation |
 | `adapter/zz_generated_wire.rs` | client | the same wire structs, so the adapter never reaches into the driver |
@@ -77,6 +79,78 @@ without `x-auth` changes nothing.
 The `TicketVerifier` port is listed under `requires.ports` and under the
 driver's `ports`, so `wiring.yaml` names its adapter the way a store
 port is named. The driver's `new` takes it after the controllers.
+
+## Parameters
+
+A parameter is a string or an integer. Anything else is refused by name.
+
+`in: path` keeps the shape it always had. Every `{name}` of the path is
+declared, the handler extracts it, and the controller takes it in path
+order.
+
+`in: query` follows the path parameters, in declaration order, on the
+controller method and on the client method. `required: true` gives a
+`&str` or an `i64`. Anything else gives an `Option<String>` or an
+`Option<i64>`. A name declared in both places is refused, and a query
+parameter declared twice is refused.
+
+The handler reads the query as a map of strings, so the driver owns
+every refusal instead of axum. A missing required parameter and an
+integer that will not parse both answer the operation's invalid status,
+422 first then 400, with the type `validation` and a message naming the
+parameter. The controller never runs.
+
+The client builds the query into the url itself, percent encoding every
+name and value, and leaves out an optional parameter that is `None`. It
+needs no reqwest feature beyond `json`.
+
+```yaml
+parameters:
+  - name: after
+    in: query
+    schema:
+      type: string
+```
+
+## Hand ports
+
+`x-ports` takes a port name or a declaration. A name is the store port
+of an `x-store` schema, the subscribe port of the operation's own
+stream, or a hand port some operation declares. A declaration is an
+object of kind `hand`, and it is the way to give a controller a port
+this engine does not generate an adapter for.
+
+```yaml
+x-ports:
+  - GreetingStore
+  - kind: hand
+    name: GreetingClock
+    methods:
+      - name: now
+        reply: Instant
+      - name: elapsed
+        request: Instant
+        reply: Span
+```
+
+The name is Pascal case and may not take the name of a store or
+subscribe port. Each method names a `request` and a `reply` from
+`components.schemas`. Both are optional. No request means no argument.
+No reply means the method answers `()`.
+
+The engine writes `port/zz_generated_<snake>.rs` holding
+`<Name>Error` with a `Refused` and a `Call` arm and the trait under
+`mockall::automock`, so the user never writes a port trait. The
+controller struct gains one boxed field, `new` takes it in port name
+order, and the controller error enum gains one arm wrapping
+`<Name>Error`. The manifest declares the port and lists it under
+`requires`, so `wiring.yaml` names its adapter. A missing adapter is a
+wiring error naming the port, and a missing method on the adapter is a
+compile error naming it.
+
+Declare a hand port once. Every other operation names it by its name. A
+second declaration with different methods is refused, and a name no
+operation declares is refused.
 
 ## Streams
 
@@ -141,10 +215,21 @@ signature is a compile error naming what broke.
 port it bound. `announce` prints `LISTENING <port>`. `serve` runs axum
 until it stops.
 
-The driver maps a controller error to a status. A port error answers
-500 with a generic body. `NotFound` answers 404. `Invalid` answers the
-4xx status the operation declares, 422 first, then 400, then 400 by
-default. `NotImplemented` answers 501.
+The driver maps a controller error to a status. The taxonomy on the wire
+is the one CLAUDE.md section 7 names. A player mistake carries its own
+message. A runtime failure carries a generic one and the chain goes to
+stderr.
+
+| Controller error | Status | Type on the wire |
+|---|---|---|
+| a port error | 500 | `runtime`, body `internal error` |
+| `Authentication` | 401 | `authentication` |
+| `Authorization` | 403 | `authorization` |
+| `NotFound` | 404 | `semantic` |
+| `Invalid` | the declared invalid status, 422 first then 400 | `validation` |
+| `Semantic` | 409 | `semantic` |
+| `RateLimited` | 429 | `rateLimiting` |
+| `NotImplemented` | 501 | `runtime` |
 
 ## The adapters
 

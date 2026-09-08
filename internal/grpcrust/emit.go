@@ -326,8 +326,24 @@ use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $
 
 #[derive(Debug, thiserror::Error)]
 pub enum {{ .ControllerError }} {
+    #[error("running {operation:?}")]
+    Runtime {
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("authenticating {subject:?}: {reason}")]
+    Authentication { subject: String, reason: String },
+    #[error("authorizing {subject:?}: {reason}")]
+    Authorization { subject: String, reason: String },
+    #[error("finding {{ .ControllerSnake }} {id:?}: not found")]
+    NotFound { id: String },
     #[error("validating {field:?}: {reason}")]
     Invalid { field: String, reason: String },
+    #[error("reconciling {resource:?}: {reason}")]
+    Semantic { resource: String, reason: String },
+    #[error("rate limiting {subject:?}: {reason}")]
+    RateLimited { subject: String, reason: String },
     #[error("running {operation:?}: not implemented")]
     NotImplemented { operation: String },
 }
@@ -453,7 +469,7 @@ impl {{ .ClientTrait }} for {{ .ClientStruct }} {
 
 use std::sync::Arc;
 
-use {{ .CratePath }}controller::{{ .ControllerTrait }};
+use {{ .CratePath }}controller::{{ "{" }}{{ .ControllerTrait }}, {{ .ControllerError }}{{ "}" }};
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .AllTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
 
 mod pb {
@@ -480,6 +496,22 @@ impl From<{{ .Name }}> for pb::{{ .Name }} {
     }
 }
 {{ end }}
+fn status(error: {{ .ControllerError }}) -> tonic::Status {
+    match error {
+        {{ .ControllerError }}::Runtime { .. } => {
+            eprintln!("{error:?}");
+            tonic::Status::internal("internal error")
+        }
+        {{ .ControllerError }}::Authentication { .. } => tonic::Status::unauthenticated(error.to_string()),
+        {{ .ControllerError }}::Authorization { .. } => tonic::Status::permission_denied(error.to_string()),
+        {{ .ControllerError }}::NotFound { .. } => tonic::Status::not_found(error.to_string()),
+        {{ .ControllerError }}::Invalid { .. } => tonic::Status::invalid_argument(error.to_string()),
+        {{ .ControllerError }}::Semantic { .. } => tonic::Status::failed_precondition(error.to_string()),
+        {{ .ControllerError }}::RateLimited { .. } => tonic::Status::resource_exhausted(error.to_string()),
+        {{ .ControllerError }}::NotImplemented { .. } => tonic::Status::unimplemented(error.to_string()),
+    }
+}
+
 pub struct {{ .DriverConfig }} {
     pub addr: String,
 }
@@ -596,7 +628,7 @@ impl pb::{{ .PbServerMod }}::{{ .ServicePascal }} for {{ .DriverService }} {
         let out = self
             .controller
             .{{ .Ident }}(core_request)
-            .map_err(|source| tonic::Status::internal(source.to_string()))?;
+            .map_err(status)?;
 
         Ok(tonic::Response::new({{ .PbResponse }}::from(out)))
     }

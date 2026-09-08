@@ -17,6 +17,7 @@ package restrust
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -72,17 +73,57 @@ type content struct {
 	Schema schema `json:"schema"`
 }
 
+type portRef struct {
+	Declared bool
+	Kind     string
+	Name     string
+	Methods  []portMethod
+}
+
+type portMethod struct {
+	Name    string `json:"name"`
+	Request string `json:"request"`
+	Reply   string `json:"reply"`
+}
+
+func (p *portRef) UnmarshalJSON(raw []byte) error {
+	var name string
+	if err := json.Unmarshal(raw, &name); err == nil {
+		p.Name = name
+
+		return nil
+	}
+
+	var declared struct {
+		Kind    string       `json:"kind"`
+		Name    string       `json:"name"`
+		Methods []portMethod `json:"methods"`
+	}
+
+	if err := json.Unmarshal(raw, &declared); err != nil {
+		return fmt.Errorf("reading an x-ports entry: an entry is either a port name or an object naming kind, name and methods: %w", err)
+	}
+
+	p.Declared = true
+	p.Kind = declared.Kind
+	p.Name = declared.Name
+	p.Methods = declared.Methods
+
+	return nil
+}
+
 type operation struct {
-	OperationID string   `json:"operationId"`
-	Summary     string   `json:"summary"`
-	Controller  string   `json:"x-controller"`
-	Ports       []string `json:"x-ports"`
-	Auth        string   `json:"x-auth"`
-	Stream      string   `json:"x-stream"`
+	OperationID string    `json:"operationId"`
+	Summary     string    `json:"summary"`
+	Controller  string    `json:"x-controller"`
+	Ports       []portRef `json:"x-ports"`
+	Auth        string    `json:"x-auth"`
+	Stream      string    `json:"x-stream"`
 	Parameters  []struct {
-		Name   string `json:"name"`
-		In     string `json:"in"`
-		Schema schema `json:"schema"`
+		Name     string `json:"name"`
+		In       string `json:"in"`
+		Required bool   `json:"required"`
+		Schema   schema `json:"schema"`
 	} `json:"parameters"`
 	RequestBody struct {
 		Content map[string]content `json:"content"`
@@ -119,6 +160,26 @@ type Param struct {
 	Kind  string
 }
 
+type QueryParam struct {
+	Name     string
+	Ident    string
+	Kind     string
+	Required bool
+}
+
+type HandMethod struct {
+	Name    string
+	Ident   string
+	Request string
+	Reply   string
+}
+
+type HandPort struct {
+	Name    string
+	Snake   string
+	Methods []HandMethod
+}
+
 type Operation struct {
 	ID            string
 	Ident         string
@@ -127,6 +188,7 @@ type Operation struct {
 	MethodLower   string
 	Path          string
 	Params        []Param
+	Query         []QueryParam
 	Body          string
 	Response      string
 	Status        int
@@ -149,6 +211,7 @@ type Spec struct {
 	Types       []TypeDef
 	Stores      []TypeDef
 	Events      []TypeDef
+	HandPorts   []HandPort
 	Controllers []Controller
 	Operations  []Operation
 	Auth        bool
@@ -166,6 +229,8 @@ const StorePortSuffix = "Store"
 
 const SubscribePortSuffix = "Subscribe"
 
+const HandPortKind = "hand"
+
 const eventStreamContent = "text/event-stream"
 
 const jsonContent = "application/json"
@@ -179,6 +244,8 @@ func checkName(what, name string) error {
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
+
+var pascalIdentPattern = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 func Parse(doc []byte) (*Spec, error) {
 	var parsed document
@@ -198,7 +265,7 @@ func Parse(doc []byte) (*Spec, error) {
 		}
 	}
 
-	operations, err := parseOperations(parsed.Paths, types, stores)
+	operations, hands, err := parseOperations(parsed.Paths, types, stores)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +281,7 @@ func Parse(doc []byte) (*Spec, error) {
 		Types:       types,
 		Stores:      stores,
 		Events:      events,
+		HandPorts:   hands,
 		Controllers: groupControllers(operations),
 		Operations:  operations,
 		Auth:        auth,
@@ -361,9 +429,9 @@ func refName(ref string, schemas map[string]schema) (string, error) {
 	return name, nil
 }
 
-func parseOperations(paths map[string]map[string]json.RawMessage, types, stores []TypeDef) ([]Operation, error) {
+func parseOperations(paths map[string]map[string]json.RawMessage, types, stores []TypeDef) ([]Operation, []HandPort, error) {
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("reading the OpenAPI paths: a service's surface is its paths, and there are none")
+		return nil, nil, fmt.Errorf("reading the OpenAPI paths: a service's surface is its paths, and there are none")
 	}
 
 	schemas := map[string]schema{}
@@ -376,6 +444,16 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 		storeNames[s.Name+"Store"] = true
 	}
 
+	hands, err := collectHandPorts(paths, schemas, storeNames)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	handNames := map[string]bool{}
+	for _, h := range hands {
+		handNames[h.Name] = true
+	}
+
 	ops := []Operation{}
 
 	for path, item := range paths {
@@ -385,9 +463,9 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 				continue
 			}
 
-			op, err := parseOperation(path, method, raw, schemas, storeNames)
+			op, err := parseOperation(path, method, raw, schemas, storeNames, handNames)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			ops = append(ops, op)
@@ -402,10 +480,107 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 		return ops[i].Method < ops[j].Method
 	})
 
-	return ops, nil
+	return ops, hands, nil
 }
 
-func parseOperation(path, method string, raw json.RawMessage, schemas map[string]schema, storeNames map[string]bool) (Operation, error) {
+func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[string]schema, storeNames map[string]bool) ([]HandPort, error) {
+	byName := map[string]HandPort{}
+
+	for _, path := range sortedKeys(paths) {
+		for _, method := range methods {
+			raw, ok := paths[path][method]
+			if !ok {
+				continue
+			}
+
+			where := fmt.Sprintf("%s %s", strings.ToUpper(method), path)
+
+			var op operation
+			if err := json.Unmarshal(raw, &op); err != nil {
+				return nil, fmt.Errorf("reading %s: %w", where, err)
+			}
+
+			for _, ref := range op.Ports {
+				if !ref.Declared {
+					continue
+				}
+
+				hand, err := parseHandPort(where, ref, schemas, storeNames)
+				if err != nil {
+					return nil, err
+				}
+
+				known, seen := byName[hand.Name]
+				if seen && !reflect.DeepEqual(known, hand) {
+					return nil, fmt.Errorf("reading %s: x-ports declares hand port %q a second time with different methods, declare it once and name it by its name everywhere else", where, hand.Name)
+				}
+
+				byName[hand.Name] = hand
+			}
+		}
+	}
+
+	hands := make([]HandPort, 0, len(byName))
+	for _, name := range sortedKeys(byName) {
+		hands = append(hands, byName[name])
+	}
+
+	return hands, nil
+}
+
+func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
+	if ref.Kind != HandPortKind {
+		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the only declared kind is %q, every other entry is the name of a store or subscribe port", where, ref.Kind, HandPortKind)
+	}
+
+	if !pascalIdentPattern.MatchString(ref.Name) {
+		return HandPort{}, fmt.Errorf("reading %s: hand port %q is not a Pascal case Rust ident, a port name starts with an upper case letter and holds letters and digits", where, ref.Name)
+	}
+
+	if storeNames[ref.Name] || strings.HasSuffix(ref.Name, SubscribePortSuffix) {
+		return HandPort{}, fmt.Errorf("reading %s: hand port %q takes the name of a store or subscribe port the engine already emits, name it something else", where, ref.Name)
+	}
+
+	if len(ref.Methods) == 0 {
+		return HandPort{}, fmt.Errorf("reading %s: hand port %q declares no method, a port the controller consumes has at least one", where, ref.Name)
+	}
+
+	hand := HandPort{Name: ref.Name, Snake: rustname.Snake(ref.Name)}
+	seen := map[string]bool{}
+
+	for _, m := range ref.Methods {
+		if err := checkName("hand port method", m.Name); err != nil {
+			return HandPort{}, fmt.Errorf("reading %s: hand port %q: %w", where, ref.Name, err)
+		}
+
+		if seen[m.Name] {
+			return HandPort{}, fmt.Errorf("reading %s: hand port %q declares method %q twice", where, ref.Name, m.Name)
+		}
+
+		seen[m.Name] = true
+
+		for label, name := range map[string]string{"request": m.Request, "reply": m.Reply} {
+			if name == "" {
+				continue
+			}
+
+			if _, ok := schemas[name]; !ok {
+				return HandPort{}, fmt.Errorf("reading %s: hand port %q method %q names %s %q, which is not a schema of components.schemas", where, ref.Name, m.Name, label, name)
+			}
+		}
+
+		hand.Methods = append(hand.Methods, HandMethod{
+			Name:    m.Name,
+			Ident:   rustname.Snake(m.Name),
+			Request: m.Request,
+			Reply:   m.Reply,
+		})
+	}
+
+	return hand, nil
+}
+
+func parseOperation(path, method string, raw json.RawMessage, schemas map[string]schema, storeNames, handNames map[string]bool) (Operation, error) {
 	where := fmt.Sprintf("%s %s", strings.ToUpper(method), path)
 
 	var op operation
@@ -439,7 +614,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, err
 	}
 
-	params, err := parseParams(where, path, op)
+	params, query, err := parseParams(where, path, op)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -462,7 +637,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, fmt.Errorf("reading %s: an x-stream operation needs a 2xx response with a %s schema, it is the event type", where, eventStreamContent)
 	}
 
-	ports, err := parsePorts(where, op, stream, response, storeNames)
+	ports, err := parsePorts(where, op, stream, response, storeNames, handNames)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -475,6 +650,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		MethodLower:   method,
 		Path:          path,
 		Params:        params,
+		Query:         query,
 		Body:          body,
 		Response:      response,
 		Status:        status,
@@ -512,16 +688,19 @@ func parseStream(where, method string, op operation) (bool, error) {
 	}
 }
 
-func parsePorts(where string, op operation, stream bool, response string, storeNames map[string]bool) ([]string, error) {
+func parsePorts(where string, op operation, stream bool, response string, storeNames, handNames map[string]bool) ([]string, error) {
 	subscribe := ""
 	if stream {
 		subscribe = response + SubscribePortSuffix
 	}
 
-	ports := append([]string{}, op.Ports...)
+	ports := make([]string, 0, len(op.Ports))
+	for _, ref := range op.Ports {
+		ports = append(ports, ref.Name)
+	}
 
 	for _, port := range ports {
-		if storeNames[port] || (subscribe != "" && port == subscribe) {
+		if storeNames[port] || handNames[port] || (subscribe != "" && port == subscribe) {
 			continue
 		}
 
@@ -529,7 +708,7 @@ func parsePorts(where string, op operation, stream bool, response string, storeN
 			return nil, fmt.Errorf("reading %s: x-ports names %q, a subscribe port is %s of an x-stream operation's response", where, port, "<Event>"+SubscribePortSuffix)
 		}
 
-		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema", where, port)
+		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema and no operation declares it as a hand port", where, port)
 	}
 
 	if subscribe != "" {
@@ -541,24 +720,43 @@ func parsePorts(where string, op operation, stream bool, response string, storeN
 	return ports, nil
 }
 
-func parseParams(where, path string, op operation) ([]Param, error) {
+func parseParams(where, path string, op operation) ([]Param, []QueryParam, error) {
 	declared := map[string]Param{}
+	query := []QueryParam{}
+	seenQuery := map[string]bool{}
 
 	for _, p := range op.Parameters {
-		if p.In != "path" {
+		if p.In != "path" && p.In != "query" {
 			continue
 		}
 
 		kind := string(p.Schema.Type)
 		if kind != "string" && kind != "integer" {
-			return nil, fmt.Errorf("reading %s: path parameter %q must be a string or an integer, got %q", where, p.Name, kind)
+			return nil, nil, fmt.Errorf("reading %s: %s parameter %q must be a string or an integer, got %q", where, p.In, p.Name, kind)
 		}
 
-		if err := checkName("path parameter", p.Name); err != nil {
-			return nil, fmt.Errorf("reading %s: %w", where, err)
+		if err := checkName(p.In+" parameter", p.Name); err != nil {
+			return nil, nil, fmt.Errorf("reading %s: %w", where, err)
 		}
 
-		declared[p.Name] = Param{Name: p.Name, Ident: rustname.Snake(p.Name), Kind: kind}
+		if p.In == "path" {
+			declared[p.Name] = Param{Name: p.Name, Ident: rustname.Snake(p.Name), Kind: kind}
+
+			continue
+		}
+
+		if seenQuery[p.Name] {
+			return nil, nil, fmt.Errorf("reading %s: query parameter %q is declared twice", where, p.Name)
+		}
+
+		seenQuery[p.Name] = true
+
+		query = append(query, QueryParam{
+			Name:     p.Name,
+			Ident:    rustname.Snake(p.Name),
+			Kind:     kind,
+			Required: p.Required,
+		})
 	}
 
 	params := []Param{}
@@ -566,13 +764,19 @@ func parseParams(where, path string, op operation) ([]Param, error) {
 	for _, match := range pathParamPattern.FindAllStringSubmatch(path, -1) {
 		p, ok := declared[match[1]]
 		if !ok {
-			return nil, fmt.Errorf("reading %s: path parameter %q is not declared", where, match[1])
+			return nil, nil, fmt.Errorf("reading %s: path parameter %q is not declared", where, match[1])
 		}
 
 		params = append(params, p)
 	}
 
-	return params, nil
+	for _, q := range query {
+		if _, taken := declared[q.Name]; taken {
+			return nil, nil, fmt.Errorf("reading %s: %q is declared both in path and in query, one name is one argument", where, q.Name)
+		}
+	}
+
+	return params, query, nil
 }
 
 func parseBody(where string, op operation, schemas map[string]schema) (string, error) {

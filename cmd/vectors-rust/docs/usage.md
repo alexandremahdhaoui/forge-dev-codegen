@@ -145,17 +145,40 @@ without a `proto:`, a `grpc_` case without a `grpcProto:`, or an
 `operationId` the OpenAPI document never declares fails the build and names
 the case and the operation. There is no skip.
 
-An error case is armed by matching `expectedStatus` against the operation's
-declared shape: 404 arms `NotFound`, the operation's declared invalid status
-(422 or 400) arms `Invalid`, 501 arms `NotImplemented`, and anything else
-falls back to the operation's first store port, arming a wrapped store
-error that the driver reports as a generic `500` "internal error". Because
-the engine has no business knowledge beyond the spec, it embeds
-`expectedErrorSubstring` itself into the chosen error's identifier field, so
-the constructed message is guaranteed to contain it wherever the driver's
-rejection text includes that field. The one case this cannot cover is the
-underlying `500` reply, whose body is a fixed "internal error" text set by
-the driver, not by the controller error's message.
+An error case is armed by matching `expectedStatus` against the taxonomy the
+rest driver maps.
+
+| `expectedStatus` | Armed controller error | Field carrying the substring |
+|---|---|---|
+| 401 on an `x-auth` operation | none, the mocked verifier refuses and the controller is armed `never` | the refusal |
+| 401 on any other operation | `Authentication` | `subject` |
+| 403 | `Authorization` | `subject` |
+| 404 | `NotFound` | `id` |
+| the declared invalid status, 422 or 400 | `Invalid` | `field` |
+| 409 | `Semantic` | `resource` |
+| 429 | `RateLimited` | `subject` |
+| 501 | `NotImplemented` | `operation` |
+
+Anything else is refused by name. Because the engine has no business
+knowledge beyond the spec, it embeds `expectedErrorSubstring` itself into
+the chosen error's identifier field, so the constructed message is
+guaranteed to contain it wherever the driver's rejection text includes that
+field. It cannot cover the `500` reply, whose body is a fixed "internal
+error" text set by the driver, not by the controller error's message.
+
+## Query parameters
+
+A query parameter of the operation reads its value from `input` by name.
+The test sends it on the uri, percent encoded, and the mocked controller
+asserts it in declaration order after the path parameters. A required
+parameter is asserted as `&str` or `i64`. An optional one is asserted as
+`Some(...)` when `input` names it and `None` when it does not.
+
+Leaving a required query parameter out of `input` is how a case pins the
+driver's own refusal. The controller is armed `never`, the uri carries no
+value for it, and `expectedStatus` must be the operation's invalid status.
+A success case that leaves one out is refused, and so is an error case
+naming any other status.
 
 ## Session cases
 

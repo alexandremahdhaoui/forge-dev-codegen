@@ -145,7 +145,7 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 			name: "the driver takes a config and a boxed controller, binds, announces and serves",
 			path: "driver/zz_generated_hello_grpc_driver.rs",
 			want: []string{
-				"use crate::grpc::controller::HelloController;",
+				"use crate::grpc::controller::{HelloController, HelloControllerError};",
 				"pub struct HelloGrpcDriverConfig {",
 				"    pub addr: String,",
 				"pub struct HelloGrpcService {",
