@@ -146,7 +146,8 @@ use {{ .Crate }}::{{ .RestCell }}::driver::http_driver::{HttpDriver, HttpDriverC
 use {{ $.Crate }}::{{ $.RestCell }}::controller::{{ .Pascal }}ControllerError;
 {{ end -}}
 {{ if .Auth -}}
-use {{ .Crate }}::{{ .RestCell }}::port::ticket_verifier::TicketVerifierError;
+use {{ .Crate }}::port::ticket_verifier::TicketVerifierError;
+use {{ .Crate }}::types::subject::Subject;
 {{ end -}}
 {{ range .TypeImports -}}
 use {{ $.Crate }}::{{ $.RestCell }}::types::{{ .Snake }}::{{ .Name }};
@@ -270,7 +271,7 @@ mockall::mock! {
 {{- if .Auth }}
 mockall::mock! {
     pub TicketVerifier {}
-    impl {{ .Crate }}::{{ .RestCell }}::port::ticket_verifier::TicketVerifier for TicketVerifier {
+    impl {{ .Crate }}::port::ticket_verifier::TicketVerifier for TicketVerifier {
         fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;
     }
 }

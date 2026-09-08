@@ -73,6 +73,39 @@ components:
           type: string
 `
 
+const accountSpec = `
+openapi: 3.1.0
+info:
+  title: Account API
+  version: 1.0.0
+paths:
+  /accounts:
+    post:
+      operationId: createAccount
+      x-controller: account
+      x-auth: bearer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Account"
+      responses:
+        "201":
+          description: The created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+components:
+  schemas:
+    Account:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+`
+
 const guardedWiring = `binary: songe-hello-node
 ports:
   GreetingStore:
@@ -119,24 +152,31 @@ func writeCell(t *testing.T, root, cell string, manifest cellmanifest.Manifest) 
 	write(filepath.Join("src", cell, cellmanifest.FileName), string(body))
 }
 
+func writeRestCell(t *testing.T, root, cell, spec, side string, sources bool) {
+	t.Helper()
+
+	write := writeUnder(t, root)
+
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Cell: cell, Side: side})
+	if err != nil {
+		t.Fatalf("generating the %s cell: %v", cell, err)
+	}
+
+	write(filepath.Join("src", cell, hexrust.CellConfigFile), "name: songe-hello\nkind: rest\n")
+
+	for _, f := range files {
+		if f.Path == cellmanifest.FileName || (sources && strings.HasSuffix(f.Path, ".rs")) {
+			write(filepath.Join("src", cell, f.Path), f.Content)
+		}
+	}
+}
+
 func standUpGuardedRestCell(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	write := writeUnder(t, root)
 
-	files, err := restrust.Generate([]byte(guardedHelloSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
-	if err != nil {
-		t.Fatalf("generating the rest cell: %v", err)
-	}
-
-	write(filepath.Join("src", "rest", hexrust.CellConfigFile), "name: songe-hello\nkind: rest\n")
-
-	for _, f := range files {
-		if f.Path == cellmanifest.FileName {
-			write(filepath.Join("src", "rest", f.Path), f.Content)
-		}
-	}
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideBoth, false)
 
 	writeCell(t, root, "tui", cellmanifest.Manifest{
 		Version:   cellmanifest.Version,
@@ -193,10 +233,11 @@ func TestAnAdapterConsumingAPortGetsItAfterItsConfigAndThatPortIsBuiltFirst(t *t
 	for _, want := range []string{
 		"let token_source: Arc<dyn TokenSource + Send + Sync> = match config.token_source.as_str() {",
 		"let greeting_client: Arc<dyn GreetingClient + Send + Sync> = match config.greeting_client.as_str() {",
-		`"rest_client" => Arc::new(`,
-		"GreetingRestClient::new(GreetingRestClientConfig {\n                base_url: config.greeting_client_rest_client_base_url.clone(),\n            }, token_source.clone()),",
+		`"rest_greeting_client" => Arc::new(`,
+		"GreetingRestClient::new(GreetingRestClientConfig {\n                base_url: config.greeting_client_rest_greeting_client_base_url.clone(),\n            }, token_source.clone()),",
 		"use songe_hello::rest::adapter::greeting_rest_client::{GreetingRestClient, GreetingRestClientConfig};",
-		"use songe_hello::rest::port::token_source::TokenSource;",
+		"use songe_hello::port::token_source::TokenSource;",
+		"use songe_hello::port::ticket_verifier::TicketVerifier;",
 		"let mut rest_driver = HttpDriver::new(",
 		"greeting_controller.clone(),\n            ticket_verifier.clone(),\n        );",
 		"Arc::new(GreetingControllerImpl::new(greeting_event_subscribe.clone(), greeting_store.clone()));",
@@ -211,6 +252,109 @@ func TestAnAdapterConsumingAPortGetsItAfterItsConfigAndThatPortIsBuiltFirst(t *t
 
 	if tokenAt < 0 || clientAt < 0 || tokenAt > clientAt {
 		t.Errorf("the token source is built at %d and the client that consumes it at %d, the port an adapter consumes must be built first\n%s", tokenAt, clientAt, main)
+	}
+}
+
+func TestTheCrateRootEmitsSubjectTicketVerifierAndTokenSourceOnceForTwoRestCells(t *testing.T) {
+	root := t.TempDir()
+
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideBoth, false)
+	writeRestCell(t, root, "account", accountSpec, restrust.SideClient, false)
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"account", "rest"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: sqlite
+    adapters:
+      sqlite: {}
+  TicketVerifier:
+    default: memory
+    adapters:
+      memory:
+        type: TicketMemoryVerifier
+        module: adapter::ticket_memory
+  GreetingEventSubscribe:
+    default: memory
+    adapters:
+      memory:
+        type: GreetingEventMemoryFeed
+        module: adapter::greeting_event_memory
+drivers:
+  rest: { enabled: true }
+`),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	for path, want := range map[string]string{
+		"src/port/zz_generated_ticket_verifier.rs": "pub trait TicketVerifier: Send + Sync {",
+		"src/port/zz_generated_token_source.rs":    "pub trait TokenSource: Send + Sync {",
+		"src/types/zz_generated_subject.rs":        "pub struct Subject {",
+	} {
+		content, emitted := byPath[path]
+		if !emitted {
+			t.Errorf("%s was not emitted at the crate root", path)
+
+			continue
+		}
+
+		if !strings.HasPrefix(content, "// Code generated by hexagonal-rust (forge-dev-codegen). DO NOT EDIT.") || !strings.Contains(content, want) {
+			t.Errorf("%s lacks the header or %q\n%s", path, want, content)
+		}
+	}
+
+	portMod := byPath["src/port/mod.rs"]
+
+	for _, want := range []string{
+		"pub mod zz_generated_ticket_verifier;",
+		"pub mod zz_generated_token_source;",
+		"pub use zz_generated_ticket_verifier as ticket_verifier;",
+		"pub use zz_generated_token_source as token_source;",
+	} {
+		if !strings.Contains(portMod, want) {
+			t.Errorf("src/port/mod.rs lacks %q\n%s", want, portMod)
+		}
+	}
+
+	if !strings.Contains(byPath["src/types/mod.rs"], "pub use zz_generated_subject as subject;") {
+		t.Errorf("src/types/mod.rs does not mount the subject\n%s", byPath["src/types/mod.rs"])
+	}
+
+	main := byPath["src/bin/zz_generated_songe_hello_node.rs"]
+
+	if strings.Count(main, "use songe_hello::port::ticket_verifier::TicketVerifier;") != 1 {
+		t.Errorf("main imports the ticket verifier other than once\n%s", main)
+	}
+
+	spec := byPath[hexrust.ConfigSpecFile]
+
+	if strings.Count(spec, "ticket_verifier:") != 1 {
+		t.Errorf("the config spec holds the ticket verifier choice other than once\n%s", spec)
+	}
+}
+
+func TestACrateWithNoAuthAndNoClientEmitsNoRootPort(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	for _, unexpected := range []string{
+		"src/port/zz_generated_ticket_verifier.rs",
+		"src/port/zz_generated_token_source.rs",
+		"src/types/zz_generated_subject.rs",
+	} {
+		if _, emitted := files[unexpected]; emitted {
+			t.Errorf("%s was emitted with no cell requiring it", unexpected)
+		}
 	}
 }
 
@@ -235,7 +379,7 @@ func TestTheConfigSpecHoldsTheChoiceOfAPortOnlyAnAdapterConsumes(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"token_source:", "token_source_file_path:", "greeting_client:", "greeting_client_rest_client_base_url:",
+		"token_source:", "token_source_file_path:", "greeting_client:", "greeting_client_rest_greeting_client_base_url:",
 	} {
 		if !strings.Contains(spec, want) {
 			t.Errorf("the config spec lacks %q\n%s", want, spec)
@@ -262,7 +406,7 @@ func TestAPortOnlyAnAdapterConsumesWithNoCandidateIsRefusedNamingTheAdapter(t *t
 		Cells:   []string{"rest", "tui"},
 		Wiring:  []byte(wiring),
 	})
-	if err == nil || !strings.Contains(err.Error(), `adapter "rest_client" consumes port "TokenSource" and the wiring names no candidate for it`) {
+	if err == nil || !strings.Contains(err.Error(), `adapter "rest_greeting_client" consumes port "TokenSource" and the wiring names no candidate for it`) {
 		t.Fatalf("the missing token source candidate was not refused by name: %v", err)
 	}
 }

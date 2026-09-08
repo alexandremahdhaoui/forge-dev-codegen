@@ -152,6 +152,7 @@ type clientView struct {
 	AdapterName string
 	Ops         []opView
 	TypeImports []importView
+	Auth        bool
 	HasStream   bool
 	UsesJson    bool
 }
@@ -230,7 +231,7 @@ func buildView(spec *Spec, opts Options) view {
 		cv := buildControllerView(c, portsByName)
 		v.Controllers = append(v.Controllers, cv)
 		v.Routes = append(v.Routes, cv.Ops...)
-		v.Clients = append(v.Clients, buildClientView(c, cv, opts.Cell, len(spec.Controllers) == 1))
+		v.Clients = append(v.Clients, buildClientView(c, cv, opts.Cell))
 
 		for _, p := range c.Ports {
 			used[p] = true
@@ -410,11 +411,8 @@ func typeImports(ops []Operation) []importView {
 	return out
 }
 
-func buildClientView(c Controller, cv controllerView, cell string, only bool) clientView {
-	adapterName := cell + "_client"
-	if !only {
-		adapterName = cell + "_" + c.Snake + "_client"
-	}
+func buildClientView(c Controller, cv controllerView, cell string) clientView {
+	adapterName := cell + "_" + c.Snake + "_client"
 
 	client := clientView{
 		Snake:       c.Snake,
@@ -431,6 +429,7 @@ func buildClientView(c Controller, cv controllerView, cell string, only bool) cl
 	}
 
 	for _, op := range cv.Ops {
+		client.Auth = client.Auth || op.Auth
 		client.HasStream = client.HasStream || op.Stream
 		client.UsesJson = client.UsesJson || op.Body != "" || (op.Response != "" && !op.Stream)
 	}

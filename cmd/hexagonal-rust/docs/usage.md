@@ -111,5 +111,18 @@ generated REST client receives its `TokenSource`. A port only such an
 adapter consumes still needs a candidate in the wiring. Two adapters
 whose ports form a cycle are refused by name.
 
+## The crate root ports
+
+`TicketVerifier` and `TokenSource` are ports every rest cell needs and
+none declares. When a cell manifest requires one and no cell provides
+it, hexagonal-rust writes it once at the crate root, in
+`src/port/zz_generated_ticket_verifier.rs` and
+`src/port/zz_generated_token_source.rs`, mounted by the root
+`src/port/mod.rs` as `ticket_verifier` and `token_source`. A ticket
+verifier brings `Subject` with it, in
+`src/types/zz_generated_subject.rs`, mounted as `subject`. The wiring
+names one ticket verifier adapter and one token source adapter per
+crate, so three client cells share one token source.
+
 The crate needs `anyhow`, `tokio` and `songe-common`, whose
 `error::chain` main uses to render a driver failure.

@@ -43,19 +43,25 @@ writes above it.
 | Emitted, under the cell | Side | Holds |
 |---|---|---|
 | `types/zz_generated_<schema>.rs` | both | one serde struct per component schema |
-| `types/zz_generated_subject.rs` | server, with `x-auth` | `Subject`, the verified caller a guarded controller method receives |
 | `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put and get, plus its error enum |
-| `port/zz_generated_ticket_verifier.rs` | server, with `x-auth` | trait `TicketVerifier` with `verify`, answering a `Subject` or `Refused` |
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
 | `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
 | `driver/zz_generated_wire.rs` | server | one wire struct per schema, `RejectionWire`, and the mapping both ways |
 | `driver/zz_generated_http_driver.rs` | server | `HttpDriver`, `HttpDriverConfig`, the router, and one handler per operation |
 | `adapter/zz_generated_wire.rs` | client | the same wire structs, so the adapter never reaches into the driver |
-| `port/zz_generated_token_source.rs` | client | trait `TokenSource` with `token`, the bearer the client sends |
 | `port/zz_generated_<name>_client.rs` | client | trait `<Name>Client` with one method per operation of that controller, and `<Name>ClientError` in the wire taxonomy |
-| `adapter/zz_generated_<name>_rest_client.rs` | client | `<Name>RestClient`, `new` taking `<Name>RestClientConfig` and a boxed `TokenSource` |
+| `adapter/zz_generated_<name>_rest_client.rs` | client | `<Name>RestClient`, `new` taking `<Name>RestClientConfig` and, under `x-auth`, a boxed `TokenSource` |
 | `zz_generated_cell.yaml` | both | the cell manifest hexagonal-rust reads |
+
+`Subject`, `TicketVerifier` and `TokenSource` belong to the crate root.
+hexagonal-rust writes `src/types/zz_generated_subject.rs`,
+`src/port/zz_generated_ticket_verifier.rs` and
+`src/port/zz_generated_token_source.rs` once per crate whenever a cell
+manifest requires them, and every rest cell references
+`crate::types::subject::Subject`, `crate::port::ticket_verifier` and
+`crate::port::token_source`. Three client cells in one crate share one
+token source and one verifier.
 
 ## Auth
 
@@ -87,7 +93,9 @@ owns it. A stream operation takes no request body.
 The `<Event>Subscribe` port is listed under `requires.ports`, so
 `wiring.yaml` names its adapter. The driver streams through an
 `http-body-util` channel body, which needs that crate's `channel`
-feature.
+feature. The bridge waits fifteen seconds for an event, then writes an
+SSE comment frame as a keep alive, so a client that went away is
+noticed and the bridge thread ends.
 
 ## The client
 
@@ -100,19 +108,19 @@ core response, a `std::sync::mpsc::Receiver<Event>` for a stream, or
 A transport failure and an unknown error type are `Runtime`.
 
 `<Name>RestClient` calls through reqwest. Its config carries `base_url`.
-It consumes the `TokenSource` port and sends the token it answers as a
-bearer on every `x-auth` operation only. A `TokenSource` failure is an
-`Authentication` error. The methods are synchronous and block inside the
-tokio runtime, so a controller with plain methods can call them. A
-stream method spawns a task that reads the `data:` frames into the
-receiver it answers.
+When one of its operations carries `x-auth` it consumes the `TokenSource`
+port and sends the token it answers as a bearer on those operations. A
+`TokenSource` failure is an `Authentication` error. Without `x-auth` its
+`new` takes the config alone. The methods are synchronous and block
+inside the tokio runtime, so a controller with plain methods can call
+them. A stream method spawns a task that reads the `data:` frames into
+the receiver it answers and logs a transport failure with its chain
+before the receiver ends.
 
-The manifest lists `<Name>Client` and `TokenSource` under `ports` and
-the adapter under `adapters` with `ports: [TokenSource]`, so
+The manifest lists `<Name>Client` under `ports` and the adapter under
+`adapters`, named `<cell>_<name>_client`, with `ports: [TokenSource]`
+and `TokenSource` under `requires.ports` when it needs one, so
 hexagonal-rust builds the token source first and hands it to `new`.
-
-Two cells in one crate cannot both emit `TokenSource`, `TicketVerifier`
-or `Subject`. A crate consuming two REST APIs is not supported yet.
 
 Each layer directory carries a `mod.rs` that mounts its generated files.
 The controller layer also carries one `mod <name>_controller;` line per

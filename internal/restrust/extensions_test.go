@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/crateports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
@@ -155,10 +156,12 @@ func TestAnXAuthOperationGuardsTheHandlerWithATicketVerifierAndHandsTheSubjectTo
 	driver := files["driver/zz_generated_http_driver.rs"].Content
 
 	for _, want := range []string{
-		"use crate::rest::port::ticket_verifier::{TicketVerifier, TicketVerifierError};",
+		"use crate::port::ticket_verifier::{TicketVerifier, TicketVerifierError};",
+		"use crate::types::subject::Subject;",
 		"pub(crate) ticket_verifier: Arc<dyn TicketVerifier + Send + Sync>,",
 		"ticket_verifier: Arc<dyn TicketVerifier + Send + Sync>) -> Self {",
 		"fn authenticate(state: &HttpState, headers: &HeaderMap) -> Result<Subject, Rejection> {",
+		`if !scheme.eq_ignore_ascii_case("bearer") {`,
 		`reject(StatusCode::UNAUTHORIZED, "authentication", error.to_string())`,
 		"async fn count_greeting(State(state): State<HttpState>, headers: HeaderMap, Path(id): Path<String>)",
 		"let subject = authenticate(&state, &headers)?;",
@@ -176,7 +179,7 @@ func TestAnXAuthOperationGuardsTheHandlerWithATicketVerifierAndHandsTheSubjectTo
 	controller := files["controller/zz_generated_greeting_controller.rs"].Content
 
 	for _, want := range []string{
-		"use crate::rest::types::subject::Subject;",
+		"use crate::types::subject::Subject;",
 		"fn count_greeting(&self, subject: Subject, id: &str) -> Result<Greeting, GreetingControllerError>;",
 		"fn get_greeting(&self, id: &str) -> Result<Greeting, GreetingControllerError>;",
 	} {
@@ -185,20 +188,10 @@ func TestAnXAuthOperationGuardsTheHandlerWithATicketVerifierAndHandsTheSubjectTo
 		}
 	}
 
-	port := files["port/zz_generated_ticket_verifier.rs"].Content
-
-	for _, want := range []string{
-		"#[cfg_attr(test, mockall::automock)]",
-		"fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;",
-		"Refused { reason: String },",
-	} {
-		if !strings.Contains(port, want) {
-			t.Errorf("the ticket verifier port lacks %q\n%s", want, port)
+	for _, unexpected := range []string{"port/zz_generated_ticket_verifier.rs", "types/zz_generated_subject.rs"} {
+		if _, emitted := files[unexpected]; emitted {
+			t.Errorf("%s was emitted by the cell, the crate root owns it", unexpected)
 		}
-	}
-
-	if !strings.Contains(files["types/zz_generated_subject.rs"].Content, "pub struct Subject {") {
-		t.Errorf("the subject type is missing\n%s", files["types/zz_generated_subject.rs"].Content)
 	}
 }
 
@@ -209,6 +202,8 @@ func TestAnXStreamOperationAnswersAnEventStreamFromASubscribePortTheControllerCo
 
 	for _, want := range []string{
 		"fn event_stream<T, W>(events: std::sync::mpsc::Receiver<T>) -> Response",
+		"match events.recv_timeout(EVENT_STREAM_KEEP_ALIVE) {",
+		`Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Some(Bytes::from_static(b": keep-alive\n\n")),`,
 		`HeaderValue::from_static("text/event-stream")`,
 		"async fn stream_greeting_events(State(state): State<HttpState>, headers: HeaderMap, Path(id): Path<String>) -> Result<Response, Rejection> {",
 		"Ok(event_stream::<GreetingEvent, GreetingEventWire>(events))",
@@ -238,7 +233,7 @@ func TestAnXStreamOperationAnswersAnEventStreamFromASubscribePortTheControllerCo
 	}
 }
 
-func TestTheServerManifestListsTheVerifierAndSubscribePortsAndTheDriverConsumesTheVerifier(t *testing.T) {
+func TestTheServerManifestRequiresTheVerifierAndTheSubscribePortAndTheDriverConsumesTheVerifier(t *testing.T) {
 	files := generateSpec(t, guardedSpec, restrust.Options{Service: "songe-hello"})
 
 	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
@@ -264,7 +259,6 @@ func TestTheServerManifestListsTheVerifierAndSubscribePortsAndTheDriverConsumesT
 	}
 
 	want := []string{
-		"TicketVerifier rest::port::ticket_verifier",
 		"GreetingStore rest::port::greeting_store",
 		"GreetingEventSubscribe rest::port::greeting_event_subscribe",
 	}
@@ -274,7 +268,7 @@ func TestTheServerManifestListsTheVerifierAndSubscribePortsAndTheDriverConsumesT
 	}
 }
 
-func TestTheClientSideEmitsAClientPortATokenSourcePortAndAReqwestAdapterAndNoDriver(t *testing.T) {
+func TestTheClientSideEmitsAClientPortAndAReqwestAdapterNamedPerControllerAndNoDriver(t *testing.T) {
 	files := generateSpec(t, guardedSpec, restrust.Options{Service: "songe-hello", Side: restrust.SideClient})
 
 	want := []string{
@@ -286,7 +280,6 @@ func TestTheClientSideEmitsAClientPortATokenSourcePortAndAReqwestAdapterAndNoDri
 		"mod.rs",
 		"port/mod.rs",
 		"port/zz_generated_greeting_client.rs",
-		"port/zz_generated_token_source.rs",
 		"types/mod.rs",
 		"types/zz_generated_create_greeting_request.rs",
 		"types/zz_generated_greeting.rs",
@@ -317,12 +310,14 @@ func TestTheClientSideEmitsAClientPortATokenSourcePortAndAReqwestAdapterAndNoDri
 	adapter := files["adapter/zz_generated_greeting_rest_client.rs"].Content
 
 	for _, want := range []string{
+		"use crate::port::token_source::TokenSource;",
 		"pub fn new(config: GreetingRestClientConfig, token_source: Arc<dyn TokenSource + Send + Sync>) -> Self {",
 		`.request(reqwest::Method::POST, format!("{}/greetings/{}/count", self.base_url, id))`,
 		"let request = request.bearer_auth(self.bearer(operation)?);",
 		"self.block(stream_events::<GreetingEventWire, GreetingEvent>(operation, request))",
 		"self.block(answer::<GreetingWire>(operation, request)).map(Greeting::from)",
 		`"authentication" => GreetingClientError::Authentication { operation, message: wire.message },`,
+		`eprintln!("reading the event stream: {}", error_chain(&error));`,
 	} {
 		if !strings.Contains(adapter, want) {
 			t.Errorf("the client adapter lacks %q\n%s", want, adapter)
@@ -342,7 +337,7 @@ func TestTheClientSideEmitsAClientPortATokenSourcePortAndAReqwestAdapterAndNoDri
 		t.Errorf("the client side provides drivers %+v and controllers %+v", m.Provides.Drivers, m.Provides.Controllers)
 	}
 
-	if len(m.Provides.Adapters) != 1 || m.Provides.Adapters[0].Name != "rest_client" || !reflect.DeepEqual(m.Provides.Adapters[0].Ports, []string{"TokenSource"}) {
+	if len(m.Provides.Adapters) != 1 || m.Provides.Adapters[0].Name != "rest_greeting_client" || !reflect.DeepEqual(m.Provides.Adapters[0].Ports, []string{"TokenSource"}) {
 		t.Errorf("adapters = %+v", m.Provides.Adapters)
 	}
 
@@ -351,8 +346,35 @@ func TestTheClientSideEmitsAClientPortATokenSourcePortAndAReqwestAdapterAndNoDri
 		traits = append(traits, p.Trait)
 	}
 
-	if !reflect.DeepEqual(traits, []string{"TokenSource", "GreetingClient"}) {
+	if !reflect.DeepEqual(traits, []string{"GreetingClient"}) {
 		t.Errorf("ports = %q", traits)
+	}
+
+	if !reflect.DeepEqual(m.Requires.Ports, []string{"TokenSource"}) {
+		t.Errorf("requires.ports = %q", m.Requires.Ports)
+	}
+}
+
+func TestAClientWithoutAnyXAuthTakesNoTokenSource(t *testing.T) {
+	files := generateSpec(t, helloSpec, restrust.Options{Service: "songe-hello", Side: restrust.SideClient})
+
+	adapter := files["adapter/zz_generated_greeting_rest_client.rs"].Content
+
+	if strings.Contains(adapter, "TokenSource") {
+		t.Errorf("a client with no x-auth operation names a token source\n%s", adapter)
+	}
+
+	if !strings.Contains(adapter, "pub fn new(config: GreetingRestClientConfig) -> Self {") {
+		t.Errorf("the client adapter new takes more than its config\n%s", adapter)
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	if len(m.Provides.Adapters[0].Ports) != 0 || len(m.Requires.Ports) != 0 {
+		t.Errorf("adapter ports = %q, requires = %q", m.Provides.Adapters[0].Ports, m.Requires.Ports)
 	}
 }
 
@@ -382,13 +404,20 @@ func TestBothSidesEmitTheDriverAndTheClientInOneCell(t *testing.T) {
 		"adapter/zz_generated_greeting_rest_client.rs",
 		"adapter/zz_generated_greeting_sqlite.rs",
 		"port/zz_generated_greeting_client.rs",
-		"port/zz_generated_token_source.rs",
-		"port/zz_generated_ticket_verifier.rs",
 		"port/zz_generated_greeting_event_subscribe.rs",
 	} {
 		if _, emitted := files[want]; !emitted {
 			t.Errorf("%s was not emitted for a both sides cell", want)
 		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	if !reflect.DeepEqual(m.Requires.Ports, []string{"TicketVerifier", "GreetingEventSubscribe", "TokenSource"}) {
+		t.Errorf("requires.ports = %q", m.Requires.Ports)
 	}
 }
 
@@ -462,13 +491,18 @@ tokio = { version = "1", features = ["full"] }
 mockall = "0.15"
 `
 
+const guardedCrateLib = `pub mod port;
+pub mod rest;
+pub mod types;
+`
+
 const guardedGreetingControllerImpl = `use crate::rest::controller::{
     GreetingController, GreetingControllerError, GreetingControllerImpl,
 };
 use crate::rest::types::create_greeting_request::CreateGreetingRequest;
 use crate::rest::types::greeting::Greeting;
 use crate::rest::types::greeting_event::GreetingEvent;
-use crate::rest::types::subject::Subject;
+use crate::types::subject::Subject;
 
 impl GreetingController for GreetingControllerImpl {
     fn create_greeting(
@@ -524,6 +558,16 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
+func WriteCrateRootPorts(t *testing.T, write func(rel, content string), header string) {
+	t.Helper()
+
+	write("src/types/mod.rs", header+"\n\npub mod zz_generated_subject;\n\npub use zz_generated_subject as subject;\n")
+	write("src/types/"+crateports.SubjectFile, crateports.SubjectSource(header))
+	write("src/port/mod.rs", header+"\n\npub mod zz_generated_ticket_verifier;\npub mod zz_generated_token_source;\n\npub use zz_generated_ticket_verifier as ticket_verifier;\n\npub use zz_generated_token_source as token_source;\n")
+	write("src/port/"+crateports.TicketVerifierFile, crateports.TicketVerifierSource(header))
+	write("src/port/"+crateports.TokenSourceFile, crateports.TokenSourceSource(header))
+}
+
 func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
@@ -551,7 +595,8 @@ func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImpl(t
 	}
 
 	write("Cargo.toml", guardedCrateManifest)
-	write("src/lib.rs", cellCrateLib)
+	write("src/lib.rs", guardedCrateLib)
+	WriteCrateRootPorts(t, write, "// Code generated by a test. DO NOT EDIT.")
 
 	for _, f := range files {
 		if !strings.HasSuffix(f.Path, ".rs") {
@@ -578,5 +623,5 @@ func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImpl(t
 		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
 	}
 
-	t.Fatalf("cargo check: %v\n%s", err, out)
+	t.Fatalf("cargo clippy: %v\n%s", err, out)
 }

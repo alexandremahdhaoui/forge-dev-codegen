@@ -21,6 +21,7 @@ import (
 	"sort"
 	"text/template"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/crateports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
@@ -42,10 +43,6 @@ const (
 	SideClient = "client"
 	SideBoth   = "both"
 )
-
-const TicketVerifierPort = "TicketVerifier"
-
-const TokenSourcePort = "TokenSource"
 
 var Layers = []string{"adapter", "controller", "driver", "port", "types"}
 
@@ -221,20 +218,6 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		},
 	}
 
-	if v.Auth {
-		mount("types", modEntry{Module: "zz_generated_subject", Alias: "subject"})
-		mount("port", modEntry{Module: "zz_generated_ticket_verifier", Alias: "ticket_verifier"})
-
-		steps = append(steps,
-			func() error {
-				return add(path.Join("types", "zz_generated_subject.rs"), "subject", map[string]any{"Header": v.Header})
-			},
-			func() error {
-				return add(path.Join("port", "zz_generated_ticket_verifier.rs"), "ticket_verifier_port", map[string]any{"Header": v.Header, "CratePath": v.CratePath})
-			},
-		)
-	}
-
 	for _, s := range v.Stores {
 		s := s
 
@@ -284,13 +267,9 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 
 func clientSteps(v view, add adder, mount mounter) []func() error {
 	mount("adapter", modEntry{Module: "zz_generated_wire", Alias: "wire"})
-	mount("port", modEntry{Module: "zz_generated_token_source", Alias: "token_source"})
 
 	steps := []func() error{
 		func() error { return add(path.Join("adapter", "zz_generated_wire.rs"), "wire", v) },
-		func() error {
-			return add(path.Join("port", "zz_generated_token_source.rs"), "token_source_port", map[string]any{"Header": v.Header})
-		},
 	}
 
 	for _, c := range v.Clients {
@@ -351,7 +330,7 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 
 	driverPorts := []string{}
 	if v.Auth {
-		driverPorts = append(driverPorts, TicketVerifierPort)
+		driverPorts = append(driverPorts, crateports.TicketVerifierPort)
 	}
 
 	if len(v.Controllers) > 0 {
@@ -372,11 +351,7 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 	}
 
 	if v.Auth {
-		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
-			Trait:  TicketVerifierPort,
-			Module: v.ModulePrefix + "port::ticket_verifier",
-		})
-		m.Requires.Ports = append(m.Requires.Ports, TicketVerifierPort)
+		m.Requires.Ports = append(m.Requires.Ports, crateports.TicketVerifierPort)
 	}
 
 	for _, s := range v.Stores {
@@ -411,12 +386,15 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 }
 
 func addClientToManifest(m *cellmanifest.Manifest, v view) {
-	m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
-		Trait:  TokenSourcePort,
-		Module: v.ModulePrefix + "port::token_source",
-	})
+	needsToken := false
 
 	for _, c := range v.Clients {
+		ports := []string{}
+		if c.Auth {
+			ports = append(ports, crateports.TokenSourcePort)
+			needsToken = true
+		}
+
 		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
 			Trait:  c.Trait,
 			Module: v.ModulePrefix + "port::" + c.PortModule,
@@ -427,7 +405,7 @@ func addClientToManifest(m *cellmanifest.Manifest, v view) {
 			Type:       c.Struct,
 			Module:     v.ModulePrefix + "adapter::" + c.Module,
 			Implements: c.Trait,
-			Ports:      []string{TokenSourcePort},
+			Ports:      ports,
 			Config: map[string]cellmanifest.ConfigField{
 				"base_url": {
 					Type:        cellmanifest.FieldTypeString,
@@ -436,6 +414,10 @@ func addClientToManifest(m *cellmanifest.Manifest, v view) {
 				},
 			},
 		})
+	}
+
+	if needsToken {
+		m.Requires.Ports = append(m.Requires.Ports, crateports.TokenSourcePort)
 	}
 }
 
@@ -494,15 +476,6 @@ pub struct {{ .Type.Name }} {
 }
 {{ end -}}
 
-{{- define "subject" -}}
-{{ .Header }}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Subject {
-    pub id: String,
-}
-{{ end -}}
-
 {{- define "port" -}}
 {{ .Header }}
 
@@ -552,43 +525,6 @@ pub trait {{ .Event.Port }}: Send + Sync {
 }
 {{ end -}}
 
-{{- define "ticket_verifier_port" -}}
-{{ .Header }}
-
-use {{ .CratePath }}types::subject::Subject;
-
-#[derive(Debug, thiserror::Error)]
-pub enum TicketVerifierError {
-    #[error("verifying the ticket: refused: {reason}")]
-    Refused { reason: String },
-    #[error("verifying the ticket")]
-    Verify {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
-
-#[cfg_attr(test, mockall::automock)]
-pub trait TicketVerifier: Send + Sync {
-    fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;
-}
-{{ end -}}
-
-{{- define "token_source_port" -}}
-{{ .Header }}
-
-#[derive(Debug, thiserror::Error)]
-pub enum TokenSourceError {
-    #[error("reading the current token: {reason}")]
-    Unavailable { reason: String },
-}
-
-#[cfg_attr(test, mockall::automock)]
-pub trait TokenSource: Send + Sync {
-    fn token(&self) -> Result<String, TokenSourceError>;
-}
-{{ end -}}
-
 {{- define "client_port" -}}
 {{ .Header }}
 {{ $c := .Client }}
@@ -633,7 +569,7 @@ use std::sync::Arc;
 use {{ $.CratePath }}port::{{ .PortSnake }}::{{ "{" }}{{ .Port }}, {{ .Port }}Error{{ "}" }};
 {{ end -}}
 {{ if $c.Auth -}}
-use {{ $.CratePath }}types::subject::Subject;
+use crate::types::subject::Subject;
 {{ end -}}
 {{ range $c.TypeImports -}}
 use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
@@ -888,8 +824,8 @@ use axum::Router;
 use {{ $v.CratePath }}controller::{{ "{" }}{{ .Pascal }}Controller, {{ .Pascal }}ControllerError{{ "}" }};
 {{ end -}}
 {{ if .Auth -}}
-use {{ .CratePath }}port::ticket_verifier::{TicketVerifier, TicketVerifierError};
-use {{ .CratePath }}types::subject::Subject;
+use crate::port::ticket_verifier::{TicketVerifier, TicketVerifierError};
+use crate::types::subject::Subject;
 {{ end -}}
 {{ range .Events -}}
 use {{ $v.CratePath }}types::{{ .Snake }}::{{ .Name }};
@@ -1053,7 +989,13 @@ fn authenticate(state: &HttpState, headers: &HeaderMap) -> Result<Subject, Rejec
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ")?.trim();
+    let (scheme, token) = value.trim().split_once(' ')?;
+
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+
+    let token = token.trim();
 
     if token.is_empty() {
         return None;
@@ -1066,6 +1008,21 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 
 const EVENT_STREAM_BUFFER: usize = 16;
 
+const EVENT_STREAM_KEEP_ALIVE: std::time::Duration = std::time::Duration::from_secs(15);
+
+fn event_frame<T, W>(events: &std::sync::mpsc::Receiver<T>) -> Option<Bytes>
+where
+    W: From<T> + serde::Serialize,
+{
+    match events.recv_timeout(EVENT_STREAM_KEEP_ALIVE) {
+        Ok(event) => serde_json::to_string(&W::from(event))
+            .ok()
+            .map(|json| Bytes::from(format!("data: {json}\n\n"))),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Some(Bytes::from_static(b": keep-alive\n\n")),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
+    }
+}
+
 fn event_stream<T, W>(events: std::sync::mpsc::Receiver<T>) -> Response
 where
     T: Send + 'static,
@@ -1075,13 +1032,7 @@ where
     let handle = tokio::runtime::Handle::current();
 
     tokio::task::spawn_blocking(move || {
-        while let Ok(event) = events.recv() {
-            let Ok(json) = serde_json::to_string(&W::from(event)) else {
-                break;
-            };
-
-            let frame = Bytes::from(format!("data: {json}\n\n"));
-
+        while let Some(frame) = event_frame::<T, W>(&events) {
             if handle.block_on(sender.send_data(frame)).is_err() {
                 break;
             }
@@ -1143,11 +1094,15 @@ async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
 {{- define "rest_client" -}}
 {{ .Header }}
 {{ $c := .Client }}
+{{ if $c.Auth -}}
 use std::sync::Arc;
 
+{{ end -}}
 use serde::de::DeserializeOwned;
 
-use {{ .CratePath }}port::token_source::TokenSource;
+{{ if $c.Auth -}}
+use crate::port::token_source::TokenSource;
+{{ end -}}
 use {{ .CratePath }}port::{{ $c.PortModule }}::{{ "{" }}{{ $c.Trait }}, {{ $c.Error }}{{ "}" }};
 {{ range $c.TypeImports -}}
 use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
@@ -1172,17 +1127,22 @@ impl Default for {{ $c.Config }} {
 pub struct {{ $c.Struct }} {
     base_url: String,
     client: reqwest::Client,
+{{- if $c.Auth }}
     token_source: Arc<dyn TokenSource + Send + Sync>,
+{{- end }}
 }
 
 impl {{ $c.Struct }} {
-    pub fn new(config: {{ $c.Config }}, token_source: Arc<dyn TokenSource + Send + Sync>) -> Self {
+    pub fn new(config: {{ $c.Config }}{{ if $c.Auth }}, token_source: Arc<dyn TokenSource + Send + Sync>{{ end }}) -> Self {
         Self {
             base_url: config.base_url.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
+{{- if $c.Auth }}
             token_source,
+{{- end }}
         }
     }
+{{- if $c.Auth }}
 
     fn bearer(&self, operation: &str) -> Result<String, {{ $c.Error }}> {
         self.token_source
@@ -1192,6 +1152,7 @@ impl {{ $c.Struct }} {
                 message: source.to_string(),
             })
     }
+{{- end }}
 
     fn block<T>(&self, future: impl std::future::Future<Output = T>) -> T {
         tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
@@ -1286,7 +1247,16 @@ where
 {
     let mut buffer: Vec<u8> = Vec::new();
 
-    while let Ok(Some(chunk)) = response.chunk().await {
+    loop {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("reading the event stream: {}", error_chain(&error));
+                return;
+            }
+        };
+
         buffer.extend_from_slice(&chunk);
 
         while let Some(end) = frame_end(&buffer) {
@@ -1299,6 +1269,18 @@ where
             }
         }
     }
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(current) = source {
+        parts.push(current.to_string());
+        source = current.source();
+    }
+
+    parts.join(": ")
 }
 
 fn frame_end(buffer: &[u8]) -> Option<usize> {

@@ -26,6 +26,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/crateports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
@@ -61,6 +62,39 @@ type Options struct {
 type File struct {
 	Path    string
 	Content string
+}
+
+type modEntry struct {
+	Module string
+	Alias  string
+}
+
+func crateRootPorts(merged *cellmanifest.Merged) []crateports.Port {
+	roots := []crateports.Port{}
+	needsSubject := false
+
+	for _, required := range merged.RequiredPorts {
+		if _, provided := merged.Ports[required.Trait]; provided {
+			continue
+		}
+
+		root, known := crateports.Lookup(required.Trait)
+		if !known {
+			continue
+		}
+
+		merged.Ports[root.Trait] = cellmanifest.PortEntry{
+			Port: cellmanifest.Port{Trait: root.Trait, Module: root.Module},
+		}
+		roots = append(roots, root)
+		needsSubject = needsSubject || root.Trait == crateports.TicketVerifierPort
+	}
+
+	if needsSubject {
+		roots = append(roots, crateports.Subject())
+	}
+
+	return roots
 }
 
 func checkCells(cells []string) error {
@@ -171,6 +205,8 @@ func Generate(opts Options) ([]File, error) {
 		return nil, err
 	}
 
+	roots := crateRootPorts(&merged)
+
 	p, err := buildPlan(merged, wiring, opts)
 	if err != nil {
 		return nil, err
@@ -201,6 +237,21 @@ func Generate(opts Options) ([]File, error) {
 		steps = append(steps, func() error { return add(BuildScriptFile, "build", p) })
 	}
 
+	rootEntries := map[string][]modEntry{}
+
+	for _, root := range roots {
+		source, known := crateports.Source(root.Trait, header)
+		if !known {
+			return nil, fmt.Errorf("emitting the crate root port %q: the crate root knows no such port", root.Trait)
+		}
+
+		files = append(files, File{Path: path.Join("src", root.Layer, root.File), Content: source})
+		rootEntries[root.Layer] = append(rootEntries[root.Layer], modEntry{
+			Module: strings.TrimSuffix(root.File, ".rs"),
+			Alias:  root.Alias,
+		})
+	}
+
 	for _, layer := range Layers {
 		layer := layer
 
@@ -208,6 +259,7 @@ func Generate(opts Options) ([]File, error) {
 			"Header":  header,
 			"Allow":   allowingLayers[layer],
 			"Configs": []handConfigPlan{},
+			"Entries": rootEntries[layer],
 		}
 
 		if layer == "adapter" {
@@ -362,8 +414,15 @@ pub mod {{ . }};
 {{- if .Allow }}
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 {{- end }}
-{{ range .Configs }}
+{{ range .Entries }}
+pub mod {{ .Module }};
+{{- end }}
+{{- range .Configs }}
 pub mod zz_generated_{{ .Module }}_config;
+{{- end }}
+{{- range .Entries }}
+
+pub use {{ .Module }} as {{ .Alias }};
 {{- end }}
 {{- range .Configs }}
 

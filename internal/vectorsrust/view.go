@@ -179,10 +179,6 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 		v.Controllers = append(v.Controllers, cv)
 	}
 
-	if spec.Auth {
-		usedTypes["Subject"] = true
-	}
-
 	for _, name := range sortedStrings(usedTypes) {
 		v.TypeImports = append(v.TypeImports, importView{Snake: rustname.Snake(name), Name: name})
 	}
