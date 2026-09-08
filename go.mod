@@ -5,7 +5,7 @@ module github.com/alexandremahdhaoui/forge-dev-codegen
 go 1.26.5
 
 require (
-	github.com/alexandremahdhaoui/forge v0.48.0
+	github.com/alexandremahdhaoui/forge v0.48.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
