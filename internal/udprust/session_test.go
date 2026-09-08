@@ -73,7 +73,7 @@ func generateSession(t *testing.T) map[string]udprust.File {
 	return byPath
 }
 
-func TestNamingAHelloRpcEmitsTheGateTheBroadcastThePushTheAdmissionAndTheTickDriver(t *testing.T) {
+func TestNamingAHelloRpcEmitsTheGateThePeerTableTheBroadcastThePushTheAdmissionAndTheTickDriver(t *testing.T) {
 	files, err := udprust.Generate([]byte(sessionProto), sessionOptions())
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -83,6 +83,7 @@ func TestNamingAHelloRpcEmitsTheGateTheBroadcastThePushTheAdmissionAndTheTickDri
 		"adapter/mod.rs",
 		"adapter/zz_generated_hello_datagram_udp_broadcast.rs",
 		"adapter/zz_generated_hello_datagram_udp_client.rs",
+		"adapter/zz_generated_hello_datagram_udp_peer_table.rs",
 		"controller/mod.rs",
 		"controller/zz_generated_hello_datagram_codec.rs",
 		"controller/zz_generated_hello_datagram_controller.rs",
@@ -93,6 +94,7 @@ func TestNamingAHelloRpcEmitsTheGateTheBroadcastThePushTheAdmissionAndTheTickDri
 		"port/mod.rs",
 		"port/zz_generated_hello_datagram_broadcast.rs",
 		"port/zz_generated_hello_datagram_client.rs",
+		"port/zz_generated_hello_datagram_peer_table.rs",
 		"port/zz_generated_hello_datagram_session_gate.rs",
 		"types/mod.rs",
 		"types/zz_generated_admission.rs",
@@ -112,7 +114,7 @@ func TestNamingAHelloRpcEmitsTheGateTheBroadcastThePushTheAdmissionAndTheTickDri
 	}
 }
 
-func TestTheSessionManifestListsTheGateAndTheBroadcastOnTheDriverTheBroadcastOnTheControllerAndTheTickDriver(t *testing.T) {
+func TestTheSessionManifestHandsTheGateAndThePeerTableToTheDriversTheBroadcastToTheControllerAndThePeerTableToTheBroadcastAdapter(t *testing.T) {
 	files := generateSession(t)
 
 	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
@@ -126,11 +128,11 @@ func TestTheSessionManifestListsTheGateAndTheBroadcastOnTheDriverTheBroadcastOnT
 
 	udp, tick := m.Provides.Drivers[0], m.Provides.Drivers[1]
 
-	if udp.Name != "udp" || !reflect.DeepEqual(udp.Ports, []string{"HelloDatagramSessionGate", "HelloDatagramBroadcast"}) {
+	if udp.Name != "udp" || !reflect.DeepEqual(udp.Ports, []string{"HelloDatagramSessionGate", "HelloDatagramPeerTable"}) {
 		t.Errorf("udp driver = %+v", udp)
 	}
 
-	if tick.Name != "tick" || tick.Type != "HelloDatagramTickDriver" || tick.Module != "udp::driver::hello_datagram_tick_driver" {
+	if tick.Name != "tick" || tick.Type != "HelloDatagramTickDriver" || !reflect.DeepEqual(tick.Ports, []string{"HelloDatagramPeerTable"}) {
 		t.Errorf("tick driver = %+v", tick)
 	}
 
@@ -142,17 +144,26 @@ func TestTheSessionManifestListsTheGateAndTheBroadcastOnTheDriverTheBroadcastOnT
 		t.Errorf("controller = %+v", m.Provides.Controllers[0])
 	}
 
-	if len(m.Provides.Adapters) != 2 {
+	if len(m.Provides.Adapters) != 3 {
 		t.Fatalf("adapters = %+v", m.Provides.Adapters)
 	}
 
-	broadcast := m.Provides.Adapters[1]
-	if broadcast.Name != "udp_broadcast" || broadcast.Implements != "HelloDatagramBroadcast" || !broadcast.Fallible {
+	peerTable, broadcast := m.Provides.Adapters[1], m.Provides.Adapters[2]
+
+	if peerTable.Name != "udp_peer_table" || peerTable.Implements != "HelloDatagramPeerTable" || !peerTable.Fallible {
+		t.Errorf("peer table adapter = %+v", peerTable)
+	}
+
+	if fmt.Sprint(peerTable.Config["max_sessions"].Default) != "64" {
+		t.Errorf("peer table adapter config = %+v", peerTable.Config)
+	}
+
+	if broadcast.Name != "udp_broadcast" || broadcast.Implements != "HelloDatagramBroadcast" || broadcast.Fallible {
 		t.Errorf("broadcast adapter = %+v", broadcast)
 	}
 
-	if fmt.Sprint(broadcast.Config["max_sessions"].Default) != "64" {
-		t.Errorf("broadcast adapter config = %+v", broadcast.Config)
+	if !reflect.DeepEqual(broadcast.Ports, []string{"HelloDatagramPeerTable"}) || len(broadcast.Config) != 0 {
+		t.Errorf("broadcast adapter = %+v", broadcast)
 	}
 
 	traits := []string{}
@@ -160,7 +171,7 @@ func TestTheSessionManifestListsTheGateAndTheBroadcastOnTheDriverTheBroadcastOnT
 		traits = append(traits, p.Trait)
 	}
 
-	if !reflect.DeepEqual(traits, []string{"HelloDatagramClient", "HelloDatagramSessionGate", "HelloDatagramBroadcast"}) {
+	if !reflect.DeepEqual(traits, []string{"HelloDatagramClient", "HelloDatagramSessionGate", "HelloDatagramBroadcast", "HelloDatagramPeerTable"}) {
 		t.Errorf("ports = %q", traits)
 	}
 }
@@ -193,16 +204,17 @@ func TestTheGatePortTakesTheSessionIdTheDecodedHelloAndThePeerAndAnswersAnAdmiss
 	}
 }
 
-func TestTheDriverGatesTheHelloFollowsAKnownSessionAndDropsAnUnknownOne(t *testing.T) {
+func TestTheDriverGatesTheHelloAdmitsThePeerAfterTheControllerAnsweredFollowsAKnownSessionAndDropsAnUnknownOne(t *testing.T) {
 	files := generateSession(t)
 
 	driver := files["driver/zz_generated_hello_datagram_udp_driver.rs"].Content
 
 	for _, want := range []string{
 		"session_gate: Arc<dyn HelloDatagramSessionGate + Send + Sync>,",
-		"broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,",
+		"peer_table: Arc<dyn HelloDatagramPeerTable + Send + Sync>,",
 		".attach(Box::new(move |datagram, peer| sender.try_send_to(datagram, peer)))",
-		"codec::HelloDatagramRequest::Hello(request) => {\n                    if !self.admit(&session_id, &request, peer, &mut told_about_a_refusal, &mut told_about_a_full_table) {",
+		"codec::HelloDatagramRequest::Hello(request) => {\n                    if !self.gate(&session_id, &request, peer, &mut told_about_a_refusal) {",
+		"match self.controller.hello(request, &context) {\n                        Ok(reply) => {\n                            if !self.admit(&session_id, peer, &mut told_about_a_full_table) {",
 		"codec::HelloDatagramRequest::Echo(request) => {\n                    if !self.follow(&session_id, peer, &mut told_about_an_unknown_session) {",
 		"Ok(Admission::Refused { reason }) => {",
 		"the peer table is full",
@@ -214,8 +226,8 @@ func TestTheDriverGatesTheHelloFollowsAKnownSessionAndDropsAnUnknownOne(t *testi
 		}
 	}
 
-	if strings.Contains(driver, "HelloDatagramRequest::Counter") {
-		t.Errorf("the driver routes a push rpc inbound\n%s", driver)
+	if strings.Contains(driver, "HelloDatagramRequest::Counter") || strings.Contains(driver, "Broadcast") {
+		t.Errorf("the driver routes a push rpc inbound or reaches the broadcast\n%s", driver)
 	}
 }
 
@@ -232,7 +244,7 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 	}
 
 	for _, want := range []string{
-		"fn on_tick(&self, tick: u64) -> Result<(), HelloDatagramControllerError>;",
+		"fn on_tick(&self) -> Result<(), HelloDatagramControllerError>;",
 		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,",
 		"pub fn new(hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>) -> Self {",
 		"Broadcast {\n        kind: String,\n        #[source]\n        source: HelloDatagramBroadcastError,\n    },",
@@ -243,19 +255,21 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 	}
 
 	for _, want := range []string{
+		"use crate::udp::types::hello_datagram_messages::{Hello, Welcome, Echo, Counter};",
 		"pub const COUNTER_HASH: u8 =",
 		"COUNTER_HASH => {\n            return Err(HelloDatagramCodecError::Outbound {",
 		"pub fn encode_push(",
 		"HelloDatagramPush::Counter(message) => seal(COUNTER_METHOD, session_id, COUNTER_HASH, message),",
 		"pub fn decode_push(",
+		"COUNTER_HASH => Counter::decode(framed.payload)\n            .map(HelloDatagramPush::Counter)",
 	} {
 		if !strings.Contains(codec, want) {
 			t.Errorf("the codec lacks %q\n%s", want, codec)
 		}
 	}
 
-	if strings.Contains(codec, "encode_counter_request") {
-		t.Errorf("the codec emits a request encoder for a push rpc\n%s", codec)
+	if strings.Contains(codec, "encode_counter_request") || strings.Count(codec[strings.Index(codec, "pub fn decode_push("):], "unframe(datagram)") != 1 {
+		t.Errorf("the codec emits a request encoder for a push rpc or unframes a push twice\n%s", codec)
 	}
 
 	if !strings.Contains(push, "pub enum HelloDatagramPush {\n    Counter(Counter),\n}") {
@@ -263,52 +277,99 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 	}
 }
 
-func TestTheBroadcastPortSendsToOneSessionOrToEveryOneAndTheAdapterHoldsThePeerTable(t *testing.T) {
+func TestTheBroadcastPortOnlySendsAndThePeerTablePortHoldsTheSocketAndThePeers(t *testing.T) {
 	files := generateSession(t)
 
-	port := files["port/zz_generated_hello_datagram_broadcast.rs"].Content
-	adapter := files["adapter/zz_generated_hello_datagram_udp_broadcast.rs"].Content
+	broadcast := files["port/zz_generated_hello_datagram_broadcast.rs"].Content
+	peerTable := files["port/zz_generated_hello_datagram_peer_table.rs"].Content
 
 	for _, want := range []string{
 		"#[cfg_attr(test, mockall::automock)]",
 		"fn send_to(&self, session_id: &[u8; 16], push: HelloDatagramPush) -> Result<(), HelloDatagramBroadcastError>;",
 		"fn send_all(&self, push: HelloDatagramPush) -> Result<usize, HelloDatagramBroadcastError>;",
-		"fn attach(&self, sender: HelloDatagramSender) -> Result<(), HelloDatagramBroadcastError>;",
 	} {
-		if !strings.Contains(port, want) {
-			t.Errorf("the broadcast port lacks %q\n%s", want, port)
+		if !strings.Contains(broadcast, want) {
+			t.Errorf("the broadcast port lacks %q\n%s", want, broadcast)
+		}
+	}
+
+	for _, unwanted := range []string{"fn attach(", "fn admit_peer(", "fn follow_peer("} {
+		if strings.Contains(broadcast, unwanted) {
+			t.Errorf("the broadcast port carries %q, the controller must not see it\n%s", unwanted, broadcast)
 		}
 	}
 
 	for _, want := range []string{
-		"pub struct HelloDatagramUdpBroadcast {",
-		"peers: Mutex<Peers>,",
-		"sender: OnceLock<HelloDatagramSender>,",
-		"if peers.len() >= self.max_sessions && !peers.contains_key(session_id) {",
-		"impl HelloDatagramBroadcast for HelloDatagramUdpBroadcast {",
-		"codec::encode_push(session_id, push)",
+		"#[cfg_attr(test, mockall::automock)]",
+		"fn attach(&self, sender: HelloDatagramSender) -> Result<(), HelloDatagramPeerTableError>;",
+		"fn attached(&self) -> bool;",
+		"fn admit_peer(",
+		"fn follow_peer(",
+		"fn peer_of(",
+		"fn peers(&self) -> Result<Vec<([u8; 16], std::net::SocketAddr)>, HelloDatagramPeerTableError>;",
+		"fn deliver(&self, datagram: &[u8], peer: std::net::SocketAddr) -> Result<(), HelloDatagramPeerTableError>;",
 	} {
-		if !strings.Contains(adapter, want) {
-			t.Errorf("the broadcast adapter lacks %q\n%s", want, adapter)
+		if !strings.Contains(peerTable, want) {
+			t.Errorf("the peer table port lacks %q\n%s", want, peerTable)
 		}
 	}
 }
 
-func TestTheTickDriverBindsAnIntervalAnnouncesItAndCallsOnTickWithACount(t *testing.T) {
+func TestOneAdapterHoldsThePeerTableAndAnotherEncodesThePushThroughIt(t *testing.T) {
+	files := generateSession(t)
+
+	peerTable := files["adapter/zz_generated_hello_datagram_udp_peer_table.rs"].Content
+	broadcast := files["adapter/zz_generated_hello_datagram_udp_broadcast.rs"].Content
+
+	for _, want := range []string{
+		"pub struct HelloDatagramUdpPeerTable {",
+		"peers: Mutex<Peers>,",
+		"sender: OnceLock<HelloDatagramSender>,",
+		"if peers.len() >= self.max_sessions && !peers.contains_key(session_id) {",
+		"impl HelloDatagramPeerTable for HelloDatagramUdpPeerTable {",
+	} {
+		if !strings.Contains(peerTable, want) {
+			t.Errorf("the peer table adapter lacks %q\n%s", want, peerTable)
+		}
+	}
+
+	for _, want := range []string{
+		"pub struct HelloDatagramUdpBroadcastConfig {}",
+		"peer_table: Arc<dyn HelloDatagramPeerTable + Send + Sync>,",
+		"pub fn new(config: HelloDatagramUdpBroadcastConfig, peer_table: Arc<dyn HelloDatagramPeerTable + Send + Sync>) -> Self {",
+		"impl HelloDatagramBroadcast for HelloDatagramUdpBroadcast {",
+		"codec::encode_push(session_id, push)",
+		".deliver(&datagram, peer)",
+	} {
+		if !strings.Contains(broadcast, want) {
+			t.Errorf("the broadcast adapter lacks %q\n%s", want, broadcast)
+		}
+	}
+}
+
+func TestTheTickDriverTakesThePeerTableRefusesToServeUnattachedAndCallsOnTickWithNoArgument(t *testing.T) {
 	files := generateSession(t)
 
 	tick := files["driver/zz_generated_hello_datagram_tick_driver.rs"].Content
 
 	for _, want := range []string{
 		"pub struct HelloDatagramTickDriverConfig {\n    pub interval_ms: i64,\n}",
-		"pub fn new(config: HelloDatagramTickDriverConfig, controller: Arc<dyn HelloDatagramController + Send + Sync>) -> Self {",
+		"peer_table: Arc<dyn HelloDatagramPeerTable + Send + Sync>,",
 		"pub async fn bind(&mut self) -> Result<(), HelloDatagramTickDriverError> {",
 		"println!(\"TICKING {}\", self.interval_ms()?);",
 		"pub async fn serve(self) -> Result<(), HelloDatagramTickDriverError> {",
-		"if let Err(error) = self.controller.on_tick(tick) {",
+		"if !self.peer_table.attached() {\n                return Err(HelloDatagramTickDriverError::NotAttached);",
+		"enable driver_udp so the udp driver attaches one",
+		".on_tick()\n                .map_err(|source| HelloDatagramTickDriverError::OnTick { source })?;",
 	} {
 		if !strings.Contains(tick, want) {
 			t.Errorf("the tick driver lacks %q\n%s", want, tick)
+		}
+	}
+
+	for _, unwanted := range []string{"fn error_chain(", "on_tick(tick)", "wrapping_add"} {
+		if strings.Contains(tick, unwanted) {
+			t.Errorf("the tick driver still carries %q\n%s", unwanted, tick)
 		}
 	}
 }
@@ -317,8 +378,10 @@ func TestWithoutAHelloNothingOfTheSessionIsEmitted(t *testing.T) {
 	files := generate(t, udprust.Options{Service: "songe-hello"})
 
 	for path := range files {
-		if strings.Contains(path, "gate") || strings.Contains(path, "broadcast") || strings.Contains(path, "tick") || strings.Contains(path, "push") || strings.Contains(path, "admission") {
-			t.Errorf("a cell with no hello emitted %s", path)
+		for _, word := range []string{"gate", "broadcast", "tick", "push", "admission", "peer_table"} {
+			if strings.Contains(path, word) {
+				t.Errorf("a cell with no hello emitted %s", path)
+			}
 		}
 	}
 

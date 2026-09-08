@@ -135,7 +135,12 @@ func TestASessionCellGetsAGateMockAStackHelperAndOneTestPerCaseKind(t *testing.T
 	content := generateSession(t, sessionCases)
 
 	for _, want := range []string{
-		"fn on_tick(&self, tick: u64) -> Result<(), HelloDatagramControllerError>;",
+		"fn on_tick(&self) -> Result<(), HelloDatagramControllerError>;",
+		"fn hello_datagram_peer_table() -> std::sync::Arc<HelloDatagramUdpPeerTable> {",
+		"let pushing = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table.clone());",
+		".returning(move || {",
+		"stack.peer_table.clone(),\n    );",
+		".peer_table\n            .peer_of(",
 		"pub HelloDatagramSessionGate {}",
 		"fn admit(&self, session_id: &[u8; 16], request: &Hello, peer: std::net::SocketAddr) -> Result<Admission, HelloDatagramSessionGateError>;",
 		"async fn stand_up_hello_datagram(",
@@ -273,9 +278,9 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
         })
     }
 
-    fn on_tick(&self, tick: u64) -> Result<(), HelloDatagramControllerError> {
+    fn on_tick(&self) -> Result<(), HelloDatagramControllerError> {
         self.hello_datagram_broadcast
-            .send_all(HelloDatagramPush::Counter(Counter { tick }))
+            .send_all(HelloDatagramPush::Counter(Counter { tick: 3 }))
             .map(|_| ())
             .map_err(|source| HelloDatagramControllerError::Broadcast {
                 kind: "Counter".to_string(),

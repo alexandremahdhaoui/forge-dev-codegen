@@ -101,6 +101,9 @@ type datagramServiceView struct {
 	GateError       string
 	BroadcastStruct string
 	BroadcastConfig string
+	PeerTableTrait  string
+	PeerTableStruct string
+	PeerTableConfig string
 	TickStruct      string
 	TickConfig      string
 	PushEnum        string
@@ -281,6 +284,9 @@ func buildDatagramServiceView(svc *datagramService) datagramServiceView {
 		GateError:       svc.Pascal + "SessionGateError",
 		BroadcastStruct: svc.Pascal + "UdpBroadcast",
 		BroadcastConfig: svc.Pascal + "UdpBroadcastConfig",
+		PeerTableTrait:  svc.Pascal + "PeerTable",
+		PeerTableStruct: svc.Pascal + "UdpPeerTable",
+		PeerTableConfig: svc.Pascal + "UdpPeerTableConfig",
 		TickStruct:      svc.Pascal + "TickDriver",
 		TickConfig:      svc.Pascal + "TickDriverConfig",
 		PushEnum:        svc.Pascal + "Push",

@@ -160,7 +160,9 @@ the driver, not by the controller error's message.
 When the udp cell names `layout.hello`, the vectors cell names the same
 `hello` and `push` under its own `layout`. Every datagram test then
 stands the generated driver up over a mocked controller, a mocked
-`<Service>SessionGate` and the real `<Service>UdpBroadcast` peer table.
+`<Service>SessionGate` and the real `<Service>UdpPeerTable`. A push case
+also builds the real `<Service>UdpBroadcast` over that table for the
+mocked controller's `on_tick`.
 
 ```yaml
 layout:

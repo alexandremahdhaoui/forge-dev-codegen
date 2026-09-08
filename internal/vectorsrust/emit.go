@@ -152,10 +152,13 @@ use {{ .Crate }}::{{ .RestCell }}::port::ticket_verifier::TicketVerifierError;
 use {{ $.Crate }}::{{ $.RestCell }}::types::{{ .Snake }}::{{ .Name }};
 {{ end }}
 {{- if .HasDatagrams }}
-{{- if .Datagram.Session }}
+{{- if .HasPush }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_broadcast::{{ "{" }}{{ .Datagram.BroadcastStruct }}, {{ .Datagram.BroadcastConfig }}{{ "}" }};
 {{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_client::{{ "{" }}{{ .Datagram.ClientStruct }}, {{ .Datagram.ClientStruct }}Config{{ "}" }};
+{{- if .Datagram.Session }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_peer_table::{{ "{" }}{{ .Datagram.PeerTableStruct }}, {{ .Datagram.PeerTableConfig }}{{ "}" }};
+{{- end }}
 {{- if or .NeedsRegister .HasReconnect }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::controller::{{ .Datagram.Snake }}_codec as {{ .Datagram.Snake }}_codec;
 {{- end }}
@@ -168,6 +171,9 @@ use {{ .Crate }}::{{ .Datagram.Cell }}::driver::{{ .Datagram.Snake }}_udp_driver
 use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_broadcast::{{ .Datagram.Pascal }}Broadcast;
 {{- end }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_client::{{ .Datagram.ClientTrait }};
+{{- if .HasReconnect }}
+use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_peer_table::{{ .Datagram.PeerTableTrait }};
+{{- end }}
 {{- if .Datagram.Session }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::port::{{ .Datagram.Snake }}_session_gate::{{ .Datagram.GateError }};
 use {{ .Crate }}::{{ .Datagram.Cell }}::types::admission::Admission;
@@ -277,7 +283,7 @@ mockall::mock! {
         fn {{ .Ident }}(&self, request: {{ .Request }}, context: &Context) -> Result<{{ .Reply }}, {{ $.Datagram.Pascal }}ControllerError>;
 {{- end }}
 {{- if .Datagram.Session }}
-        fn on_tick(&self, tick: u64) -> Result<(), {{ .Datagram.Pascal }}ControllerError>;
+        fn on_tick(&self) -> Result<(), {{ .Datagram.Pascal }}ControllerError>;
 {{- end }}
     }
 }
@@ -293,7 +299,7 @@ mockall::mock! {
 #[allow(dead_code)]
 struct {{ .Datagram.Pascal }}Stack {
     port: u16,
-    broadcast: std::sync::Arc<{{ .Datagram.BroadcastStruct }}>,
+    peer_table: std::sync::Arc<{{ .Datagram.PeerTableStruct }}>,
     controller: std::sync::Arc<Mock{{ .Datagram.Pascal }}Controller>,
 }
 
@@ -312,9 +318,9 @@ fn {{ .Datagram.Snake }}_gate(admits: bool) -> Mock{{ .Datagram.GateTrait }} {
     gate
 }
 
-fn {{ .Datagram.Snake }}_broadcast() -> std::sync::Arc<{{ .Datagram.BroadcastStruct }}> {
+fn {{ .Datagram.Snake }}_peer_table() -> std::sync::Arc<{{ .Datagram.PeerTableStruct }}> {
     std::sync::Arc::new(
-        {{ .Datagram.BroadcastStruct }}::new({{ .Datagram.BroadcastConfig }} { max_sessions: 64 })
+        {{ .Datagram.PeerTableStruct }}::new({{ .Datagram.PeerTableConfig }} { max_sessions: 64 })
             .expect("a peer table"),
     )
 }
@@ -322,7 +328,7 @@ fn {{ .Datagram.Snake }}_broadcast() -> std::sync::Arc<{{ .Datagram.BroadcastStr
 async fn stand_up_{{ .Datagram.Snake }}(
     controller: Mock{{ .Datagram.Pascal }}Controller,
     gate: Mock{{ .Datagram.GateTrait }},
-    broadcast: std::sync::Arc<{{ .Datagram.BroadcastStruct }}>,
+    peer_table: std::sync::Arc<{{ .Datagram.PeerTableStruct }}>,
 ) -> {{ .Datagram.Pascal }}Stack {
     let controller = std::sync::Arc::new(controller);
 
@@ -332,7 +338,7 @@ async fn stand_up_{{ .Datagram.Snake }}(
         },
         controller.clone(),
         std::sync::Arc::new(gate),
-        broadcast.clone(),
+        peer_table.clone(),
     );
 
     driver.bind().await.expect("a bound udp socket");
@@ -347,7 +353,7 @@ async fn stand_up_{{ .Datagram.Snake }}(
 
     {{ .Datagram.Pascal }}Stack {
         port,
-        broadcast,
+        peer_table,
         controller,
     }
 }
@@ -424,8 +430,8 @@ async fn receive_{{ .Datagram.Snake }}_push(
 {{- $t := . }}
 #[tokio::test]
 async fn {{ .Name }}() {
-    let broadcast = {{ .ServiceSnake }}_broadcast();
-    let pushing = broadcast.clone();
+    let peer_table = {{ .ServiceSnake }}_peer_table();
+    let pushing = {{ .ServicePascal }}UdpBroadcast::new({{ .ServicePascal }}UdpBroadcastConfig {}, peer_table.clone());
 
     let mut {{ .ControllerVar }} = Mock{{ .ServicePascal }}Controller::new();
     {{ .ControllerVar }}
@@ -433,7 +439,7 @@ async fn {{ .Name }}() {
         .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
     {{ .ControllerVar }}
         .expect_on_tick()
-        .returning(move |_tick| {
+        .returning(move || {
             pushing
                 .send_all({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }}))
                 .map(|_reached| ())
@@ -443,7 +449,7 @@ async fn {{ .Name }}() {
                 })
         });
 
-    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate(true), broadcast).await;
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate(true), peer_table).await;
 
     let peers = vec![
 {{- range .SessionLiterals }}
@@ -456,6 +462,7 @@ async fn {{ .Name }}() {
             interval_ms: {{ .TickIntervalMs }},
         },
         stack.controller.clone(),
+        stack.peer_table.clone(),
     );
 
     tick.bind().await.expect("a bound tick interval");
@@ -483,7 +490,7 @@ async fn {{ .Name }}() {
         .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
 {{- end }}
 
-    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_peer_table()).await;
 {{- if and .Registered (not .IsHello) }}
 
     let _registered = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .HelloLiteral }}).await;
@@ -518,7 +525,7 @@ async fn {{ .Name }}() {
             Ok(controller_reply.clone())
         });
 
-    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_peer_table()).await;
 
     let (first, _) = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .RequestLiteral }}).await;
     let (second, reply) = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .RequestLiteral }}).await;
@@ -531,7 +538,7 @@ async fn {{ .Name }}() {
     assert_ne!(first_address, second_address);
     assert_eq!(
         stack
-            .broadcast
+            .peer_table
             .peer_of(&{{ .ServiceSnake }}_codec::session_id_from({{ .SessionLiteral }}))
             .expect("a peer"),
         Some(second_address),
@@ -559,7 +566,7 @@ async fn {{ .Name }}() {
         .returning(|_request, _context| Ok({{ .HelloReply }}::default()));
 {{- end }}
 
-    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_broadcast()).await;
+    let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate({{ .GateAdmits }}), {{ .ServiceSnake }}_peer_table()).await;
 {{- if and .Registered (not .IsHello) }}
 
     let _registered = register_{{ .ServiceSnake }}(stack.port, {{ .SessionLiteral }}, {{ .HelloLiteral }}).await;

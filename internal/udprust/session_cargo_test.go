@@ -32,7 +32,14 @@ use crate::udp::types::hello_datagram_push::HelloDatagramPush;
 
 impl HelloDatagramController for HelloDatagramControllerImpl {
     fn hello(&self, request: Hello, context: &Context) -> Result<Welcome, HelloDatagramControllerError> {
-        let _ = (request, context);
+        let _ = context;
+
+        if request.secret == "explode" {
+            return Err(HelloDatagramControllerError::Invalid {
+                field: "secret".to_string(),
+                reason: "explodes on purpose".to_string(),
+            });
+        }
 
         Ok(Welcome {
             greeting: "welcome".to_string(),
@@ -47,9 +54,9 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
         })
     }
 
-    fn on_tick(&self, tick: u64) -> Result<(), HelloDatagramControllerError> {
+    fn on_tick(&self) -> Result<(), HelloDatagramControllerError> {
         self.hello_datagram_broadcast
-            .send_all(HelloDatagramPush::Counter(Counter { tick }))
+            .send_all(HelloDatagramPush::Counter(Counter { tick: 7 }))
             .map(|_| ())
             .map_err(|source| HelloDatagramControllerError::Broadcast {
                 kind: "Counter".to_string(),
@@ -68,16 +75,20 @@ use songe_hello::udp::adapter::hello_datagram_udp_broadcast::{
 use songe_hello::udp::adapter::hello_datagram_udp_client::{
     HelloDatagramUdpClient, HelloDatagramUdpClientConfig,
 };
+use songe_hello::udp::adapter::hello_datagram_udp_peer_table::{
+    HelloDatagramUdpPeerTable, HelloDatagramUdpPeerTableConfig,
+};
 use songe_hello::udp::controller::hello_datagram_codec as codec;
 use songe_hello::udp::controller::{HelloDatagramController, HelloDatagramControllerImpl};
 use songe_hello::udp::driver::hello_datagram_tick_driver::{
-    HelloDatagramTickDriver, HelloDatagramTickDriverConfig,
+    HelloDatagramTickDriver, HelloDatagramTickDriverConfig, HelloDatagramTickDriverError,
 };
 use songe_hello::udp::driver::hello_datagram_udp_driver::{
     HelloDatagramUdpDriver, HelloDatagramUdpDriverConfig,
 };
 use songe_hello::udp::port::hello_datagram_broadcast::HelloDatagramBroadcast;
 use songe_hello::udp::port::hello_datagram_client::HelloDatagramClient;
+use songe_hello::udp::port::hello_datagram_peer_table::HelloDatagramPeerTable;
 use songe_hello::udp::port::hello_datagram_session_gate::{
     HelloDatagramSessionGate, HelloDatagramSessionGateError,
 };
@@ -98,30 +109,38 @@ impl HelloDatagramSessionGate for SecretGate {
         request: &Hello,
         _peer: std::net::SocketAddr,
     ) -> Result<Admission, HelloDatagramSessionGateError> {
-        if request.secret == SECRET {
-            return Ok(Admission::Admitted);
+        if request.secret == "wrong" {
+            return Ok(Admission::Refused {
+                reason: "the secret does not match".to_string(),
+            });
         }
 
-        Ok(Admission::Refused {
-            reason: "the secret does not match".to_string(),
-        })
+        Ok(Admission::Admitted)
     }
 }
 
 struct Stack {
     port: u16,
-    broadcast: Arc<HelloDatagramUdpBroadcast>,
+    peer_table: Arc<HelloDatagramUdpPeerTable>,
     controller: Arc<dyn HelloDatagramController + Send + Sync>,
 }
 
-async fn stand_up(max_sessions: i64) -> Stack {
-    let broadcast = Arc::new(
-        HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig { max_sessions })
+fn peer_table(max_sessions: i64) -> Arc<HelloDatagramUdpPeerTable> {
+    Arc::new(
+        HelloDatagramUdpPeerTable::new(HelloDatagramUdpPeerTableConfig { max_sessions })
             .expect("a peer table"),
-    );
+    )
+}
 
-    let controller: Arc<dyn HelloDatagramController + Send + Sync> =
-        Arc::new(HelloDatagramControllerImpl::new(broadcast.clone()));
+fn controller(peer_table: Arc<HelloDatagramUdpPeerTable>) -> Arc<dyn HelloDatagramController + Send + Sync> {
+    let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table);
+
+    Arc::new(HelloDatagramControllerImpl::new(Arc::new(broadcast)))
+}
+
+async fn stand_up(max_sessions: i64) -> Stack {
+    let peer_table = peer_table(max_sessions);
+    let controller = controller(peer_table.clone());
 
     let mut driver = HelloDatagramUdpDriver::new(
         HelloDatagramUdpDriverConfig {
@@ -129,7 +148,7 @@ async fn stand_up(max_sessions: i64) -> Stack {
         },
         controller.clone(),
         Arc::new(SecretGate),
-        broadcast.clone(),
+        peer_table.clone(),
     );
 
     driver.bind().await.expect("a bound socket");
@@ -142,7 +161,7 @@ async fn stand_up(max_sessions: i64) -> Stack {
 
     Stack {
         port,
-        broadcast,
+        peer_table,
         controller,
     }
 }
@@ -214,7 +233,7 @@ async fn a_hello_with_the_secret_is_admitted_and_welcomed() {
         .expect("a welcome");
 
     assert_eq!(welcome.greeting, "welcome");
-    assert_eq!(stack.broadcast.sessions().expect("a count"), 1);
+    assert_eq!(stack.peer_table.sessions().expect("a count"), 1);
 }
 
 #[tokio::test]
@@ -227,7 +246,19 @@ async fn a_hello_with_a_wrong_secret_is_refused_and_never_answered() {
         .expect_err("no welcome");
 
     assert!(error.to_string().contains("Hello"));
-    assert_eq!(stack.broadcast.sessions().expect("a count"), 0);
+    assert_eq!(stack.peer_table.sessions().expect("a count"), 0);
+}
+
+#[tokio::test]
+async fn a_hello_the_controller_refuses_leaves_no_session_behind() {
+    let stack = stand_up(64).await;
+
+    client(stack.port, SESSION, 300)
+        .hello(hello("explode"))
+        .await
+        .expect_err("no welcome");
+
+    assert_eq!(stack.peer_table.sessions().expect("a count"), 0);
 }
 
 #[tokio::test]
@@ -266,12 +297,13 @@ async fn a_hello_again_from_a_new_address_replaces_the_peer() {
     let second = raw_hello(stack.port, SESSION).await;
 
     assert_eq!(
-        stack.broadcast.peer_of(&codec::session_id_from(SESSION)).expect("a peer"),
+        stack.peer_table.peer_of(&codec::session_id_from(SESSION)).expect("a peer"),
         Some(second.local_addr().expect("an address"))
     );
 
-    stack
-        .broadcast
+    let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, stack.peer_table.clone());
+
+    broadcast
         .send_to(
             &codec::session_id_from(SESSION),
             HelloDatagramPush::Counter(Counter { tick: 7 }),
@@ -296,7 +328,7 @@ async fn a_full_peer_table_refuses_a_new_session_and_keeps_the_known_one() {
         .await
         .expect_err("no welcome");
 
-    assert_eq!(stack.broadcast.sessions().expect("a count"), 1);
+    assert_eq!(stack.peer_table.sessions().expect("a count"), 1);
 }
 
 #[tokio::test]
@@ -309,6 +341,7 @@ async fn the_tick_driver_pushes_the_counter_to_every_admitted_session() {
     let mut tick = HelloDatagramTickDriver::new(
         HelloDatagramTickDriverConfig { interval_ms: 10 },
         stack.controller.clone(),
+        stack.peer_table.clone(),
     );
 
     tick.bind().await.expect("a bound interval");
@@ -318,23 +351,45 @@ async fn the_tick_driver_pushes_the_counter_to_every_admitted_session() {
         let _ = tick.serve().await;
     });
 
-    assert!(matches!(
+    assert_eq!(
         recv_push(&first, SESSION).await,
-        Some(HelloDatagramPush::Counter(Counter { tick })) if tick >= 1
-    ));
-    assert!(matches!(
+        Some(HelloDatagramPush::Counter(Counter { tick: 7 }))
+    );
+    assert_eq!(
         recv_push(&second, OTHER).await,
-        Some(HelloDatagramPush::Counter(Counter { tick })) if tick >= 1
-    ));
+        Some(HelloDatagramPush::Counter(Counter { tick: 7 }))
+    );
+}
+
+#[tokio::test]
+async fn the_tick_driver_refuses_to_serve_while_no_udp_driver_attached_a_socket() {
+    let peer_table = peer_table(4);
+
+    let mut tick = HelloDatagramTickDriver::new(
+        HelloDatagramTickDriverConfig { interval_ms: 10 },
+        controller(peer_table.clone()),
+        peer_table,
+    );
+
+    tick.bind().await.expect("a bound interval");
+
+    let error = tokio::time::timeout(Duration::from_secs(2), tick.serve())
+        .await
+        .expect("serve ends in time")
+        .expect_err("a refusal");
+
+    assert!(matches!(error, HelloDatagramTickDriverError::NotAttached));
+    assert!(error.to_string().contains("driver_udp"));
 }
 
 #[tokio::test]
 async fn a_tick_interval_below_one_millisecond_is_refused_at_bind() {
-    let stack = stand_up(64).await;
+    let peer_table = peer_table(4);
 
     let mut tick = HelloDatagramTickDriver::new(
         HelloDatagramTickDriverConfig { interval_ms: 0 },
-        stack.controller.clone(),
+        controller(peer_table.clone()),
+        peer_table,
     );
 
     let error = tick.bind().await.expect_err("a refusal");
@@ -346,15 +401,14 @@ async fn a_tick_interval_below_one_millisecond_is_refused_at_bind() {
 }
 
 #[test]
-fn a_push_datagram_sent_before_the_driver_is_bound_names_the_unbound_driver() {
-    let broadcast =
-        HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig { max_sessions: 4 })
-            .expect("a peer table");
-
+fn a_push_sent_before_the_driver_is_bound_names_the_unbound_driver() {
+    let peer_table = peer_table(4);
     let session = codec::session_id_from(SESSION);
     let peer: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
 
-    assert!(broadcast.admit_peer(&session, peer).expect("an admission"));
+    assert!(peer_table.admit_peer(&session, peer).expect("an admission"));
+
+    let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table);
 
     let error = broadcast
         .send_to(&session, HelloDatagramPush::Counter(Counter { tick: 1 }))
@@ -362,13 +416,17 @@ fn a_push_datagram_sent_before_the_driver_is_bound_names_the_unbound_driver() {
 
     assert_eq!(
         error.to_string(),
-        "sending Counter: the hello_datagram udp driver is not bound"
+        "sending Counter to session [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]"
     );
+    assert!(std::error::Error::source(&error)
+        .expect("a cause")
+        .to_string()
+        .contains("udp driver is not bound"));
 }
 
 #[test]
 fn a_peer_table_sized_below_one_is_refused() {
-    let error = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig { max_sessions: 0 })
+    let error = HelloDatagramUdpPeerTable::new(HelloDatagramUdpPeerTableConfig { max_sessions: 0 })
         .err()
         .expect("a refusal");
 

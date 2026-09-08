@@ -167,6 +167,9 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 					return add(path.Join("adapter", "zz_generated_"+v.BroadcastAdapter+".rs"), "broadcast_adapter", v)
 				},
 				func() error {
+					return add(path.Join("adapter", "zz_generated_"+v.PeerTableAdapter+".rs"), "peer_table_adapter", v)
+				},
+				func() error {
 					return add(path.Join("driver", "zz_generated_"+v.TickModule+".rs"), "tick", v)
 				},
 				func() error {
@@ -174,6 +177,9 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 				},
 				func() error {
 					return add(path.Join("port", "zz_generated_"+v.BroadcastModule+".rs"), "broadcast", v)
+				},
+				func() error {
+					return add(path.Join("port", "zz_generated_"+v.PeerTableModule+".rs"), "peer_table", v)
 				},
 				func() error {
 					return add(path.Join("types", "zz_generated_"+v.PushModule+".rs"), "push", v)
@@ -200,9 +206,11 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 		if v.Session {
 			mount("adapter", modEntry{Module: "zz_generated_" + v.BroadcastAdapter, Alias: v.BroadcastAdapter})
+			mount("adapter", modEntry{Module: "zz_generated_" + v.PeerTableAdapter, Alias: v.PeerTableAdapter})
 			mount("driver", modEntry{Module: "zz_generated_" + v.TickModule, Alias: v.TickModule})
 			mount("port", modEntry{Module: "zz_generated_" + v.GateModule, Alias: v.GateModule})
 			mount("port", modEntry{Module: "zz_generated_" + v.BroadcastModule, Alias: v.BroadcastModule})
+			mount("port", modEntry{Module: "zz_generated_" + v.PeerTableModule, Alias: v.PeerTableModule})
 			mount("types", modEntry{Module: "zz_generated_" + v.PushModule, Alias: v.PushModule})
 		}
 
@@ -263,7 +271,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 
 	if v.Session {
 		controllerPorts = []string{v.BroadcastTrait}
-		driverPorts = []string{v.GateTrait, v.BroadcastTrait}
+		driverPorts = []string{v.GateTrait, v.PeerTableTrait}
 	}
 
 	m.Provides.Controllers = append(m.Provides.Controllers, cellmanifest.Controller{
@@ -326,6 +334,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Type:     v.TickStruct,
 		Module:   v.ModulePrefix + "driver::" + v.TickModule,
 		Requires: []string{v.ControllerTrait},
+		Ports:    []string{v.PeerTableTrait},
 		Config: map[string]cellmanifest.ConfigField{
 			"interval_ms": {
 				Type:        cellmanifest.FieldTypeInteger,
@@ -338,22 +347,32 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 	m.Provides.Ports = append(m.Provides.Ports,
 		cellmanifest.Port{Trait: v.GateTrait, Module: v.ModulePrefix + "port::" + v.GateModule},
 		cellmanifest.Port{Trait: v.BroadcastTrait, Module: v.ModulePrefix + "port::" + v.BroadcastModule},
+		cellmanifest.Port{Trait: v.PeerTableTrait, Module: v.ModulePrefix + "port::" + v.PeerTableModule},
 	)
 
-	m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
-		Name:       v.BroadcastName,
-		Type:       v.BroadcastStruct,
-		Module:     v.ModulePrefix + "adapter::" + v.BroadcastAdapter,
-		Implements: v.BroadcastTrait,
-		Fallible:   true,
-		Config: map[string]cellmanifest.ConfigField{
-			"max_sessions": {
-				Type:        cellmanifest.FieldTypeInteger,
-				Default:     DefaultSessions,
-				Description: "How many sessions the " + v.ServiceSnake + " peer table holds before it refuses a new one",
+	m.Provides.Adapters = append(m.Provides.Adapters,
+		cellmanifest.Adapter{
+			Name:       v.PeerTableName,
+			Type:       v.PeerTableStruct,
+			Module:     v.ModulePrefix + "adapter::" + v.PeerTableAdapter,
+			Implements: v.PeerTableTrait,
+			Fallible:   true,
+			Config: map[string]cellmanifest.ConfigField{
+				"max_sessions": {
+					Type:        cellmanifest.FieldTypeInteger,
+					Default:     DefaultSessions,
+					Description: "How many sessions the " + v.ServiceSnake + " peer table holds before it refuses a new one",
+				},
 			},
 		},
-	})
+		cellmanifest.Adapter{
+			Name:       v.BroadcastName,
+			Type:       v.BroadcastStruct,
+			Module:     v.ModulePrefix + "adapter::" + v.BroadcastAdapter,
+			Implements: v.BroadcastTrait,
+			Ports:      []string{v.PeerTableTrait},
+		},
+	)
 }
 
 func render(name string, data any) (string, error) {
@@ -478,20 +497,69 @@ pub trait {{ .GateTrait }}: Send + Sync {
 }
 {{ end -}}
 
-{{- define "broadcast" -}}
+{{- define "peer_table" -}}
 {{ .Header }}
-
-use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
 
 pub type {{ .SenderType }} =
     Box<dyn Fn(&[u8], std::net::SocketAddr) -> std::io::Result<usize> + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
-pub enum {{ .BroadcastError }} {
-    #[error("attaching a sender to the {{ .ServiceSnake }} broadcast: one is attached already")]
+pub enum {{ .PeerTableError }} {
+    #[error("attaching a sender to the {{ .ServiceSnake }} peer table: one is attached already")]
     Attached,
     #[error("locking the {{ .ServiceSnake }} peer table while {action}: poisoned")]
     Poisoned { action: &'static str },
+    #[error("sending {length} bytes to {peer}: the {{ .ServiceSnake }} udp driver is not bound")]
+    NotBound {
+        length: usize,
+        peer: std::net::SocketAddr,
+    },
+    #[error("sending {length} bytes to {peer}")]
+    Send {
+        length: usize,
+        peer: std::net::SocketAddr,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait {{ .PeerTableTrait }}: Send + Sync {
+    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .PeerTableError }}>;
+
+    fn attached(&self) -> bool;
+
+    fn admit_peer(
+        &self,
+        session_id: &[u8; 16],
+        peer: std::net::SocketAddr,
+    ) -> Result<bool, {{ .PeerTableError }}>;
+
+    fn follow_peer(
+        &self,
+        session_id: &[u8; 16],
+        peer: std::net::SocketAddr,
+    ) -> Result<bool, {{ .PeerTableError }}>;
+
+    fn peer_of(
+        &self,
+        session_id: &[u8; 16],
+    ) -> Result<Option<std::net::SocketAddr>, {{ .PeerTableError }}>;
+
+    fn peers(&self) -> Result<Vec<([u8; 16], std::net::SocketAddr)>, {{ .PeerTableError }}>;
+
+    fn deliver(&self, datagram: &[u8], peer: std::net::SocketAddr) -> Result<(), {{ .PeerTableError }}>;
+}
+{{ end -}}
+
+{{- define "broadcast" -}}
+{{ .Header }}
+
+use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ .PeerTableError }};
+use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ .BroadcastError }} {
     #[error("encoding {kind} for session {session_id:?}")]
     Encode {
         kind: &'static str,
@@ -504,34 +572,17 @@ pub enum {{ .BroadcastError }} {
         kind: &'static str,
         session_id: [u8; 16],
     },
-    #[error("sending {kind}: the {{ .ServiceSnake }} udp driver is not bound")]
-    NotBound { kind: &'static str },
-    #[error("sending {kind} to session {session_id:?} at {peer}")]
-    Send {
+    #[error("sending {kind} to session {session_id:?}")]
+    PeerTable {
         kind: &'static str,
         session_id: [u8; 16],
-        peer: std::net::SocketAddr,
         #[source]
-        source: std::io::Error,
+        source: {{ .PeerTableError }},
     },
 }
 
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .BroadcastTrait }}: Send + Sync {
-    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .BroadcastError }}>;
-
-    fn admit_peer(
-        &self,
-        session_id: &[u8; 16],
-        peer: std::net::SocketAddr,
-    ) -> Result<bool, {{ .BroadcastError }}>;
-
-    fn follow_peer(
-        &self,
-        session_id: &[u8; 16],
-        peer: std::net::SocketAddr,
-    ) -> Result<bool, {{ .BroadcastError }}>;
-
     fn send_to(&self, session_id: &[u8; 16], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}>;
 
     fn send_all(&self, push: {{ .PushEnum }}) -> Result<usize, {{ .BroadcastError }}>;
@@ -600,7 +651,7 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
     ) -> Result<{{ .Reply }}, {{ $.ControllerError }}>;
 {{- end }}
 {{- if .Session }}
-    fn on_tick(&self, tick: u64) -> Result<(), {{ .ControllerError }}>;
+    fn on_tick(&self) -> Result<(), {{ .ControllerError }}>;
 {{- end }}
 }
 {{ if .Session }}
@@ -883,14 +934,29 @@ pub fn decode_push(
 ) -> Result<{{ .PushEnum }}, {{ .CodecError }}> {
     let framed = unframe(datagram)?;
 
+    if framed.version != SCHEMA_VERSION {
+        return Err({{ .CodecError }}::Version {
+            length: datagram.len(),
+            got: framed.version,
+        });
+    }
+
+    if framed.session_id != *session_id {
+        return Err({{ .CodecError }}::UnknownSession {
+            length: datagram.len(),
+            expected: *session_id,
+            got: framed.session_id,
+        });
+    }
+
     match framed.hash {
 {{- range .Pushes }}
-        {{ .Upper }}_HASH => Ok({{ $.PushEnum }}::{{ .Pascal }}(open(
-            {{ .Upper }}_METHOD,
-            session_id,
-            {{ .Upper }}_HASH,
-            datagram,
-        )?)),
+        {{ .Upper }}_HASH => {{ .Request }}::decode(framed.payload)
+            .map({{ $.PushEnum }}::{{ .Pascal }})
+            .map_err(|source| {{ $.CodecError }}::Payload {
+                operation: {{ .Upper }}_METHOD,
+                source,
+            }),
 {{- end }}
         hash => Err({{ .CodecError }}::UnknownMethod {
             length: datagram.len(),
@@ -912,8 +978,8 @@ use std::time::Duration;
 use {{ .CratePath }}controller::{{ .ServiceSnake }}_codec as codec;
 use {{ .CratePath }}controller::{{ .ControllerTrait }};
 {{- if .Session }}
-use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
 use {{ .CratePath }}port::{{ .GateModule }}::{{ .GateTrait }};
+use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ "{" }}{{ .PeerTableError }}, {{ .PeerTableTrait }}{{ "}" }};
 use {{ .CratePath }}types::admission::Admission;
 {{- end }}
 use {{ .CratePath }}types::context::Context;
@@ -978,11 +1044,11 @@ pub enum {{ .DriverError }} {
     #[error("using the {{ .ServiceSnake }} udp driver for {address:?}: it is not bound yet")]
     NotBound { address: String },
 {{- if .Session }}
-    #[error("attaching the socket bound on {address:?} to the {{ .ServiceSnake }} broadcast")]
+    #[error("attaching the socket bound on {address:?} to the {{ .ServiceSnake }} peer table")]
     Attach {
         address: String,
         #[source]
-        source: {{ .BroadcastError }},
+        source: {{ .PeerTableError }},
     },
 {{- end }}
 }
@@ -992,7 +1058,7 @@ pub struct {{ .DriverStruct }} {
     controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
 {{- if .Session }}
     session_gate: Arc<dyn {{ .GateTrait }} + Send + Sync>,
-    broadcast: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+    peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>,
 {{- end }}
     socket: Option<Arc<tokio::net::UdpSocket>>,
 }
@@ -1003,7 +1069,7 @@ impl {{ .DriverStruct }} {
         controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
 {{- if .Session }}
         session_gate: Arc<dyn {{ .GateTrait }} + Send + Sync>,
-        broadcast: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+        peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>,
 {{- end }}
     ) -> Self {
         Self {
@@ -1011,7 +1077,7 @@ impl {{ .DriverStruct }} {
             controller,
 {{- if .Session }}
             session_gate,
-            broadcast,
+            peer_table,
 {{- end }}
             socket: None,
         }
@@ -1030,7 +1096,7 @@ impl {{ .DriverStruct }} {
 
         let sender = socket.clone();
 
-        self.broadcast
+        self.peer_table
             .attach(Box::new(move |datagram, peer| sender.try_send_to(datagram, peer)))
             .map_err(|source| {{ .DriverError }}::Attach {
                 address: self.config.addr.clone(),
@@ -1067,24 +1133,26 @@ impl {{ .DriverStruct }} {
     }
 {{- if .Session }}
 
-    fn admit(&self, session_id: &[u8; codec::SESSION_ID_LEN], request: &{{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ .HelloRpc.Request }}, peer: SocketAddr, refused: &mut Told, full: &mut Told) -> bool {
+    fn gate(&self, session_id: &[u8; codec::SESSION_ID_LEN], request: &{{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ .HelloRpc.Request }}, peer: SocketAddr, refused: &mut Told) -> bool {
         match self.session_gate.admit(session_id, request, peer) {
-            Ok(Admission::Admitted) => {}
+            Ok(Admission::Admitted) => true,
             Ok(Admission::Refused { reason }) => {
                 if refused.first_time(peer) {
                     eprintln!("refusing session {session_id:?} from {peer}: {reason}");
                 }
 
-                return false;
+                false
             }
             Err(error) => {
                 eprintln!("dropping a hello from {peer}: {}", error_chain(&error));
 
-                return false;
+                false
             }
         }
+    }
 
-        match self.broadcast.admit_peer(session_id, peer) {
+    fn admit(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr, full: &mut Told) -> bool {
+        match self.peer_table.admit_peer(session_id, peer) {
             Ok(true) => true,
             Ok(false) => {
                 if full.first_time(peer) {
@@ -1102,7 +1170,7 @@ impl {{ .DriverStruct }} {
     }
 
     fn follow(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr, unknown: &mut Told) -> bool {
-        match self.broadcast.follow_peer(session_id, peer) {
+        match self.peer_table.follow_peer(session_id, peer) {
             Ok(true) => true,
             Ok(false) => {
                 if unknown.first_time(peer) {
@@ -1204,7 +1272,7 @@ impl {{ .DriverStruct }} {
 {{- range .Inbound }}
                 codec::{{ $.RequestEnum }}::{{ .Pascal }}(request) => {
 {{- if .Hello }}
-                    if !self.admit(&session_id, &request, peer, &mut told_about_a_refusal, &mut told_about_a_full_table) {
+                    if !self.gate(&session_id, &request, peer, &mut told_about_a_refusal) {
                         continue;
                     }
 {{- else if $.Session }}
@@ -1214,8 +1282,34 @@ impl {{ .DriverStruct }} {
 {{- end }}
 
                     match self.controller.{{ .Ident }}(request, &context) {
-{{- if .Silent }}
+{{- if and .Silent .Hello }}
+                        Ok(_) => {
+                            if !self.admit(&session_id, peer, &mut told_about_a_full_table) {
+                                continue;
+                            }
+
+                            None
+                        }
+{{- else if .Silent }}
                         Ok(_) => None,
+{{- else if .Hello }}
+                        Ok(reply) => {
+                            if !self.admit(&session_id, peer, &mut told_about_a_full_table) {
+                                continue;
+                            }
+
+                            match codec::encode_{{ .Ident }}_reply(&session_id, &reply) {
+                                Ok(answer) => Some(answer),
+                                Err(error) => {
+                                    eprintln!(
+                                        "dropping a reply to {peer}: encoding {{ .FullMethod }}: {}",
+                                        error_chain(&error)
+                                    );
+
+                                    None
+                                }
+                            }
+                        }
 {{- else }}
                         Ok(reply) => match codec::encode_{{ .Ident }}_reply(&session_id, &reply) {
                             Ok(answer) => Some(answer),
@@ -1276,7 +1370,8 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 use std::sync::Arc;
 use std::time::Duration;
 
-use {{ .CratePath }}controller::{{ .ControllerTrait }};
+use {{ .CratePath }}controller::{{ "{" }}{{ .ControllerError }}, {{ .ControllerTrait }}{{ "}" }};
+use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ .PeerTableTrait }};
 
 pub struct {{ .TickConfig }} {
     pub interval_ms: i64,
@@ -1296,19 +1391,32 @@ pub enum {{ .TickError }} {
     IntervalBelowOne { interval_ms: i64 },
     #[error("using the {{ .ServiceSnake }} tick driver: it is not bound yet")]
     NotBound,
+    #[error("serving the {{ .ServiceSnake }} tick driver: the peer table holds no socket, enable driver_udp so the udp driver attaches one")]
+    NotAttached,
+    #[error("running on_tick of the {{ .ServiceSnake }} tick driver")]
+    OnTick {
+        #[source]
+        source: {{ .ControllerError }},
+    },
 }
 
 pub struct {{ .TickStruct }} {
     config: {{ .TickConfig }},
     controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+    peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>,
     interval: Option<Duration>,
 }
 
 impl {{ .TickStruct }} {
-    pub fn new(config: {{ .TickConfig }}, controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>) -> Self {
+    pub fn new(
+        config: {{ .TickConfig }},
+        controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+        peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>,
+    ) -> Self {
         Self {
             config,
             controller,
+            peer_table,
             interval: None,
         }
     }
@@ -1344,51 +1452,35 @@ impl {{ .TickStruct }} {
         let mut ticker = tokio::time::interval(interval);
         ticker.tick().await;
 
-        let mut tick: u64 = 0;
-
         loop {
             ticker.tick().await;
-            tick = tick.wrapping_add(1);
 
-            if let Err(error) = self.controller.on_tick(tick) {
-                eprintln!(
-                    "skipping tick {tick} of the {{ .ServiceSnake }} tick driver: {}",
-                    error_chain(&error)
-                );
+            if !self.peer_table.attached() {
+                return Err({{ .TickError }}::NotAttached);
             }
+
+            self.controller
+                .on_tick()
+                .map_err(|source| {{ .TickError }}::OnTick { source })?;
         }
     }
 }
-
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut parts = vec![error.to_string()];
-    let mut source = error.source();
-
-    while let Some(current) = source {
-        parts.push(current.to_string());
-        source = current.source();
-    }
-
-    parts.join(": ")
-}
 {{ end -}}
 
-{{- define "broadcast_adapter" -}}
+{{- define "peer_table_adapter" -}}
 {{ .Header }}
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use {{ .CratePath }}controller::{{ .ServiceSnake }}_codec as codec;
-use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}, {{ .SenderType }}{{ "}" }};
-use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ "{" }}{{ .PeerTableError }}, {{ .PeerTableTrait }}, {{ .SenderType }}{{ "}" }};
 
-pub struct {{ .BroadcastConfig }} {
+pub struct {{ .PeerTableConfig }} {
     pub max_sessions: i64,
 }
 
-impl Default for {{ .BroadcastConfig }} {
+impl Default for {{ .PeerTableConfig }} {
     fn default() -> Self {
         Self {
             max_sessions: {{ .DefaultSessions }},
@@ -1397,25 +1489,25 @@ impl Default for {{ .BroadcastConfig }} {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum {{ .BroadcastStruct }}Error {
+pub enum {{ .PeerTableStruct }}Error {
     #[error("sizing the {{ .ServiceSnake }} peer table: max_sessions {max_sessions} is below 1")]
     MaxSessionsBelowOne { max_sessions: i64 },
 }
 
-type Peers = HashMap<[u8; codec::SESSION_ID_LEN], SocketAddr>;
+type Peers = HashMap<[u8; 16], SocketAddr>;
 
-pub struct {{ .BroadcastStruct }} {
+pub struct {{ .PeerTableStruct }} {
     max_sessions: usize,
     peers: Mutex<Peers>,
     sender: OnceLock<{{ .SenderType }}>,
 }
 
-impl {{ .BroadcastStruct }} {
-    pub fn new(config: {{ .BroadcastConfig }}) -> Result<Self, {{ .BroadcastStruct }}Error> {
+impl {{ .PeerTableStruct }} {
+    pub fn new(config: {{ .PeerTableConfig }}) -> Result<Self, {{ .PeerTableStruct }}Error> {
         let max_sessions = usize::try_from(config.max_sessions)
             .ok()
             .filter(|max_sessions| *max_sessions >= 1)
-            .ok_or({{ .BroadcastStruct }}Error::MaxSessionsBelowOne {
+            .ok_or({{ .PeerTableStruct }}Error::MaxSessionsBelowOne {
                 max_sessions: config.max_sessions,
             })?;
 
@@ -1426,58 +1518,30 @@ impl {{ .BroadcastStruct }} {
         })
     }
 
-    pub fn peer_of(&self, session_id: &[u8; codec::SESSION_ID_LEN]) -> Result<Option<SocketAddr>, {{ .BroadcastError }}> {
-        Ok(self.peers("reading a peer")?.get(session_id).copied())
+    pub fn sessions(&self) -> Result<usize, {{ .PeerTableError }}> {
+        Ok(self.lock("counting the sessions")?.len())
     }
 
-    pub fn sessions(&self) -> Result<usize, {{ .BroadcastError }}> {
-        Ok(self.peers("counting the sessions")?.len())
-    }
-
-    fn peers(&self, action: &'static str) -> Result<MutexGuard<'_, Peers>, {{ .BroadcastError }}> {
+    fn lock(&self, action: &'static str) -> Result<MutexGuard<'_, Peers>, {{ .PeerTableError }}> {
         self.peers
             .lock()
-            .map_err(|_| {{ .BroadcastError }}::Poisoned { action })
-    }
-
-    fn deliver(
-        &self,
-        kind: &'static str,
-        session_id: &[u8; codec::SESSION_ID_LEN],
-        peer: SocketAddr,
-        push: &{{ .PushEnum }},
-    ) -> Result<(), {{ .BroadcastError }}> {
-        let sender = self
-            .sender
-            .get()
-            .ok_or({{ .BroadcastError }}::NotBound { kind })?;
-
-        let datagram = codec::encode_push(session_id, push).map_err(|source| {{ .BroadcastError }}::Encode {
-            kind,
-            session_id: *session_id,
-            source: Box::new(source),
-        })?;
-
-        sender(&datagram, peer)
-            .map(|_| ())
-            .map_err(|source| {{ .BroadcastError }}::Send {
-                kind,
-                session_id: *session_id,
-                peer,
-                source,
-            })
+            .map_err(|_| {{ .PeerTableError }}::Poisoned { action })
     }
 }
 
-impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
-    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .BroadcastError }}> {
+impl {{ .PeerTableTrait }} for {{ .PeerTableStruct }} {
+    fn attach(&self, sender: {{ .SenderType }}) -> Result<(), {{ .PeerTableError }}> {
         self.sender
             .set(sender)
-            .map_err(|_| {{ .BroadcastError }}::Attached)
+            .map_err(|_| {{ .PeerTableError }}::Attached)
     }
 
-    fn admit_peer(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr) -> Result<bool, {{ .BroadcastError }}> {
-        let mut peers = self.peers("admitting a peer")?;
+    fn attached(&self) -> bool {
+        self.sender.get().is_some()
+    }
+
+    fn admit_peer(&self, session_id: &[u8; 16], peer: SocketAddr) -> Result<bool, {{ .PeerTableError }}> {
+        let mut peers = self.lock("admitting a peer")?;
 
         if peers.len() >= self.max_sessions && !peers.contains_key(session_id) {
             return Ok(false);
@@ -1488,8 +1552,8 @@ impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
         Ok(true)
     }
 
-    fn follow_peer(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr) -> Result<bool, {{ .BroadcastError }}> {
-        let mut peers = self.peers("following a peer")?;
+    fn follow_peer(&self, session_id: &[u8; 16], peer: SocketAddr) -> Result<bool, {{ .PeerTableError }}> {
+        let mut peers = self.lock("following a peer")?;
 
         let Some(known) = peers.get_mut(session_id) else {
             return Ok(false);
@@ -1500,13 +1564,94 @@ impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
         Ok(true)
     }
 
-    fn send_to(&self, session_id: &[u8; codec::SESSION_ID_LEN], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}> {
+    fn peer_of(&self, session_id: &[u8; 16]) -> Result<Option<SocketAddr>, {{ .PeerTableError }}> {
+        Ok(self.lock("reading a peer")?.get(session_id).copied())
+    }
+
+    fn peers(&self) -> Result<Vec<([u8; 16], SocketAddr)>, {{ .PeerTableError }}> {
+        Ok(self
+            .lock("listing the peers")?
+            .iter()
+            .map(|(session_id, peer)| (*session_id, *peer))
+            .collect())
+    }
+
+    fn deliver(&self, datagram: &[u8], peer: SocketAddr) -> Result<(), {{ .PeerTableError }}> {
+        let sender = self.sender.get().ok_or({{ .PeerTableError }}::NotBound {
+            length: datagram.len(),
+            peer,
+        })?;
+
+        sender(datagram, peer)
+            .map(|_| ())
+            .map_err(|source| {{ .PeerTableError }}::Send {
+                length: datagram.len(),
+                peer,
+                source,
+            })
+    }
+}
+{{ end -}}
+
+{{- define "broadcast_adapter" -}}
+{{ .Header }}
+
+use std::sync::Arc;
+
+use {{ .CratePath }}controller::{{ .ServiceSnake }}_codec as codec;
+use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
+use {{ .CratePath }}port::{{ .PeerTableModule }}::{{ "{" }}{{ .PeerTableError }}, {{ .PeerTableTrait }}{{ "}" }};
+use {{ .CratePath }}types::{{ .PushModule }}::{{ .PushEnum }};
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct {{ .BroadcastConfig }} {}
+
+pub struct {{ .BroadcastStruct }} {
+    peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>,
+}
+
+impl {{ .BroadcastStruct }} {
+    pub fn new(config: {{ .BroadcastConfig }}, peer_table: Arc<dyn {{ .PeerTableTrait }} + Send + Sync>) -> Self {
+        let _ = config;
+
+        Self { peer_table }
+    }
+
+    fn deliver(
+        &self,
+        kind: &'static str,
+        session_id: &[u8; 16],
+        peer: std::net::SocketAddr,
+        push: &{{ .PushEnum }},
+    ) -> Result<(), {{ .BroadcastError }}> {
+        let datagram = codec::encode_push(session_id, push).map_err(|source| {{ .BroadcastError }}::Encode {
+            kind,
+            session_id: *session_id,
+            source: Box::new(source),
+        })?;
+
+        self.peer_table
+            .deliver(&datagram, peer)
+            .map_err(|source| {{ .BroadcastError }}::PeerTable {
+                kind,
+                session_id: *session_id,
+                source,
+            })
+    }
+}
+
+impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
+    fn send_to(&self, session_id: &[u8; 16], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}> {
         let kind = push.kind();
 
         let peer = self
-            .peers("sending to a session")?
-            .get(session_id)
-            .copied()
+            .peer_table
+            .peer_of(session_id)
+            .map_err(|source| {{ .BroadcastError }}::PeerTable {
+                kind,
+                session_id: *session_id,
+                source,
+            })?
             .ok_or({{ .BroadcastError }}::UnknownSession {
                 kind,
                 session_id: *session_id,
@@ -1518,18 +1663,24 @@ impl {{ .BroadcastTrait }} for {{ .BroadcastStruct }} {
     fn send_all(&self, push: {{ .PushEnum }}) -> Result<usize, {{ .BroadcastError }}> {
         let kind = push.kind();
 
-        let targets: Vec<([u8; codec::SESSION_ID_LEN], SocketAddr)> = self
-            .peers("sending to every session")?
-            .iter()
-            .map(|(session_id, peer)| (*session_id, *peer))
-            .collect();
+        let targets = self
+            .peer_table
+            .peers()
+            .map_err(|source| {{ .BroadcastError }}::PeerTable {
+                kind,
+                session_id: [0u8; 16],
+                source,
+            })?;
 
         let mut reached = 0usize;
 
         for (session_id, peer) in targets {
             match self.deliver(kind, &session_id, peer, &push) {
                 Ok(()) => reached += 1,
-                Err(error @ {{ .BroadcastError }}::Send { .. }) => eprintln!("{error}"),
+                Err({{ .BroadcastError }}::PeerTable {
+                    source: {{ .PeerTableError }}::Send { .. },
+                    ..
+                }) => {}
                 Err(error) => return Err(error),
             }
         }

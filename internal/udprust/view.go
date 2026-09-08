@@ -135,6 +135,14 @@ type serviceView struct {
 	BroadcastConfig  string
 	BroadcastAdapter string
 	BroadcastName    string
+	PeerTableTrait   string
+	PeerTableError   string
+	PeerTableModule  string
+	PeerTableSnake   string
+	PeerTableStruct  string
+	PeerTableConfig  string
+	PeerTableAdapter string
+	PeerTableName    string
 	SenderType       string
 	PushEnum         string
 	PushModule       string
@@ -247,12 +255,14 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 	driverName := opts.Cell
 	clientName := opts.Cell + "_client"
 	broadcastName := opts.Cell + "_broadcast"
+	peerTableName := opts.Cell + "_peer_table"
 	tickName := "tick"
 
 	if !only {
 		driverName = opts.Cell + "_" + rustname.Snake(svc.Name)
 		clientName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_client"
 		broadcastName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_broadcast"
+		peerTableName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_peer_table"
 		tickName = "tick_" + rustname.Snake(svc.Name)
 	}
 
@@ -299,6 +309,14 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		BroadcastConfig:  pascal + "UdpBroadcastConfig",
 		BroadcastAdapter: snake + "_udp_broadcast",
 		BroadcastName:    broadcastName,
+		PeerTableTrait:   pascal + "PeerTable",
+		PeerTableError:   pascal + "PeerTableError",
+		PeerTableModule:  snake + "_peer_table",
+		PeerTableSnake:   snake + "_peer_table",
+		PeerTableStruct:  pascal + "UdpPeerTable",
+		PeerTableConfig:  pascal + "UdpPeerTableConfig",
+		PeerTableAdapter: snake + "_udp_peer_table",
+		PeerTableName:    peerTableName,
 		SenderType:       pascal + "Sender",
 		PushEnum:         pascal + "Push",
 		PushModule:       snake + "_push",
@@ -369,6 +387,14 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 
 				sv.TraitTypes = append(sv.TraitTypes, t)
 			}
+		}
+	}
+
+	for _, t := range sv.PushTypes {
+		if !seenCodec[t] {
+			seenCodec[t] = true
+
+			sv.CodecTypes = append(sv.CodecTypes, t)
 		}
 	}
 

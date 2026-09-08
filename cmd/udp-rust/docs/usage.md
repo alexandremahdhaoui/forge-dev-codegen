@@ -84,34 +84,40 @@ too.
 | `types/zz_generated_admission.rs` | `Admission`, `Admitted` or `Refused { reason }` |
 | `types/zz_generated_<service>_push.rs` | `<Service>Push`, one variant per push rpc carrying its request message, and `kind()` |
 | `port/zz_generated_<service>_session_gate.rs` | trait `<Service>SessionGate` with `admit(session_id, &hello, peer)` answering an `Admission`, under mockall automock |
-| `port/zz_generated_<service>_broadcast.rs` | trait `<Service>Broadcast` with `send_to(session_id, push)` and `send_all(push)`, plus `attach`, `admit_peer` and `follow_peer` the driver uses |
-| `adapter/zz_generated_<service>_udp_broadcast.rs` | `<Service>UdpBroadcast`, the peer table and the socket slot, implementing the broadcast port |
+| `port/zz_generated_<service>_peer_table.rs` | trait `<Service>PeerTable` the drivers take, with `attach`, `attached`, `admit_peer`, `follow_peer`, `peer_of`, `peers` and `deliver` |
+| `port/zz_generated_<service>_broadcast.rs` | trait `<Service>Broadcast` the controller takes, with `send_to(session_id, push)` and `send_all(push)` |
+| `adapter/zz_generated_<service>_udp_peer_table.rs` | `<Service>UdpPeerTable`, the peer table and the socket slot, implementing the peer table port |
+| `adapter/zz_generated_<service>_udp_broadcast.rs` | `<Service>UdpBroadcast`, encodes a push and delivers it through the peer table port it is built with, implementing the broadcast port |
 | `driver/zz_generated_<service>_tick_driver.rs` | `<Service>TickDriver`, calls `on_tick` on the controller every `interval_ms` |
 
-The controller trait gains `on_tick(&self, tick: u64)`. The struct gains
-one field, the broadcast port, and `new` takes it. The error enum gains
+The controller trait gains `on_tick(&self)`. The struct gains one
+field, the broadcast port, and `new` takes it. The error enum gains
 `Broadcast { kind, source }`. A push rpc gets no inbound method on the
 controller and no method on the client port. The codec still names its
 method and hash and emits `encode_push` and `decode_push`.
 
-The manifest lists the gate and the broadcast under `ports` on the udp
-driver, the broadcast under `ports` on the controller, the peer table
-under `provides.adapters` as `udp_broadcast` with `max_sessions`, and
-the tick driver under `provides.drivers` as `tick` with `interval_ms`.
-hexagonal-rust builds the peer table first, hands it to the controller
-as the boxed broadcast port and to the udp driver after the controller.
-The wiring names an adapter for the gate. It stays silent on the
-broadcast, because the cell provides its only adapter.
+The manifest lists the gate and the peer table under `ports` on the udp
+driver, the peer table under `ports` on the tick driver, the broadcast
+under `ports` on the controller, and two adapters under
+`provides.adapters`. `udp_peer_table` implements the peer table port
+with `max_sessions`. `udp_broadcast` implements the broadcast port and
+names the peer table under its own `ports`, so hexagonal-rust builds
+the table first and hands it to the broadcast adapter's `new`. The
+tick driver sits under `provides.drivers` as `tick` with `interval_ms`.
+The wiring names an adapter for the gate. It stays silent on the peer
+table and the broadcast, because the cell provides their only adapter.
 
 ## The session flow
 
 The driver decodes a datagram, then looks at its rpc.
 
 On the hello rpc the gate receives the session id, the decoded hello
-and the peer. `Admitted` puts the session in the peer table with that
-peer and calls the controller. `Refused` drops the datagram and logs
-the reason once per peer. A full table refuses a session it does not
-hold and logs once per peer. `max_sessions` sizes it, 64 by default.
+and the peer. `Admitted` calls the controller. When the controller
+answers, the session enters the peer table with that peer and the reply
+goes out. When the controller fails, nothing enters the table. `Refused`
+drops the datagram and logs the reason once per peer. A full table
+refuses a session it does not hold and logs once per peer.
+`max_sessions` sizes it, 64 by default.
 
 On any other inbound rpc a session the table does not hold is dropped
 and logged once per peer. A session it holds moves to the sender's
@@ -122,16 +128,22 @@ The same hello again from a new address goes through the gate again
 and, when admitted, replaces the peer. That is a reconnect.
 
 A push reaches a peer through the broadcast port. The controller sends
-`<Service>Push` to one session or to every session. The peer table
-encodes it with the codec, the method hash of the push rpc and the same
-frame as a reply, and sends it through the socket the driver attached
-at bind. Before bind every send fails naming the unbound driver. A send
-to every session skips a peer the socket refuses and answers how many
-it reached.
+`<Service>Push` to one session or to every session. The broadcast
+adapter encodes it with the codec, the method hash of the push rpc and
+the same frame as a reply, and the peer table delivers it through the
+socket the udp driver attached at bind. Before bind every send fails
+naming the unbound driver. A send to every session skips a peer the
+socket refuses and answers how many it reached.
 
 The tick driver takes `interval_ms`, refuses a value below 1 at bind,
-prints `TICKING <ms>` on announce, and calls `on_tick` with a count
-starting at 1. The controller pushes state from there.
+prints `TICKING <ms>` on announce, and calls `on_tick` on every tick.
+The controller pushes state from there and keeps its own count. Before
+each tick the driver checks the peer table holds a socket. When it does
+not, `serve` ends with an error naming `driver_udp`, so a tick driver
+enabled beside a disabled udp driver stops instead of failing forever.
+The check sits in `serve` and not in `bind` because main binds the tick
+driver before the udp driver. An `on_tick` error also ends `serve`, and
+main walks the chain.
 
 ## The wire layout
 
