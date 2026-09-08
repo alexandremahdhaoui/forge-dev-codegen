@@ -120,7 +120,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		"controller": {
 			{
 				Module:  "zz_generated_" + v.ControllerModule,
-				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerImpl, v.PortsTrait},
+				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerImpl},
 			},
 		},
 		"driver": {
@@ -185,7 +185,6 @@ func manifestOf(v cellView) cellmanifest.Manifest {
 		Trait:  v.ControllerTrait,
 		Impl:   v.ControllerImpl,
 		Module: v.ModulePrefix + "controller",
-		Ports:  []string{"Screen", "Keyboard"},
 	}}
 
 	m.Provides.Drivers = []cellmanifest.Driver{{
@@ -193,6 +192,7 @@ func manifestOf(v cellView) cellmanifest.Manifest {
 		Type:     v.DriverStruct,
 		Module:   v.ModulePrefix + "driver::" + v.DriverModule,
 		Requires: []string{v.ControllerTrait},
+		Ports:    []string{"Screen", "Keyboard"},
 		Config: map[string]cellmanifest.ConfigField{
 			"tick_ms": {
 				Type:        cellmanifest.FieldTypeDuration,
@@ -452,10 +452,6 @@ pub trait Keyboard: Send + Sync {
 {{- define "controller" -}}
 {{ .Header }}
 
-use std::sync::Arc;
-
-use {{ .CratePath }}port::keyboard::Keyboard;
-use {{ .CratePath }}port::screen::Screen;
 use {{ .CratePath }}types::frame::{Frame, Step};
 use {{ .CratePath }}types::key::Key;
 
@@ -467,38 +463,18 @@ pub enum {{ .ControllerError }} {
     NotImplemented { operation: String },
 }
 
-pub trait {{ .PortsTrait }}: Send + Sync {
-    fn screen(&self) -> Arc<dyn Screen + Send + Sync>;
-    fn keyboard(&self) -> Arc<dyn Keyboard + Send + Sync>;
-}
-
-pub trait {{ .ControllerTrait }}: {{ .PortsTrait }} + Send + Sync {
+pub trait {{ .ControllerTrait }}: Send + Sync {
     fn on_key(&self, frame: &Frame, key: Key) -> Result<Step, {{ .ControllerError }}>;
     fn on_line(&self, frame: &Frame, line: &str) -> Result<Step, {{ .ControllerError }}>;
     fn on_tick(&self, frame: &Frame) -> Result<Frame, {{ .ControllerError }}>;
 }
 
-pub struct {{ .ControllerImpl }} {
-    pub(crate) screen: Arc<dyn Screen + Send + Sync>,
-    pub(crate) keyboard: Arc<dyn Keyboard + Send + Sync>,
-}
+#[derive(Default)]
+pub struct {{ .ControllerImpl }} {}
 
 impl {{ .ControllerImpl }} {
-    pub fn new(
-        screen: Arc<dyn Screen + Send + Sync>,
-        keyboard: Arc<dyn Keyboard + Send + Sync>,
-    ) -> Self {
-        Self { screen, keyboard }
-    }
-}
-
-impl {{ .PortsTrait }} for {{ .ControllerImpl }} {
-    fn screen(&self) -> Arc<dyn Screen + Send + Sync> {
-        self.screen.clone()
-    }
-
-    fn keyboard(&self) -> Arc<dyn Keyboard + Send + Sync> {
-        self.keyboard.clone()
+    pub fn new() -> Self {
+        Self {}
     }
 }
 {{ end -}}
@@ -581,6 +557,8 @@ enum Next {
 pub struct {{ .DriverStruct }} {
     config: {{ .DriverConfig }},
     controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+    screen: Arc<dyn Screen + Send + Sync>,
+    keyboard: Arc<dyn Keyboard + Send + Sync>,
     screen_open: bool,
 }
 
@@ -588,10 +566,14 @@ impl {{ .DriverStruct }} {
     pub fn new(
         config: {{ .DriverConfig }},
         controller: Arc<dyn {{ .ControllerTrait }} + Send + Sync>,
+        screen: Arc<dyn Screen + Send + Sync>,
+        keyboard: Arc<dyn Keyboard + Send + Sync>,
     ) -> Self {
         Self {
             config,
             controller,
+            screen,
+            keyboard,
             screen_open: false,
         }
     }
@@ -606,8 +588,7 @@ impl {{ .DriverStruct }} {
 
         println!("TUI {WIDTH}x{HEIGHT}");
 
-        self.controller
-            .screen()
+        self.screen
             .enter()
             .map_err(|source| {{ .DriverError }}::Enter { source })?;
 
@@ -639,8 +620,7 @@ impl {{ .DriverStruct }} {
         driver.screen_open = false;
 
         let left = driver
-            .controller
-            .screen()
+            .screen
             .leave()
             .map_err(|source| {{ .DriverError }}::Leave { source });
 
@@ -648,10 +628,8 @@ impl {{ .DriverStruct }} {
     }
 
     fn run(&self) -> Result<(), {{ .DriverError }}> {
-        let screen = self.controller.screen();
-        let keyboard = self.controller.keyboard();
-        let screen: &(dyn Screen + Send + Sync) = &*screen;
-        let keyboard: &(dyn Keyboard + Send + Sync) = &*keyboard;
+        let screen: &(dyn Screen + Send + Sync) = &*self.screen;
+        let keyboard: &(dyn Keyboard + Send + Sync) = &*self.keyboard;
 
         let tick_ms = self.config.tick_ms.unsigned_abs();
         let tick = Duration::from_millis(tick_ms);
@@ -790,7 +768,7 @@ impl Drop for {{ .DriverStruct }} {
             return;
         }
 
-        if let Err(error) = self.controller.screen().leave() {
+        if let Err(error) = self.screen.leave() {
             eprintln!(
                 "leaving the terminal of the {{ .Cell }} driver dropped while its screen was open: {}",
                 error_chain(&error)

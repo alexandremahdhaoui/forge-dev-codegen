@@ -36,7 +36,6 @@ type cellView struct {
 	ControllerError  string
 	ControllerImpl   string
 	ControllerModule string
-	PortsTrait       string
 	DriverStruct     string
 	DriverConfig     string
 	DriverError      string
@@ -82,7 +81,6 @@ func buildCellView(spec Spec, opts Options) (cellView, error) {
 		ControllerError:  controllerPascal + "ControllerError",
 		ControllerImpl:   controllerPascal + "ControllerImpl",
 		ControllerModule: controllerSnake + "_controller",
-		PortsTrait:       cellPascal + "Ports",
 		DriverStruct:     cellPascal + "Driver",
 		DriverConfig:     cellPascal + "DriverConfig",
 		DriverError:      cellPascal + "DriverError",

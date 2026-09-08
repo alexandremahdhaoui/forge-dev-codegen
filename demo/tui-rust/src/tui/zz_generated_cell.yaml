@@ -14,9 +14,7 @@ provides:
   controllers:
   - impl: BoardControllerImpl
     module: tui::controller
-    ports:
-    - Screen
-    - Keyboard
+    ports: []
     trait: BoardController
   drivers:
   - config:
@@ -26,6 +24,9 @@ provides:
         type: duration
     module: tui::driver::tui_driver
     name: tui
+    ports:
+    - Screen
+    - Keyboard
     requires:
     - BoardController
     type: TuiDriver

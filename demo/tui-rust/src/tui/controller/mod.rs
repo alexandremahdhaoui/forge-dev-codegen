@@ -5,5 +5,5 @@ pub mod zz_generated_board_controller;
 mod board_controller;
 
 pub use zz_generated_board_controller::{
-    BoardController, BoardControllerError, BoardControllerImpl, TuiPorts,
+    BoardController, BoardControllerError, BoardControllerImpl,
 };

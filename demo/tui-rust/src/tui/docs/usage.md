@@ -23,6 +23,7 @@ cargo test --manifest-path demo/tui-rust/Cargo.toml
 ```
 
 The controller tests drive `on_key`, `on_line` and `on_tick` with keys
-and check the frame. The loop tests drive `TuiDriver` with `MockScreen`
-and `MockKeyboard` and check what was drawn and that the screen was left
-on every exit, a quit, an error and a panic.
+and check the frame. The loop tests build `TuiDriver` with the
+controller, a `MockScreen` and a `MockKeyboard`, then check what was
+drawn and that the screen was left on every exit, a quit, an error and
+a panic.

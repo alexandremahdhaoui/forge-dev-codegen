@@ -105,6 +105,10 @@ func TestTheCellManifestNamesTheDriverTheTwoAdaptersTheControllerAndTheTwoPorts(
 		t.Errorf("driver requires = %+v", driver.Requires)
 	}
 
+	if !reflect.DeepEqual(driver.Ports, []string{"Screen", "Keyboard"}) {
+		t.Errorf("driver ports = %+v, the driver owns the terminal so it consumes both", driver.Ports)
+	}
+
 	if driver.Config["tick_ms"].Type != cellmanifest.FieldTypeDuration || fmt.Sprint(driver.Config["tick_ms"].Default) != "100" {
 		t.Errorf("driver config = %+v", driver.Config)
 	}
@@ -131,8 +135,8 @@ func TestTheCellManifestNamesTheDriverTheTwoAdaptersTheControllerAndTheTwoPorts(
 		t.Errorf("controller = %+v", controller)
 	}
 
-	if !reflect.DeepEqual(controller.Ports, []string{"Screen", "Keyboard"}) {
-		t.Errorf("controller ports = %+v, the driver reaches them through the controller", controller.Ports)
+	if len(controller.Ports) != 0 {
+		t.Errorf("controller ports = %+v, the controller decides and never touches the terminal", controller.Ports)
 	}
 
 	wantPorts := []cellmanifest.Port{
@@ -145,27 +149,27 @@ func TestTheCellManifestNamesTheDriverTheTwoAdaptersTheControllerAndTheTwoPorts(
 	}
 }
 
-func TestTheControllerTraitHasOneMethodPerInputAndCarriesItsPortsForTheDriver(t *testing.T) {
+func TestTheControllerTraitHasOneMethodPerInputAndItsStructHoldsNoPort(t *testing.T) {
 	files := generate(t, boardSpec, tuirust.Options{Service: "songe-tui"})
 
 	controller := files["controller/zz_generated_board_controller.rs"].Content
 
 	for _, want := range []string{
-		"pub trait TuiPorts: Send + Sync {",
-		"fn screen(&self) -> Arc<dyn Screen + Send + Sync>;",
-		"fn keyboard(&self) -> Arc<dyn Keyboard + Send + Sync>;",
-		"pub trait BoardController: TuiPorts + Send + Sync {",
+		"pub trait BoardController: Send + Sync {",
 		"fn on_key(&self, frame: &Frame, key: Key) -> Result<Step, BoardControllerError>;",
 		"fn on_line(&self, frame: &Frame, line: &str) -> Result<Step, BoardControllerError>;",
 		"fn on_tick(&self, frame: &Frame) -> Result<Frame, BoardControllerError>;",
-		"pub struct BoardControllerImpl {",
-		"    pub(crate) screen: Arc<dyn Screen + Send + Sync>,",
-		"    pub(crate) keyboard: Arc<dyn Keyboard + Send + Sync>,",
-		"pub fn new(\n        screen: Arc<dyn Screen + Send + Sync>,\n        keyboard: Arc<dyn Keyboard + Send + Sync>,\n    ) -> Self {",
-		"impl TuiPorts for BoardControllerImpl {",
+		"#[derive(Default)]\npub struct BoardControllerImpl {}",
+		"pub fn new() -> Self {\n        Self {}\n    }",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Fatalf("the controller never carried %q:\n%s", want, controller)
+		}
+	}
+
+	for _, banned := range []string{"Ports", "Screen", "Keyboard", "Arc<"} {
+		if strings.Contains(controller, banned) {
+			t.Fatalf("the controller still carries %q, the driver owns the terminal ports:\n%s", banned, controller)
 		}
 	}
 }
@@ -224,6 +228,10 @@ func TestTheDriverBindsTheGridSizeTheTickAndTheViKeysFromTheSpec(t *testing.T) {
 		"Input::Char(' ') => Some(Key::EndTurn),",
 		"Input::Char('q') => Some(Key::Quit),",
 		"matches!(input, Input::Enter)",
+		"pub fn new(\n        config: TuiDriverConfig,\n        controller: Arc<dyn BoardController + Send + Sync>,\n        screen: Arc<dyn Screen + Send + Sync>,\n        keyboard: Arc<dyn Keyboard + Send + Sync>,\n    ) -> Self {",
+		"self.screen\n            .enter()",
+		"let keyboard: &(dyn Keyboard + Send + Sync) = &*self.keyboard;",
+		"if let Err(error) = self.screen.leave() {",
 		"pub async fn bind(&mut self) -> Result<(), TuiDriverError> {",
 		"pub fn announce(&self) -> Result<(), TuiDriverError> {",
 		"pub async fn serve(self) -> Result<(), TuiDriverError> {",
@@ -311,8 +319,8 @@ func TestEveryLayerAndTheCellCarryAGeneratedModFile(t *testing.T) {
 		t.Fatalf("the controller mod file never mounts the user impl file:\n%s", files["controller/mod.rs"].Content)
 	}
 
-	if !strings.Contains(files["controller/mod.rs"].Content, "pub use zz_generated_board_controller::{\n    BoardController, BoardControllerError, BoardControllerImpl, TuiPorts,\n};") {
-		t.Fatalf("the controller mod file never exports the trait, the error, the impl and the ports:\n%s", files["controller/mod.rs"].Content)
+	if !strings.Contains(files["controller/mod.rs"].Content, "pub use zz_generated_board_controller::{\n    BoardController, BoardControllerError, BoardControllerImpl,\n};") {
+		t.Fatalf("the controller mod file never exports the trait, the error and the impl:\n%s", files["controller/mod.rs"].Content)
 	}
 
 	for _, layer := range []string{"adapter", "driver"} {
@@ -341,8 +349,8 @@ func TestTheCellDefaultsToTuiAndTheMountPointsFollowIt(t *testing.T) {
 		t.Fatal("the driver ignored the named cell")
 	}
 
-	if !strings.Contains(named["controller/zz_generated_board_controller.rs"].Content, "pub trait ScreenPorts: Send + Sync {") {
-		t.Fatal("the ports trait ignored the named cell")
+	if !strings.Contains(named["controller/zz_generated_board_controller.rs"].Content, "use crate::screen::types::frame::{Frame, Step};") {
+		t.Fatal("the controller ignored the named cell")
 	}
 }
 

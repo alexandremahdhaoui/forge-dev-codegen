@@ -74,8 +74,8 @@ refused by name. The arrow keys always move, whatever the letters say.
 | `types/zz_generated_key.rs` | `Input`, what the keyboard yields. `Key`, the typed action the controller receives |
 | `port/zz_generated_screen.rs` | trait `Screen` with `enter`, `draw` and `leave`, and `ScreenError` |
 | `port/zz_generated_keyboard.rs` | trait `Keyboard` with `read`, and `KeyboardError` |
-| `controller/zz_generated_<controller>_controller.rs` | trait `<Controller>Controller`, its error, the struct with its ports and `new`, and the `<Cell>Ports` trait the driver reaches the ports through |
-| `driver/zz_generated_<cell>_driver.rs` | `<Cell>Driver`, the loop, the key map, and the guard that restores the terminal |
+| `controller/zz_generated_<controller>_controller.rs` | trait `<Controller>Controller`, its error, the struct and `new` |
+| `driver/zz_generated_<cell>_driver.rs` | `<Cell>Driver` holding the controller, the `Screen` and the `Keyboard`, the loop, the key map, and the guard that restores the terminal |
 | `adapter/zz_generated_crossterm_screen.rs` | `CrosstermScreen`, raw mode, the alternate screen and the grid written to stdout |
 | `adapter/zz_generated_crossterm_keyboard.rs` | `CrosstermKeyboard`, one key event read with a tick timeout |
 | `zz_generated_cell.yaml` | the cell manifest hexagonal-rust reads |
@@ -92,7 +92,7 @@ holding `impl <Controller>Controller for <Controller>ControllerImpl`. A
 missing file, method or impl is a compile error with a name.
 
 ```rust
-pub trait BoardController: TuiPorts + Send + Sync {
+pub trait BoardController: Send + Sync {
     fn on_key(&self, frame: &Frame, key: Key) -> Result<Step, BoardControllerError>;
     fn on_line(&self, frame: &Frame, line: &str) -> Result<Step, BoardControllerError>;
     fn on_tick(&self, frame: &Frame) -> Result<Frame, BoardControllerError>;
@@ -116,13 +116,16 @@ Backspace erases one. Escape closes it. Enter hands the text to
 
 ## The ports and the driver
 
-hexagonal-rust builds the adapters a controller consumes and hands them
-to the controller's `new`. It hands a driver its controllers and nothing
-else. So the manifest lists `Screen` and `Keyboard` as the controller's
-ports, the generated struct carries them, and the generated `<Cell>Ports`
-trait, a supertrait of the controller, hands them to the driver. The
-user never touches them. The day a manifest driver may name ports of its
-own, the supertrait goes away and nothing the user wrote changes.
+The driver owns the terminal, so the manifest lists `Screen` and
+`Keyboard` under the driver's `ports`. hexagonal-rust builds the two
+adapters and hands them to the driver's `new` after its controller.
+
+```rust
+TuiDriver::new(config, controller, screen, keyboard)
+```
+
+The controller holds no port. Its struct is empty and `new` takes no
+argument. The user never touches the terminal.
 
 `bind` refuses a `tick_ms` below 1 naming the key, prints
 `TUI <width>x<height>` while the shell still owns the screen, then calls
@@ -149,20 +152,18 @@ provides:
   - {name: crossterm_screen, type: CrosstermScreen, module: tui::adapter::crossterm_screen, implements: Screen}
   - {name: crossterm_keyboard, type: CrosstermKeyboard, module: tui::adapter::crossterm_keyboard, implements: Keyboard}
   controllers:
-  - {trait: BoardController, impl: BoardControllerImpl, module: tui::controller, ports: [Screen, Keyboard]}
+  - {trait: BoardController, impl: BoardControllerImpl, module: tui::controller}
   drivers:
-  - {name: tui, type: TuiDriver, module: tui::driver::tui_driver, requires: [BoardController], config: {tick_ms: {type: duration, default: 100}}}
+  - {name: tui, type: TuiDriver, module: tui::driver::tui_driver, requires: [BoardController], ports: [Screen, Keyboard], config: {tick_ms: {type: duration, default: 100}}}
   ports:
   - {trait: Screen, module: tui::port::screen}
   - {trait: Keyboard, module: tui::port::keyboard}
 ```
 
-The wiring names one adapter per port and enables the driver.
+The wiring enables the driver. Each port has one provided adapter, so
+hexagonal-rust picks it when the wiring says nothing about the port.
 
 ```yaml
-ports:
-  Screen: { default: crossterm_screen, adapters: { crossterm_screen: {} } }
-  Keyboard: { default: crossterm_keyboard, adapters: { crossterm_keyboard: {} } }
 drivers:
   tui: { enabled: true }
 ```

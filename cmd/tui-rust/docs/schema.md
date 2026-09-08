@@ -1,6 +1,6 @@
 # tui-rust Configuration
 
-Emits the rust tui cell of one service from its tui spec. It writes the frame and key types, a Screen port and a Keyboard port, a crossterm adapter for each, a controller trait with the struct that carries its ports, and a driver that owns the terminal loop.
+Emits the rust tui cell of one service from its tui spec. It writes the frame and key types, a Screen port and a Keyboard port, a crossterm adapter for each, a controller trait with its struct, and a driver that holds both ports and owns the terminal loop.
 
 > Full OpenAPI specification: [spec.openapi.yaml](../spec.openapi.yaml)
 

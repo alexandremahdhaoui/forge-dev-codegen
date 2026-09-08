@@ -1,7 +1,7 @@
 name: tui-rust
 kind: mcp-server
 version: 0.1.0
-description: Emits the rust tui cell of one service from its tui spec. It writes the frame and key types, a Screen port and a Keyboard port, a crossterm adapter for each, a controller trait with the struct that carries its ports, and a driver that owns the terminal loop.
+description: Emits the rust tui cell of one service from its tui spec. It writes the frame and key types, a Screen port and a Keyboard port, a crossterm adapter for each, a controller trait with its struct, and a driver that holds both ports and owns the terminal loop.
 openapi:
   specPath: ./spec.openapi.yaml
 generate:

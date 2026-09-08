@@ -75,6 +75,8 @@ enum Next {
 pub struct TuiDriver {
     config: TuiDriverConfig,
     controller: Arc<dyn BoardController + Send + Sync>,
+    screen: Arc<dyn Screen + Send + Sync>,
+    keyboard: Arc<dyn Keyboard + Send + Sync>,
     screen_open: bool,
 }
 
@@ -82,10 +84,14 @@ impl TuiDriver {
     pub fn new(
         config: TuiDriverConfig,
         controller: Arc<dyn BoardController + Send + Sync>,
+        screen: Arc<dyn Screen + Send + Sync>,
+        keyboard: Arc<dyn Keyboard + Send + Sync>,
     ) -> Self {
         Self {
             config,
             controller,
+            screen,
+            keyboard,
             screen_open: false,
         }
     }
@@ -100,8 +106,7 @@ impl TuiDriver {
 
         println!("TUI {WIDTH}x{HEIGHT}");
 
-        self.controller
-            .screen()
+        self.screen
             .enter()
             .map_err(|source| TuiDriverError::Enter { source })?;
 
@@ -133,8 +138,7 @@ impl TuiDriver {
         driver.screen_open = false;
 
         let left = driver
-            .controller
-            .screen()
+            .screen
             .leave()
             .map_err(|source| TuiDriverError::Leave { source });
 
@@ -142,10 +146,8 @@ impl TuiDriver {
     }
 
     fn run(&self) -> Result<(), TuiDriverError> {
-        let screen = self.controller.screen();
-        let keyboard = self.controller.keyboard();
-        let screen: &(dyn Screen + Send + Sync) = &*screen;
-        let keyboard: &(dyn Keyboard + Send + Sync) = &*keyboard;
+        let screen: &(dyn Screen + Send + Sync) = &*self.screen;
+        let keyboard: &(dyn Keyboard + Send + Sync) = &*self.keyboard;
 
         let tick_ms = self.config.tick_ms.unsigned_abs();
         let tick = Duration::from_millis(tick_ms);
@@ -288,7 +290,7 @@ impl Drop for TuiDriver {
             return;
         }
 
-        if let Err(error) = self.controller.screen().leave() {
+        if let Err(error) = self.screen.leave() {
             eprintln!(
                 "leaving the terminal of the tui driver dropped while its screen was open: {}",
                 error_chain(&error)

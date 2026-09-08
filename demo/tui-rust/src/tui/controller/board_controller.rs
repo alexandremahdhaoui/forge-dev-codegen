@@ -80,7 +80,16 @@ mod tests {
     use crate::tui::types::key::Input;
 
     fn controller() -> BoardControllerImpl {
-        BoardControllerImpl::new(Arc::new(MockScreen::new()), Arc::new(MockKeyboard::new()))
+        BoardControllerImpl::new()
+    }
+
+    fn driver(config: TuiDriverConfig, screen: MockScreen, keyboard: MockKeyboard) -> TuiDriver {
+        TuiDriver::new(
+            config,
+            Arc::new(controller()),
+            Arc::new(screen),
+            Arc::new(keyboard),
+        )
     }
 
     fn board_with_player_at(x: u16, y: u16) -> Frame {
@@ -240,11 +249,7 @@ mod tests {
     }
 
     async fn play(screen: MockScreen, keyboard: MockKeyboard) -> Result<(), TuiDriverError> {
-        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(
-            BoardControllerImpl::new(Arc::new(screen), Arc::new(keyboard)),
-        );
-
-        let mut driver = TuiDriver::new(TuiDriverConfig::default(), controller);
+        let mut driver = driver(TuiDriverConfig::default(), screen, keyboard);
         driver.bind().await?;
         driver.announce()?;
         driver.serve().await
@@ -387,8 +392,11 @@ mod tests {
 
     #[tokio::test]
     async fn serving_before_bind_is_refused_by_name() {
-        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(controller());
-        let driver = TuiDriver::new(TuiDriverConfig::default(), controller);
+        let driver = driver(
+            TuiDriverConfig::default(),
+            MockScreen::new(),
+            MockKeyboard::new(),
+        );
 
         let announced = driver.announce().expect_err("a refusal");
         let served = driver.serve().await.expect_err("a refusal");
@@ -421,11 +429,7 @@ mod tests {
     #[tokio::test]
     async fn a_driver_bound_and_dropped_without_serve_restores_the_terminal() {
         let (screen, recording) = recording_screen();
-        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(
-            BoardControllerImpl::new(Arc::new(screen), Arc::new(MockKeyboard::new())),
-        );
-
-        let mut driver = TuiDriver::new(TuiDriverConfig::default(), controller);
+        let mut driver = driver(TuiDriverConfig::default(), screen, MockKeyboard::new());
         driver.bind().await.expect("a bound driver");
 
         drop(driver);
@@ -438,11 +442,7 @@ mod tests {
         let mut screen = MockScreen::new();
         screen.expect_enter().never();
 
-        let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(
-            BoardControllerImpl::new(Arc::new(screen), Arc::new(MockKeyboard::new())),
-        );
-
-        let mut driver = TuiDriver::new(TuiDriverConfig { tick_ms: 0 }, controller);
+        let mut driver = driver(TuiDriverConfig { tick_ms: 0 }, screen, MockKeyboard::new());
 
         let error = driver.bind().await.expect_err("a refusal");
 

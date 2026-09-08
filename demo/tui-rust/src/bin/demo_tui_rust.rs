@@ -16,12 +16,14 @@ async fn main() {
 }
 
 async fn run() -> Result<(), TuiDriverError> {
-    let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(BoardControllerImpl::new(
+    let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(BoardControllerImpl::new());
+
+    let mut driver = TuiDriver::new(
+        TuiDriverConfig::default(),
+        controller,
         Arc::new(CrosstermScreen::new(CrosstermScreenConfig::default())),
         Arc::new(CrosstermKeyboard::new(CrosstermKeyboardConfig::default())),
-    ));
-
-    let mut driver = TuiDriver::new(TuiDriverConfig::default(), controller);
+    );
 
     driver.bind().await?;
     driver.announce()?;
