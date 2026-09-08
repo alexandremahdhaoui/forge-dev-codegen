@@ -388,6 +388,33 @@ func TestTheSameHandPortDeclaredTwiceWithDifferentMethodsIsRefused(t *testing.T)
 	}
 }
 
+func TestAnXPortsEntryThatIsNeitherANameNorADeclarationIsRefused(t *testing.T) {
+	broken := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [7]", 1)
+
+	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), "an entry is either a port name or an object naming kind, name and methods") {
+		t.Fatalf("a number in x-ports was not refused: %v", err)
+	}
+}
+
+func TestAQueryParameterNameRustCannotSpellIsRefused(t *testing.T) {
+	broken := strings.Replace(queriedSpec, "        - name: after\n          in: query", "        - name: 1st\n          in: query", 1)
+
+	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `reading query parameter "1st"`) {
+		t.Fatalf("an unspellable query parameter name was not refused: %v", err)
+	}
+}
+
+func TestAHandPortMethodNameRustCannotSpellIsRefused(t *testing.T) {
+	broken := strings.Replace(queriedSpec, "            - name: now\n              reply: Instant", "            - name: 1now\n              reply: Instant", 1)
+
+	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `reading hand port method "1now"`) {
+		t.Fatalf("an unspellable hand port method name was not refused: %v", err)
+	}
+}
+
 func TestAPortNameThatNoOperationDeclaresIsRefused(t *testing.T) {
 	unknown := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [GreetingStore, GreetingCalendar]", 1)
 
