@@ -176,6 +176,80 @@ func TestTheRngPortComesFromTheLayout(t *testing.T) {
 	}
 }
 
+func TestTheVectorsDocumentComesFromTheFileLayoutVectorsNames(t *testing.T) {
+	src := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(src, "cases.json"), []byte(smallVectors), 0o644); err != nil {
+		t.Fatalf("writing the vectors: %v", err)
+	}
+
+	out, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, SrcDir: src,
+		Layout: map[string]interface{}{"vectors": "cases.json"},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if !strings.Contains(out.Files[0].Content, "async fn creating_a_greeting_succeeds() {") {
+		t.Fatalf("the vector never reached the file\n%s", out.Files[0].Content)
+	}
+}
+
+func TestAModelWithNoVectorsAndNoLayoutVectorsIsRefused(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec,
+	})
+
+	want := "the model carries no vectors document and layout.vectors names no file"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestAVectorsPathThatNamesNoFileIsRefusedByName(t *testing.T) {
+	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, SrcDir: t.TempDir(),
+		Layout: map[string]interface{}{"vectors": "missing.json"},
+	})
+
+	want := "reading the vectors document missing.json"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestALayoutPushThatIsNotAListOfNamesIsRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		push interface{}
+		want string
+	}{
+		{
+			name: "a bare string",
+			push: "Counter",
+			want: "reading layout.push: it is a list of rpc names",
+		},
+		{
+			name: "a list holding a number",
+			push: []interface{}{7},
+			want: "reading layout.push entry 0: it is an rpc name",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewHandlers().Generate(context.Background(), GenerateInput{
+				Name: "svc", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,
+				Layout: map[string]interface{}{"push": tc.push},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("generating reported %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestAnRngLayoutThatIsNotAMapIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "songe-hello", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,

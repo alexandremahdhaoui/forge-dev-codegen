@@ -117,12 +117,12 @@ func readCallService(proto []byte, cell string) (*callService, error) {
 	}
 
 	for _, r := range svc.Rpcs {
-		request, err := callMessageNamed(spec, r.Request)
+		request, err := messageNamed(spec, r.Request)
 		if err != nil {
 			return nil, err
 		}
 
-		reply, err := callMessageNamed(spec, r.Response)
+		reply, err := messageNamed(spec, r.Response)
 		if err != nil {
 			return nil, err
 		}
@@ -139,16 +139,6 @@ func readCallService(proto []byte, cell string) (*callService, error) {
 	}
 
 	return out, nil
-}
-
-func callMessageNamed(spec *grpcrust.Spec, name string) (grpcrust.Message, error) {
-	for _, m := range spec.Messages {
-		if m.Name == name {
-			return m, nil
-		}
-	}
-
-	return grpcrust.Message{}, fmt.Errorf("reading the grpc proto: message %q is not defined", name)
 }
 
 func buildCallServiceView(svc *callService) callServiceView {

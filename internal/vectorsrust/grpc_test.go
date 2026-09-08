@@ -272,6 +272,204 @@ func TestASeededRngPortGetsAMockAndABuilderArmedWithTheSeed(t *testing.T) {
 	}
 }
 
+const silentProto = `syntax = "proto3";
+
+package songe.play.udp.v1;
+
+service PlayDatagram {
+  rpc Hello(Hello) returns (Welcome);
+  rpc Act(Act) returns (Nothing);
+  rpc Result(Result) returns (Nothing);
+}
+
+message Hello {
+  string secret = 1;
+}
+
+message Welcome {
+  string greeting = 1;
+}
+
+message Act {
+  string verb = 1;
+}
+
+message Result {
+  uint64 roll = 1;
+}
+
+message Nothing {}
+`
+
+func silentOptions() vectorsrust.Options {
+	return vectorsrust.Options{
+		Service:   "songe-play",
+		Proto:     []byte(silentProto),
+		Hello:     "Hello",
+		Push:      []string{"Result"},
+		GrpcProto: nil,
+	}
+}
+
+func TestASilentInboundRpcAnsweredByAPushAssertsNoReplyCameBack(t *testing.T) {
+	const cases = `{
+  "cases": [
+    {
+      "case": "udp_an_act_is_answered_by_a_result_push",
+      "operation": "udp_act",
+      "input": { "sessionId": "5e5510000000sess", "verb": "attack" },
+      "hello": { "secret": "open" },
+      "expectPush": {
+        "rpc": "Result",
+        "sessionIds": ["5e5510000000sess", "5e5510000000gues"],
+        "payload": { "roll": 4 }
+      }
+    }
+  ]
+}`
+
+	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(cases), silentOptions())
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	for _, want := range []string{
+		"async fn udp_an_act_is_answered_by_a_result_push() {",
+		"let controller_reply = Nothing {};",
+		"drain_play_datagram(asking, \"5e5510000000sess\", 2000, false).await;",
+		"assert!(answer.is_none(), \"Act answers Nothing and the driver still sent a reply\");",
+		"PlayDatagramPush::Result(Result { roll: 4 })",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the emitted file lacks %q\n%s", want, content)
+		}
+	}
+
+	if strings.Contains(content, "decode_act_reply") {
+		t.Errorf("a silent rpc still decoded a reply\n%s", content)
+	}
+}
+
+func TestARequestDrivenPushIsRefusedWhenTheSilentShapeAndTheFieldsDisagree(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "a controller reply on a silent rpc",
+			body: `{"case": "c", "operation": "udp_act", "input": {"sessionId": "5e5510000000sess", "verb": "attack"}, "controllerReply": {}, "expectPush": {"rpc": "Result", "sessionIds": ["5e5510000000sess"]}}`,
+			want: `Act answers Nothing, so the push is the whole answer, drop controllerReply and expectedBody`,
+		},
+		{
+			name: "an input field of the wrong type",
+			body: `{"case": "c", "operation": "udp_act", "input": {"sessionId": "5e5510000000sess", "verb": 7}, "expectPush": {"rpc": "Result", "sessionIds": ["5e5510000000sess"]}}`,
+			want: `reading input: field "verb" must be a JSON string`,
+		},
+		{
+			name: "a payload field of the wrong type",
+			body: `{"case": "c", "operation": "udp_act", "input": {"sessionId": "5e5510000000sess", "verb": "attack"}, "expectPush": {"rpc": "Result", "sessionIds": ["5e5510000000sess"], "payload": {"roll": "four"}}}`,
+			want: `reading expectPush.payload: field "roll" must be a JSON number`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vectorsrust.Generate([]byte(helloSpec), []byte(`{"cases": [`+tc.body+`]}`), silentOptions())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("generating reported %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestARequestDrivenPushReadsExpectedBodyWhenItDiffersFromTheControllerReply(t *testing.T) {
+	const cases = `{
+  "cases": [
+    {
+      "case": "udp_an_echo_reads_back_what_the_driver_wrote",
+      "operation": "udp_echo",
+      "input": { "sessionId": "0123456789abcdef", "payload": "songe" },
+      "hello": { "secret": "open" },
+      "controllerReply": { "payload": "songe" },
+      "expectedBody": { "payload": "songe" },
+      "expectPush": {
+        "rpc": "Counter",
+        "sessionIds": ["fedcba9876543210"],
+        "payload": { "tick": 1 }
+      }
+    }
+  ]
+}`
+
+	content := generateSession(t, cases)
+
+	for _, want := range []string{
+		"let asking_socket = register_hello_datagram(stack.port, \"0123456789abcdef\", Hello { secret: \"open\".to_string() }).await.0;",
+		"let asking = &asking_socket;",
+		"assert_eq!(reply, Echo { payload: \"songe\".to_string() });",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the emitted file lacks %q\n%s", want, content)
+		}
+	}
+}
+
+func TestAGrpcCaseWithAFieldOfTheWrongTypeIsRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "an input field of the wrong type",
+			body: `{"case": "c", "operation": "grpc_Ping", "input": {"message": 7}, "controllerReply": {"message": "songe"}}`,
+			want: `reading input: field "message" must be a JSON string`,
+		},
+		{
+			name: "a reply field of the wrong type",
+			body: `{"case": "c", "operation": "grpc_Ping", "input": {"message": "songe"}, "controllerReply": {"count": "eight"}}`,
+			want: `reading controllerReply: field "count" must be a JSON number`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vectorsrust.Generate([]byte(helloSpec), []byte(`{"cases": [`+tc.body+`]}`), callOptions())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("generating reported %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAGrpcProtoNamingAMessageItNeverDefinesIsRefused(t *testing.T) {
+	const missing = `syntax = "proto3";
+
+package songe.hello.v1;
+
+service Hello {
+  rpc Ping(PingRequest) returns (PingReply);
+}
+
+message PingRequest {
+  string message = 1;
+}
+`
+
+	opts := callOptions()
+	opts.GrpcProto = []byte(missing)
+
+	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(callCases), opts)
+
+	want := `reading the grpc proto: reading service "Hello": rpc "Ping" references undefined message "PingReply"`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
 func TestARequestDrivenPushSendsTheInboundDatagramAndReadsBothThePushAndTheReply(t *testing.T) {
 	content := generateSession(t, sessionCases)
 
