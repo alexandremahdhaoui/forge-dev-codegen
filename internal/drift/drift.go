@@ -27,6 +27,12 @@ const (
 	asideSuffix     = ".aside"
 	storeLockSuffix = ".lock"
 	gateLockSuffix  = ".drift-lock"
+
+	unchangedSkipPrefix = "⏭  Skipping "
+	unchangedSkipSuffix = " (unchanged)"
+
+	gitDirectoryVariable = "GIT_DIR"
+	gitWorkTreeVariable  = "GIT_WORK_TREE"
 )
 
 type Options struct {
@@ -82,7 +88,7 @@ func Check(opts Options) (findings []Finding, err error) {
 		}
 	}()
 
-	if err := runForgeBuild(root, rebuilder); err != nil {
+	if err := runForgeBuild(root, storePath, rebuilder); err != nil {
 		return nil, err
 	}
 
@@ -139,7 +145,9 @@ func askForgeItsVersion(candidate Forge) (string, error) {
 
 	cmd := exec.Command(candidate.Argv[0], append(append([]string{}, candidate.Argv[1:]...), "version")...)
 	cmd.Dir = outsideAnyRepository
-	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(outsideAnyRepository))
+	cmd.Env = append(
+		withoutTheGitRepositoryTheCallerExported(os.Environ()),
+		"GIT_CEILING_DIRECTORIES="+filepath.Dir(outsideAnyRepository))
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -156,6 +164,22 @@ func askForgeItsVersion(candidate Forge) (string, error) {
 
 	return "", fmt.Errorf("the %s forge %q names no version, it answered: %s",
 		candidate.Source, spelled, strings.TrimSpace(string(out)))
+}
+
+func withoutTheGitRepositoryTheCallerExported(environment []string) []string {
+	kept := make([]string, 0, len(environment))
+
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+
+		if name == gitDirectoryVariable || name == gitWorkTreeVariable {
+			continue
+		}
+
+		kept = append(kept, entry)
+	}
+
+	return kept
 }
 
 func trimDirty(version string) string {
@@ -299,7 +323,7 @@ func lockPath(path string) (func(), error) {
 	}, nil
 }
 
-func runForgeBuild(root string, rebuilder Forge) error {
+func runForgeBuild(root, storePath string, rebuilder Forge) error {
 	cmd := exec.Command(rebuilder.Argv[0], append(append([]string{}, rebuilder.Argv[1:]...), "build")...)
 	cmd.Dir = root
 
@@ -309,7 +333,33 @@ func runForgeBuild(root string, rebuilder Forge) error {
 			root, rebuilder.Source, strings.Join(rebuilder.Argv, " "), err, strings.TrimSpace(string(out)))
 	}
 
+	if skipped := artifactsSkippedAsUnchanged(string(out)); len(skipped) > 0 {
+		return fmt.Errorf(
+			"refusing the comparison in %q: this build started with no artifact store, so no entry could be fresh, "+
+				"yet it skipped %s as unchanged. something wrote records into %q while this gate held the store aside, "+
+				"so the comparison would answer on a build that never ran. let the run that wrote them finish, "+
+				"then run the gate again with nothing else touching the repository",
+			root, strings.Join(skipped, ", "), storePath)
+	}
+
 	return nil
+}
+
+func artifactsSkippedAsUnchanged(buildOutput string) []string {
+	skipped := make([]string, 0)
+
+	for _, line := range strings.Split(buildOutput, "\n") {
+		line = strings.TrimRight(line, "\r")
+
+		if !strings.HasPrefix(line, unchangedSkipPrefix) || !strings.HasSuffix(line, unchangedSkipSuffix) {
+			continue
+		}
+
+		skipped = append(skipped,
+			strings.TrimSuffix(strings.TrimPrefix(line, unchangedSkipPrefix), unchangedSkipSuffix))
+	}
+
+	return skipped
 }
 
 func snapshot(root string) (map[string]string, error) {

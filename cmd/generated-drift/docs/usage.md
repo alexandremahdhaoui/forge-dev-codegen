@@ -25,7 +25,7 @@ Build info answers which one that is. A build recording a version of `github.com
 
 Build info describes the gate, never the repo under test. So the repo under test must sit in the same Go workspace as the gate. A gate built in a workspace takes the workspace path for every repo it is pointed at, and a repo outside that workspace has no version to run forge at, so the run fails loudly instead of answering wrong.
 
-The version question is asked from an empty directory the engine makes, with `GIT_CEILING_DIRECTORIES` set above it. An unstamped forge falls back to `git describe` in whatever directory it was started from, so a forge with no version of its own would otherwise answer the tags of the repo under test. Those tags live in the same namespace and the factory bumps them together, so the answer could match by accident and the gate would accept a forge it never checked. Away from every repository that forge answers `dev` and the gate refuses it by name.
+The version question is asked from an empty directory the engine makes, with `GIT_CEILING_DIRECTORIES` set above it and with `GIT_DIR` and `GIT_WORK_TREE` stripped from the environment. An unstamped forge falls back to `git describe` in whatever directory it was started from, so a forge with no version of its own would otherwise answer the tags of the repo under test. Those tags live in the same namespace and the factory bumps them together, so the answer could match by accident and the gate would accept a forge it never checked. The ceiling stops the walk upward, which matters when the temporary directory lands inside a repository. It does nothing against an exported git directory, which names a repository outright and which every git hook exports, so those two variables go. Away from every repository that forge answers `dev` and the gate refuses it by name.
 
 ## The artifact store
 
@@ -38,6 +38,16 @@ The restore renames the copy back over whatever the build left at the store path
 A run that finds an `.aside` already in place refuses and names both paths, because an interrupted run left it and the move would overwrite the only copy. Read that file. Move it back over the store path when it is the store you want to keep. Delete it when it is not. Then run the gate again.
 
 The gate leaves the store exactly as it found it, absent included, when it runs alone.
+
+## The build must find nothing to skip
+
+The lock keeps two gates from interleaving their moves. It does not keep the outer forge that started the first gate from writing the whole store back into the hole the second gate has already made, after the lock is released and before the first answer arrives. The second gate then builds against a full store, skips every entry, regenerates nothing, and compares a tree no generator touched.
+
+So the gate reads its own build's output. A build that starts with no artifact store has no record to call anything fresh, so an entry reported as skipped and unchanged proves the store was there. The gate refuses and names every entry forge skipped, the repository and the store path. The refusal holds whoever wrote the store and whenever they wrote it, and it takes no flag.
+
+The shape it matches is one line of forge's own build, `⏭  Skipping <entry> (unchanged)`, whole line, prefix and suffix. Forge writes that line in one place and only after the freshness rule found a record. The other line starting the same way ends `(built by the <stage> stage that needs it)`, which is an entry a test stage owns rather than an entry found fresh, and the suffix separates the two.
+
+An ordinary `forge build` beside the gate is still not protected. The gate's build reads no store, so it reports no skip and the refusal stays silent, while the restore still renames the saved copy over whatever that build wrote. Protecting it needs one lock that every writer of the store respects for the whole of a build, which is forge's to take, not this gate's.
 
 ## Output
 
