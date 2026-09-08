@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,6 +54,15 @@ func Run(_ context.Context, input mcptypes.RunInput, spec *Spec) (*forge.TestRep
 	return report, nil
 }
 
+var remedies = []struct {
+	Change string
+	Remedy string
+}{
+	{drift.Rewritten, "rewritten: the generators write other bytes now. read the new ones and commit them."},
+	{drift.Written, "written: the repo neither tracks nor ignores this path. add it to .gitignore, or commit it."},
+	{drift.Removed, "removed: the generators no longer write this path. drop it from git."},
+}
+
 func renderFindings(findings []drift.Finding) string {
 	var details strings.Builder
 
@@ -62,7 +72,16 @@ func renderFindings(findings []drift.Finding) string {
 		fmt.Fprintf(&details, "  - %s: %s\n", finding.Path, finding.Change)
 	}
 
-	details.WriteString("\nthe generators no longer write what is committed. run forge build and commit the result.\n")
+	details.WriteString("\nthis run already wrote them, so they sit in the tree now. an ordinary forge build " +
+		"would skip every one of them, which is the hole this gate exists to catch.\n")
+
+	for _, one := range remedies {
+		if !slices.ContainsFunc(findings, func(f drift.Finding) bool { return f.Change == one.Change }) {
+			continue
+		}
+
+		fmt.Fprintf(&details, "  %s\n", one.Remedy)
+	}
 
 	return details.String()
 }

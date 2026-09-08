@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/authzgen"
+	"github.com/openfga/language/pkg/go/transformer"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type wireModel struct {
@@ -177,6 +179,62 @@ func TestTheWireFormTagsARelationOnlyWhenItIsWrittenInsideAnExtendBlock(t *testi
 		if relation.Module != "play" {
 			t.Errorf("the extending relation session %q carries the module %q", name, relation.Module)
 		}
+	}
+}
+
+func TestTheListenerTagsARelationInsideAnExtendBlockEvenWhenTheModuleDeclaresTheTypeItself(t *testing.T) {
+	proto, _, err := transformer.TransformModularDSLToProto(`module play
+
+type monster
+  relations
+    define session: [session]
+
+extend type monster
+  relations
+    define slain: [character]
+`)
+	if err != nil {
+		t.Fatalf("transforming a module that extends a type it declares itself: %v", err)
+	}
+
+	encoded, err := protojson.Marshal(proto)
+	if err != nil {
+		t.Fatalf("encoding the type definitions: %v", err)
+	}
+
+	declared := map[string]wireRelation{}
+	extended := map[string]wireRelation{}
+
+	for _, one := range decodeWire(t, "a module extending its own type", string(encoded)).TypeDefinitions {
+		if one.Type != "monster" {
+			t.Fatalf("the transformed model carries the type %q", one.Type)
+		}
+
+		if one.Metadata.Module != "play" {
+			t.Fatalf("a monster entry carries the module %q", one.Metadata.Module)
+		}
+
+		for name, relation := range one.Metadata.Relations {
+			if relation.Module == "" {
+				declared[name] = relation
+
+				continue
+			}
+
+			extended[name] = relation
+		}
+	}
+
+	if _, known := declared["session"]; !known || len(declared) != 1 {
+		t.Fatalf("the relations outside the extend block are %v", declared)
+	}
+
+	if got := extended["slain"].Module; got != "play" {
+		t.Fatalf("the relation slain sits inside the extend block of a type play declares itself and carries the module %q", got)
+	}
+
+	if len(extended) != 1 {
+		t.Fatalf("the relations inside the extend block are %v", extended)
 	}
 }
 

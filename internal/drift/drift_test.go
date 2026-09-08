@@ -47,8 +47,111 @@ func TestCompareNamesEveryChangeInPathOrder(t *testing.T) {
 	}
 }
 
+func TestResolveForgeRunsTheWorkspaceCheckoutWhenTheBuildRecordsNoForgeVersion(t *testing.T) {
+	stubForgeOnPath(t, "echo forge version v0.1.0")
+
+	resolved, err := drift.ResolveForge("")
+	if err != nil {
+		t.Fatalf("resolving a forge for a workspace build: %v", err)
+	}
+
+	want := []string{"go", "run", "github.com/alexandremahdhaoui/forge/cmd/forge"}
+
+	if strings.Join(resolved.Argv, " ") != strings.Join(want, " ") {
+		t.Fatalf("expected %v, got %v", want, resolved.Argv)
+	}
+
+	if resolved.Source != "workspace" {
+		t.Fatalf("expected the workspace source, got %q", resolved.Source)
+	}
+}
+
+func TestResolveForgeAcceptsAForgeReportingTheVersionTheGateWasBuiltAgainst(t *testing.T) {
+	stub := stubForgeOnPath(t, "echo forge version v1.2.3")
+
+	resolved, err := drift.ResolveForge("v1.2.3")
+	if err != nil {
+		t.Fatalf("resolving a forge of the version this gate was built against: %v", err)
+	}
+
+	if resolved.Argv[0] != stub {
+		t.Fatalf("expected the resolved path %q, got %v", stub, resolved.Argv)
+	}
+}
+
+func TestResolveForgeAcceptsAForgeBuiltDirtyFromTheVersionTheGateWasBuiltAgainst(t *testing.T) {
+	stubForgeOnPath(t, "echo forge version v1.2.3+dirty")
+
+	if _, err := drift.ResolveForge("v1.2.3"); err != nil {
+		t.Fatalf("expected a dirty build of the same version to be accepted, got %v", err)
+	}
+}
+
+func TestResolveForgeRefusesAForgeOfAnotherVersionNamingBothVersionsAndThePath(t *testing.T) {
+	stub := stubForgeOnPath(t, "echo forge version v0.46.0")
+
+	_, err := drift.ResolveForge("v0.49.0")
+	if err == nil {
+		t.Fatal("expected a forge of another version to be refused")
+	}
+
+	for _, want := range []string{"v0.46.0", "v0.49.0", stub} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in the refusal, got %v", want, err)
+		}
+	}
+}
+
+func TestResolveForgeRefusesAForgeThatNamesNoVersion(t *testing.T) {
+	stubForgeOnPath(t, "echo hello from somewhere else")
+
+	_, err := drift.ResolveForge("v0.49.0")
+	if err == nil {
+		t.Fatal("expected a forge that names no version to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "names no version") {
+		t.Fatalf("expected the refusal to say so, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "hello from somewhere else") {
+		t.Fatalf("expected what it answered in the refusal, got %v", err)
+	}
+}
+
+func TestResolveForgeWrapsAForgeThatCannotAnswerItsVersion(t *testing.T) {
+	stubForgeOnPath(t, "echo cannot start >&2; exit 4")
+
+	_, err := drift.ResolveForge("v0.49.0")
+	if err == nil {
+		t.Fatal("expected a forge that cannot answer to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "asking the") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "cannot start") {
+		t.Fatalf("expected the output in the message, got %v", err)
+	}
+}
+
+func TestResolveForgeWrapsARefNothingOnThePathResolves(t *testing.T) {
+	t.Setenv("FORGE_RUN_LOCAL_ENABLED", "")
+	t.Setenv("PATH", t.TempDir())
+
+	_, err := drift.ResolveForge("v0.49.0")
+	if err == nil {
+		t.Fatal("expected an unresolvable forge to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "resolving a forge built from v0.49.0") {
+		t.Fatalf("expected the action and the version in the message, got %v", err)
+	}
+}
+
 func TestCheckAnswersNothingWhenTheBuildWritesNothing(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 
 	findings := checkOK(t, root)
 
@@ -57,20 +160,33 @@ func TestCheckAnswersNothingWhenTheBuildWritesNothing(t *testing.T) {
 	}
 }
 
+func TestCheckReadsTheCurrentDirectoryWhenNoRootDirectoryIsNamed(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "printf 'changed\\n' > zz_generated.rs")
+
+	t.Chdir(root)
+
+	findings, err := drift.Check(drift.Options{})
+	if err != nil {
+		t.Fatalf("checking the current directory: %v", err)
+	}
+
+	assertOneFinding(t, findings, "zz_generated.rs", drift.Rewritten)
+}
+
 func TestCheckNamesAFileTheBuildWroteOverAsRewritten(t *testing.T) {
-	root := repoWithFakeForge(t, "printf 'changed\\n' > zz_generated.rs")
+	root := repoWithStubbedWorkspaceForge(t, "printf 'changed\\n' > zz_generated.rs")
 
 	assertOneFinding(t, checkOK(t, root), "zz_generated.rs", drift.Rewritten)
 }
 
 func TestCheckNamesAFileTheBuildCreatedAndTheRepoDoesNotIgnoreAsWritten(t *testing.T) {
-	root := repoWithFakeForge(t, "printf 'new\\n' > zz_generated_extra.rs")
+	root := repoWithStubbedWorkspaceForge(t, "printf 'new\\n' > zz_generated_extra.rs")
 
 	assertOneFinding(t, checkOK(t, root), "zz_generated_extra.rs", drift.Written)
 }
 
 func TestCheckSaysNothingAboutAFileTheRepoGitignores(t *testing.T) {
-	root := repoWithFakeForge(t, "mkdir -p build && printf 'binary\\n' > build/probe")
+	root := repoWithStubbedWorkspaceForge(t, "mkdir -p build && printf 'binary\\n' > build/probe")
 
 	findings := checkOK(t, root)
 
@@ -80,13 +196,13 @@ func TestCheckSaysNothingAboutAFileTheRepoGitignores(t *testing.T) {
 }
 
 func TestCheckNamesAFileTheBuildDeletedAsRemoved(t *testing.T) {
-	root := repoWithFakeForge(t, "rm zz_generated.rs")
+	root := repoWithStubbedWorkspaceForge(t, "rm zz_generated.rs")
 
 	assertOneFinding(t, checkOK(t, root), "zz_generated.rs", drift.Removed)
 }
 
 func TestCheckNamesAFileEditedBeforeTheGateOnlyWhenTheBuildWritesOverIt(t *testing.T) {
-	root := repoWithFakeForge(t, "printf 'generated\\n' > zz_generated.rs")
+	root := repoWithStubbedWorkspaceForge(t, "printf 'generated\\n' > zz_generated.rs")
 
 	write(t, filepath.Join(root, "zz_generated.rs"), "edited by hand\n")
 
@@ -94,7 +210,7 @@ func TestCheckNamesAFileEditedBeforeTheGateOnlyWhenTheBuildWritesOverIt(t *testi
 }
 
 func TestCheckSaysNothingAboutAFileEditedBeforeTheGateThatTheBuildLeavesAlone(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 
 	write(t, filepath.Join(root, "zz_generated.rs"), "edited by hand\n")
 
@@ -106,15 +222,23 @@ func TestCheckSaysNothingAboutAFileEditedBeforeTheGateThatTheBuildLeavesAlone(t 
 }
 
 func TestCheckHidesTheArtifactStoreFromTheBuildSoNoEntryCanSkip(t *testing.T) {
-	root := repoWithFakeForge(t, "test ! -e .forge/artifact-store.yaml || { echo store still there >&2; exit 1; }")
+	root := repoWithStubbedWorkspaceForge(t, "test ! -e .forge/artifact-store.yaml || { echo store still there >&2; exit 1; }")
 
 	if _, err := drift.Check(drift.Options{RootDir: root}); err != nil {
 		t.Fatalf("expected the build to find no store, got %v", err)
 	}
 }
 
+func TestCheckMovesTheArtifactStoreToASiblingSoAnInterruptedRunLeavesItOnDisk(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "test -e .forge/artifact-store.yaml.aside || { echo no sibling >&2; exit 1; }")
+
+	if _, err := drift.Check(drift.Options{RootDir: root}); err != nil {
+		t.Fatalf("expected the store to be moved to a sibling, got %v", err)
+	}
+}
+
 func TestCheckPutsTheArtifactStoreBackAfterTheBuild(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 
 	checkOK(t, root)
 
@@ -125,7 +249,7 @@ func TestCheckPutsTheArtifactStoreBackAfterTheBuild(t *testing.T) {
 }
 
 func TestCheckPutsTheArtifactStoreBackWhenTheBuildFails(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 3")
+	root := repoWithStubbedWorkspaceForge(t, "exit 3")
 
 	if _, err := drift.Check(drift.Options{RootDir: root}); err == nil {
 		t.Fatal("expected a failed build to be an error")
@@ -137,8 +261,24 @@ func TestCheckPutsTheArtifactStoreBackWhenTheBuildFails(t *testing.T) {
 	}
 }
 
+func TestCheckLeavesNoArtifactStoreWhereTheRepoHadNone(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "mkdir -p .forge && printf 'artifacts: [fresh]\\n' > .forge/artifact-store.yaml")
+
+	store := filepath.Join(root, ".forge", "artifact-store.yaml")
+
+	remove(t, store)
+
+	if _, err := drift.Check(drift.Options{RootDir: root}); err != nil {
+		t.Fatalf("checking a repo with no artifact store: %v", err)
+	}
+
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatalf("expected no store where the repo had none, got %v", err)
+	}
+}
+
 func TestCheckWrapsAFailedBuildWithTheRootDirectoryAndTheBuildOutput(t *testing.T) {
-	root := repoWithFakeForge(t, "echo hexagonal-rust exploded >&2; exit 1")
+	root := repoWithStubbedWorkspaceForge(t, "echo hexagonal-rust exploded >&2; exit 1")
 
 	_, err := drift.Check(drift.Options{RootDir: root})
 	if err == nil {
@@ -158,8 +298,25 @@ func TestCheckWrapsAFailedBuildWithTheRootDirectoryAndTheBuildOutput(t *testing.
 	}
 }
 
+func TestCheckNamesTheForgeItRanWhenTheBuildFails(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 1")
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a failed build to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "go run github.com/alexandremahdhaoui/forge/cmd/forge") {
+		t.Fatalf("expected the forge it ran in the message, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("expected the source in the message, got %v", err)
+	}
+}
+
 func TestCheckRefusesAForgeYamlThatNamesNoArtifactStorePath(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 
 	write(t, filepath.Join(root, "forge.yaml"), "name: probe\nenvFile: .envrc\n")
 
@@ -174,7 +331,7 @@ func TestCheckRefusesAForgeYamlThatNamesNoArtifactStorePath(t *testing.T) {
 }
 
 func TestCheckRefusesARootDirectoryWithNoForgeYaml(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 
 	remove(t, filepath.Join(root, "forge.yaml"))
 
@@ -199,33 +356,110 @@ func TestCheckRefusesARootDirectoryGitDoesNotKnow(t *testing.T) {
 	}
 }
 
-func TestCheckWrapsAnUnreadableArtifactStoreWithItsPath(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
-
-	store := filepath.Join(root, ".forge", "artifact-store.yaml")
-
-	remove(t, store)
-
-	if err := os.MkdirAll(store, 0o755); err != nil {
-		t.Fatalf("making %q unreadable: %v", store, err)
-	}
+func TestCheckWrapsAFailureToListTheFilesAfterTheBuild(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "rm -rf .git")
 
 	_, err := drift.Check(drift.Options{RootDir: root})
 	if err == nil {
-		t.Fatal("expected an unreadable artifact store to be refused")
+		t.Fatal("expected a build that unmakes the git repository to be an error")
 	}
 
-	if !strings.Contains(err.Error(), "reading the artifact store") {
+	if !strings.Contains(err.Error(), "listing the files git shows in") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+}
+
+func TestCheckWrapsAFileItCannotOpenToDigestWithItsPath(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
+
+	secret := filepath.Join(root, "zz_generated_secret.rs")
+
+	write(t, secret, "generated\n")
+	sealFile(t, secret)
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a file that cannot be opened to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "to digest it") {
 		t.Fatalf("expected the action in the message, got %v", err)
 	}
 
-	if !strings.Contains(err.Error(), store) {
-		t.Fatalf("expected the store path in the message, got %v", err)
+	if !strings.Contains(err.Error(), secret) {
+		t.Fatalf("expected the path in the message, got %v", err)
+	}
+}
+
+func TestCheckRefusesWhenItCannotTakeTheArtifactStoreLock(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
+
+	remove(t, filepath.Join(root, ".forge", "artifact-store.yaml.lock"))
+	sealDirectory(t, filepath.Join(root, ".forge"))
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a lock that cannot be opened to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "opening the artifact store lock") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+}
+
+func TestCheckRefusesWhenTheArtifactStoreDirectoryIsAFile(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
+
+	write(t, filepath.Join(root, "forge.yaml"), "name: probe\nartifactStorePath: blocked/store.yaml\nenvFile: .envrc\n")
+	write(t, filepath.Join(root, "blocked"), "not a directory\n")
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+	if err == nil {
+		t.Fatal("expected a store directory that is a file to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "creating the directory of the artifact store lock") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+}
+
+func TestCheckWrapsAFailureToTakeTheArtifactStoreLockAfterTheBuild(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t, "rm .forge/artifact-store.yaml.lock && chmod 500 .forge")
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+
+	unsealDirectory(t, filepath.Join(root, ".forge"))
+
+	if err == nil {
+		t.Fatal("expected a lock that cannot be reopened to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "opening the artifact store lock") {
+		t.Fatalf("expected the action in the message, got %v", err)
+	}
+}
+
+func TestCheckWrapsAnArtifactStoreItCannotRemoveWhereTheRepoHadNone(t *testing.T) {
+	root := repoWithStubbedWorkspaceForge(t,
+		"mkdir -p .forge && printf 'artifacts: [fresh]\\n' > .forge/artifact-store.yaml && chmod 500 .forge")
+
+	remove(t, filepath.Join(root, ".forge", "artifact-store.yaml"))
+
+	_, err := drift.Check(drift.Options{RootDir: root})
+
+	unsealDirectory(t, filepath.Join(root, ".forge"))
+
+	if err == nil {
+		t.Fatal("expected a store this run created and cannot remove to be an error")
+	}
+
+	if !strings.Contains(err.Error(), "removing the artifact store") {
+		t.Fatalf("expected the action in the message, got %v", err)
 	}
 }
 
 func TestCheckWrapsAnArtifactStoreItCannotMoveAsideWithItsPath(t *testing.T) {
-	root := repoWithFakeForge(t, "exit 0")
+	root := repoWithStubbedWorkspaceForge(t, "exit 0")
 	store := filepath.Join(root, ".forge", "artifact-store.yaml")
 
 	sealDirectory(t, filepath.Dir(store))
@@ -245,7 +479,7 @@ func TestCheckWrapsAnArtifactStoreItCannotMoveAsideWithItsPath(t *testing.T) {
 }
 
 func TestCheckWrapsAnArtifactStoreItCannotPutBackWithItsPath(t *testing.T) {
-	root := repoWithFakeForge(t, "chmod 500 .forge")
+	root := repoWithStubbedWorkspaceForge(t, "chmod 500 .forge")
 
 	_, err := drift.Check(drift.Options{RootDir: root})
 	if err == nil {
@@ -254,13 +488,13 @@ func TestCheckWrapsAnArtifactStoreItCannotPutBackWithItsPath(t *testing.T) {
 
 	unsealDirectory(t, filepath.Join(root, ".forge"))
 
-	if !strings.Contains(err.Error(), "restoring the artifact store of") {
+	if !strings.Contains(err.Error(), "putting the artifact store") {
 		t.Fatalf("expected the action in the message, got %v", err)
 	}
 }
 
 func TestCheckAnswersNothingWhenTheBuildOnlyRewritesTheArtifactStore(t *testing.T) {
-	root := repoWithFakeForge(t, "mkdir -p .forge && printf 'artifacts: [rebuilt]\\n' > .forge/artifact-store.yaml")
+	root := repoWithStubbedWorkspaceForge(t, "mkdir -p .forge && printf 'artifacts: [rebuilt]\\n' > .forge/artifact-store.yaml")
 
 	findings := checkOK(t, root)
 
@@ -292,7 +526,7 @@ func assertOneFinding(t *testing.T, findings []drift.Finding, path, change strin
 	}
 }
 
-func repoWithFakeForge(t *testing.T, body string) string {
+func repoWithStubbedWorkspaceForge(t *testing.T, body string) string {
 	t.Helper()
 
 	root := t.TempDir()
@@ -301,21 +535,38 @@ func repoWithFakeForge(t *testing.T, body string) string {
 	write(t, filepath.Join(root, ".gitignore"), "/.forge/\n/build/\n")
 	write(t, filepath.Join(root, "zz_generated.rs"), "generated\n")
 	write(t, filepath.Join(root, ".forge", "artifact-store.yaml"), "artifacts: []\n")
+	write(t, filepath.Join(root, ".forge", "artifact-store.yaml.lock"), "")
 
 	git(t, root, "init")
 	git(t, root, "add", "forge.yaml", ".gitignore", "zz_generated.rs")
 
-	bin := t.TempDir()
-	write(t, filepath.Join(bin, "forge"), "#!/bin/sh\n"+body+"\n")
+	stubBinaryOnPath(t, "go", body)
 
-	if err := os.Chmod(filepath.Join(bin, "forge"), 0o755); err != nil {
-		t.Fatalf("making the fake forge runnable: %v", err)
+	return root
+}
+
+func stubForgeOnPath(t *testing.T, body string) string {
+	t.Helper()
+
+	return stubBinaryOnPath(t, "forge", body)
+}
+
+func stubBinaryOnPath(t *testing.T, name, body string) string {
+	t.Helper()
+
+	bin := t.TempDir()
+	path := filepath.Join(bin, name)
+
+	write(t, path, "#!/bin/sh\n"+body+"\n")
+
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("making the stubbed %s runnable: %v", name, err)
 	}
 
 	t.Setenv("FORGE_RUN_LOCAL_ENABLED", "")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	return root
+	return path
 }
 
 func git(t *testing.T, root string, args ...string) {
@@ -368,6 +619,16 @@ func unsealDirectory(t *testing.T, path string) {
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatalf("unsealing %q: %v", path, err)
 	}
+}
+
+func sealFile(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("sealing %q: %v", path, err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 }
 
 func remove(t *testing.T, path string) {

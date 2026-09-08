@@ -311,6 +311,14 @@ decides it in `transformer/dsltojson.go`, `ExitRelationDeclaration`. The
 proto at `openfga/v1/authzmodel.proto` only declares the field on
 `RelationMetadata`.
 
+A module that extends a type it declares itself lands twice in
+`type_definitions`, once for the `type` block and once for the `extend
+type` block, both carrying this module on the type and only the second
+carrying it on the relations. A consumer that reads a relation module as
+ownership gets that case wrong. The engine refuses the shape by name, so
+nothing it emits carries it, and a consumer of arbitrary input cannot
+rely on the signal.
+
 ```json
 {
   "schema_version": "1.2",

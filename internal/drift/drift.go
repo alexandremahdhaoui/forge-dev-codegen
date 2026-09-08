@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 	"github.com/alexandremahdhaoui/forge/pkg/toolresolver"
@@ -33,7 +34,12 @@ type Finding struct {
 	Change string
 }
 
-func Check(opts Options) ([]Finding, error) {
+type Forge struct {
+	Argv   []string
+	Source string
+}
+
+func Check(opts Options) (findings []Finding, err error) {
 	root, err := absoluteRoot(opts.RootDir)
 	if err != nil {
 		return nil, err
@@ -44,19 +50,24 @@ func Check(opts Options) ([]Finding, error) {
 		return nil, err
 	}
 
+	rebuilder, err := ResolveForge(toolresolver.DepVersion(forgeModule))
+	if err != nil {
+		return nil, err
+	}
+
 	store, err := takeArtifactStore(root)
 	if err != nil {
 		return nil, err
 	}
 
-	buildErr := runForgeBuild(root)
+	defer func() {
+		if back := store.putBack(); back != nil && err == nil {
+			findings, err = nil, back
+		}
+	}()
 
-	if err := store.putBack(); err != nil {
-		return nil, fmt.Errorf("restoring the artifact store of %q: %w", root, err)
-	}
-
-	if buildErr != nil {
-		return nil, buildErr
+	if err := runForgeBuild(root, rebuilder); err != nil {
+		return nil, err
 	}
 
 	after, err := snapshot(root)
@@ -65,6 +76,64 @@ func Check(opts Options) ([]Finding, error) {
 	}
 
 	return Compare(before, after), nil
+}
+
+func ResolveForge(builtAgainst string) (Forge, error) {
+	if builtAgainst == "" {
+		return Forge{
+			Argv:   []string{"go", "run", forgeModule},
+			Source: toolresolver.SourceWorkspace,
+		}, nil
+	}
+
+	invocation, err := toolresolver.Resolver{}.Resolve(toolresolver.Ref{Name: forgeName, Module: forgeModule})
+	if err != nil {
+		return Forge{}, fmt.Errorf("resolving a forge built from %s: %w", builtAgainst, err)
+	}
+
+	candidate := Forge{
+		Argv:   append([]string{invocation.Path}, invocation.Args...),
+		Source: invocation.Source,
+	}
+
+	reported, err := askForgeItsVersion(candidate)
+	if err != nil {
+		return Forge{}, err
+	}
+
+	if trimDirty(reported) != trimDirty(builtAgainst) {
+		return Forge{}, fmt.Errorf(
+			"refusing the %s forge at %q: it reports %s and this gate was built against forge %s",
+			candidate.Source, invocation.Path, reported, builtAgainst)
+	}
+
+	return candidate, nil
+}
+
+func askForgeItsVersion(candidate Forge) (string, error) {
+	spelled := strings.Join(candidate.Argv, " ")
+
+	cmd := exec.Command(candidate.Argv[0], append(append([]string{}, candidate.Argv[1:]...), "version")...)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("asking the %s forge %q for its version: %w: %s",
+			candidate.Source, spelled, err, strings.TrimSpace(string(out)))
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == forgeName && fields[1] == "version" {
+			return fields[2], nil
+		}
+	}
+
+	return "", fmt.Errorf("the %s forge %q names no version, it answered: %s",
+		candidate.Source, spelled, strings.TrimSpace(string(out)))
+}
+
+func trimDirty(version string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(version, "-dirty"), "+dirty")
 }
 
 func Compare(before, after map[string]string) []Finding {
@@ -106,8 +175,9 @@ func absoluteRoot(rootDir string) (string, error) {
 }
 
 type savedStore struct {
-	path    string
-	content []byte
+	path  string
+	aside string
+	taken bool
 }
 
 func takeArtifactStore(root string) (savedStore, error) {
@@ -121,47 +191,83 @@ func takeArtifactStore(root string) (savedStore, error) {
 		path = filepath.Join(root, path)
 	}
 
-	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return savedStore{path: path}, nil
-	}
+	saved := savedStore{path: path, aside: path + ".aside"}
 
+	unlock, err := lockArtifactStore(path)
 	if err != nil {
-		return savedStore{}, fmt.Errorf("reading the artifact store %q: %w", path, err)
+		return savedStore{}, err
 	}
 
-	if err := os.Remove(path); err != nil {
-		return savedStore{}, fmt.Errorf("moving the artifact store %q aside: %w", path, err)
+	defer unlock()
+
+	if err := os.Rename(path, saved.aside); err != nil {
+		if os.IsNotExist(err) {
+			return saved, nil
+		}
+
+		return savedStore{}, fmt.Errorf("moving the artifact store %q aside to %q: %w", path, saved.aside, err)
 	}
 
-	return savedStore{path: path, content: content}, nil
+	saved.taken = true
+
+	return saved, nil
 }
 
 func (s savedStore) putBack() error {
-	if s.content == nil {
+	unlock, err := lockArtifactStore(s.path)
+	if err != nil {
+		return err
+	}
+
+	defer unlock()
+
+	if !s.taken {
+		if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing the artifact store %q this run created: %w", s.path, err)
+		}
+
 		return nil
 	}
 
-	if err := os.WriteFile(s.path, s.content, 0o600); err != nil {
-		return fmt.Errorf("writing the artifact store %q back: %w", s.path, err)
+	if err := os.Rename(s.aside, s.path); err != nil {
+		return fmt.Errorf("putting the artifact store %q back from %q: %w", s.path, s.aside, err)
 	}
 
 	return nil
 }
 
-func runForgeBuild(root string) error {
-	invocation, err := toolresolver.Resolver{}.Resolve(toolresolver.Ref{Name: forgeName, Module: forgeModule})
-	if err != nil {
-		return fmt.Errorf("resolving the forge that rebuilds %q: %w", root, err)
+func lockArtifactStore(path string) (func(), error) {
+	lockPath := path + ".lock"
+
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("creating the directory of the artifact store lock %q: %w", lockPath, err)
 	}
 
-	cmd := exec.Command(invocation.Path, append(append([]string{}, invocation.Args...), "build")...)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening the artifact store lock %q: %w", lockPath, err)
+	}
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+
+		return nil, fmt.Errorf("taking the artifact store lock %q: %w", lockPath, err)
+	}
+
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
+}
+
+func runForgeBuild(root string, rebuilder Forge) error {
+	cmd := exec.Command(rebuilder.Argv[0], append(append([]string{}, rebuilder.Argv[1:]...), "build")...)
 	cmd.Dir = root
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("running forge build in %q with the %s forge: %w: %s",
-			root, invocation.Source, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("running forge build in %q with the %s forge %q: %w: %s",
+			root, rebuilder.Source, strings.Join(rebuilder.Argv, " "), err, strings.TrimSpace(string(out)))
 	}
 
 	return nil
