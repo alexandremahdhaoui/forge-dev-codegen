@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
@@ -31,6 +32,8 @@ type view struct {
 	Header           string
 	Crate            string
 	RestCell         string
+	HasRest          bool
+	HasRefusedCalls  bool
 	Auth             bool
 	HasStream        bool
 	Controllers      []controllerView
@@ -185,6 +188,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 		Header:    header,
 		Crate:     rustname.Snake(opts.Service),
 		RestCell:  opts.RestCell,
+		HasRest:   len(spec.Controllers) > 0,
 		Auth:      spec.Auth,
 		DrawIdent: drawIdent,
 	}
@@ -284,6 +288,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 			}
 
 			v.CallTests = append(v.CallTests, tv)
+			v.HasRefusedCalls = v.HasRefusedCalls || tv.Refused
 		}
 	}
 
@@ -294,20 +299,17 @@ type armKind int
 
 const (
 	armKindOK armKind = iota
-	armKindNotFound
-	armKindInvalid
-	armKindNotImplemented
+	armKindTaxonomy
 	armKindUnauthenticated
-	armKindAuthentication
-	armKindAuthorization
-	armKindSemantic
-	armKindRateLimited
 	armKindMissingQuery
 )
 
+const unauthenticatedName = "Unauthenticated"
+
 type arm struct {
-	kind armKind
-	id   string
+	kind   armKind
+	member taxonomy.Member
+	id     string
 }
 
 func chooseArm(c VectorCase, op restrust.Operation, missingQuery []string) (arm, error) {
@@ -335,34 +337,86 @@ func chooseArm(c VectorCase, op restrust.Operation, missingQuery []string) (arm,
 	}
 
 	if isOK {
+		if c.ExpectedError != "" {
+			return arm{}, fmt.Errorf("reading vector %q: it carries controllerReply and expectedError %q, a case answers a reply or an error, never both", c.Case, c.ExpectedError)
+		}
+
 		return arm{kind: armKindOK}, nil
 	}
 
+	if c.ExpectedError != "" {
+		return namedArm(c, op)
+	}
+
 	if c.ExpectedStatus == 401 && op.Auth {
+		return arm{}, fmt.Errorf(
+			"reading vector %q: expectedStatus 401 on the x-auth operation %q means either the ticket verifier refuses the bearer or the %s controller answers Authentication, name one in expectedError: %s or Authentication",
+			c.Case, op.ID, op.Controller, unauthenticatedName,
+		)
+	}
+
+	member, ok := memberForStatus(c.ExpectedStatus, op.InvalidStatus)
+	if !ok {
+		return arm{}, fmt.Errorf(
+			"reading vector %q: expectedStatus %d matches no taxonomy member, the members are %s, and Invalid reads %d on %q, name the member in expectedError or fix the status",
+			c.Case, c.ExpectedStatus, taxonomy.RestStatusList(), op.InvalidStatus, op.ID,
+		)
+	}
+
+	return arm{kind: armKindTaxonomy, member: member, id: c.ExpectedErrorSubstring}, nil
+}
+
+func memberForStatus(status, invalidStatus int) (taxonomy.Member, bool) {
+	for _, m := range taxonomy.Detailed("") {
+		if m.RestStatus == 0 && status == invalidStatus {
+			return m, true
+		}
+
+		if m.RestStatus != 0 && m.RestStatus == status {
+			return m, true
+		}
+	}
+
+	return taxonomy.Member{}, false
+}
+
+func restStatusOf(m taxonomy.Member, invalidStatus int) int {
+	if m.RestStatus == 0 {
+		return invalidStatus
+	}
+
+	return m.RestStatus
+}
+
+func namedArm(c VectorCase, op restrust.Operation) (arm, error) {
+	if c.ExpectedError == unauthenticatedName {
+		if !op.Auth {
+			return arm{}, fmt.Errorf("reading vector %q: expectedError %s means the ticket verifier refuses the bearer, and %q carries no x-auth", c.Case, unauthenticatedName, op.ID)
+		}
+
+		if c.ExpectedStatus != 401 {
+			return arm{}, fmt.Errorf("reading vector %q: expectedError %s answers 401 and expectedStatus is %d", c.Case, unauthenticatedName, c.ExpectedStatus)
+		}
+
 		return arm{kind: armKindUnauthenticated, id: c.ExpectedErrorSubstring}, nil
 	}
 
-	switch c.ExpectedStatus {
-	case 401:
-		return arm{kind: armKindAuthentication, id: c.ExpectedErrorSubstring}, nil
-	case 403:
-		return arm{kind: armKindAuthorization, id: c.ExpectedErrorSubstring}, nil
-	case 404:
-		return arm{kind: armKindNotFound, id: c.ExpectedErrorSubstring}, nil
-	case op.InvalidStatus:
-		return arm{kind: armKindInvalid, id: c.ExpectedErrorSubstring}, nil
-	case 409:
-		return arm{kind: armKindSemantic, id: c.ExpectedErrorSubstring}, nil
-	case 429:
-		return arm{kind: armKindRateLimited, id: c.ExpectedErrorSubstring}, nil
-	case 501:
-		return arm{kind: armKindNotImplemented, id: c.ExpectedErrorSubstring}, nil
-	default:
+	member, ok := taxonomy.ByVariant(c.ExpectedError)
+	if !ok || member.Variant == "Runtime" {
 		return arm{}, fmt.Errorf(
-			"reading vector %q: expectedStatus %d matches none of Authentication (401), Authorization (403), NotFound (404), Invalid (%d), Semantic (409), RateLimited (429), NotImplemented (501) or a refused bearer on an x-auth operation (401), vectors-rust cannot choose which controller error to mock",
-			c.Case, c.ExpectedStatus, op.InvalidStatus,
+			"reading vector %q: expectedError %q names no member a controller answers, the members are %s and %s",
+			c.Case, c.ExpectedError, strings.Join(taxonomy.DetailedVariantNames(), ", "), unauthenticatedName,
 		)
 	}
+
+	if want := restStatusOf(member, op.InvalidStatus); want != c.ExpectedStatus {
+		return arm{}, fmt.Errorf(
+			"reading vector %q: expectedError %s answers %d on %q and expectedStatus is %d",
+			c.Case, member.Variant, want, op.ID, c.ExpectedStatus,
+		)
+	}
+
+	return arm{kind: armKindTaxonomy, member: member, id: c.ExpectedErrorSubstring}, nil
 }
 
 func checkBearer(c VectorCase, op restrust.Operation) error {
@@ -689,20 +743,8 @@ func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.C
 		return "Ok(" + decoded + ")", nil
 	case armKindUnauthenticated, armKindMissingQuery:
 		return "", nil
-	case armKindAuthentication:
-		return fmt.Sprintf("Err(%sControllerError::Authentication { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindAuthorization:
-		return fmt.Sprintf("Err(%sControllerError::Authorization { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindNotFound:
-		return fmt.Sprintf("Err(%sControllerError::NotFound { id: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindInvalid:
-		return fmt.Sprintf("Err(%sControllerError::Invalid { field: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindSemantic:
-		return fmt.Sprintf("Err(%sControllerError::Semantic { resource: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindRateLimited:
-		return fmt.Sprintf("Err(%sControllerError::RateLimited { subject: %s.to_string(), reason: \"generated by vectors-rust\".to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
-	case armKindNotImplemented:
-		return fmt.Sprintf("Err(%sControllerError::NotImplemented { operation: %s.to_string() })", owner.Pascal, strconv.Quote(a.id)), nil
+	case armKindTaxonomy:
+		return "Err(" + a.member.Literal(owner.Pascal+"ControllerError", a.id, taxonomy.VectorFiller) + ")", nil
 	default:
 		return "", fmt.Errorf("choosing a mock arm: unhandled kind %v", a.kind)
 	}

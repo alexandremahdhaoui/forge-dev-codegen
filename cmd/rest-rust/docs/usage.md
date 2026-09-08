@@ -231,6 +231,14 @@ stderr.
 | `RateLimited` | 429 | `rateLimiting` |
 | `NotImplemented` | 501 | `runtime` |
 
+The table is not written in this engine. `internal/taxonomy` owns the
+members, the variant fields, the display string, the wire type, the REST
+status, the gRPC status and the rule that only a runtime failure hides its
+message. rest-rust renders the controller enum, the driver mapping, the
+client enum and the client's reverse mapping from it, grpc-rust-tonic
+renders its enum and its status mapping from it, and vectors-rust arms its
+mocks from it. A ninth member is one edit in one file.
+
 ## The adapters
 
 `<Store>SqliteStore::new` takes `<Store>SqliteStoreConfig`, whose only

@@ -362,7 +362,7 @@ func buildSessionCargoWorkspace(t *testing.T) (string, string) {
 		t.Fatalf("generating the udp cell: %v", err)
 	}
 
-	restCases := cargoVectors[:strings.LastIndex(cargoVectors, "}\n  ]")+1]
+	restCases := "{\n  \"cases\": [\n" + cargoRestCases
 
 	vectorFiles, err := vectorsrust.Generate([]byte(cargoSpec), []byte(restCases+","+sessionUdpCases+"\n  ]\n}"), sessionOptions())
 	if err != nil {

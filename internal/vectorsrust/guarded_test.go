@@ -115,6 +115,7 @@ const guardedVectors = `{
       "operation": "countGreeting",
       "input": { "id": "g1" },
       "expectedStatus": 401,
+      "expectedError": "Unauthenticated",
       "expectedErrorSubstring": "bearer"
     },
     {
@@ -123,7 +124,18 @@ const guardedVectors = `{
       "input": { "id": "g1" },
       "bearer": "wrong",
       "expectedStatus": 401,
+      "expectedError": "Unauthenticated",
       "expectedErrorSubstring": "refused"
+    },
+    {
+      "case": "counting_for_a_subject_the_controller_refuses_answers_authentication",
+      "operation": "countGreeting",
+      "input": { "id": "g1" },
+      "bearer": "open",
+      "subject": "expired",
+      "expectedStatus": 401,
+      "expectedError": "Authentication",
+      "expectedErrorSubstring": "expired"
     },
     {
       "case": "streaming_with_a_valid_ticket_answers_the_first_event",

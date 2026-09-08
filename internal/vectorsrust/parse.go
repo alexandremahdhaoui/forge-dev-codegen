@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 type VectorsFile struct {
@@ -33,6 +34,7 @@ type VectorCase struct {
 	ControllerReply        json.RawMessage `json:"controllerReply"`
 	ExpectedStatus         int             `json:"expectedStatus"`
 	ExpectedBody           json.RawMessage `json:"expectedBody"`
+	ExpectedError          string          `json:"expectedError"`
 	ExpectedErrorSubstring string          `json:"expectedErrorSubstring"`
 	Bearer                 string          `json:"bearer"`
 	Subject                string          `json:"subject"`
@@ -61,6 +63,7 @@ type declared struct {
 	operation func(string) bool
 	datagram  func(string) bool
 	grpc      func(string) bool
+	surfaces  []string
 	rng       *rngPort
 }
 
@@ -153,7 +156,7 @@ func parseVectors(doc []byte, d declared) (*VectorsFile, error) {
 		}
 
 		if !d.operation(c.Operation) {
-			return nil, fmt.Errorf("reading vector %q: operation %q names no operationId of the OpenAPI document, no udp_<rpc> of the datagram service and no grpc_<Rpc> of the grpc service", c.Case, c.Operation)
+			return nil, fmt.Errorf("reading vector %q: operation %q names nothing the cell declares, the cell declares %s", c.Case, c.Operation, strings.Join(d.surfaces, ", "))
 		}
 
 		if c.ExpectedStatus == 0 {
@@ -175,12 +178,16 @@ func parseVectors(doc []byte, d declared) (*VectorsFile, error) {
 }
 
 func checkCall(c VectorCase) error {
-	if len(c.ControllerReply) == 0 && c.ExpectedErrorSubstring == "" {
-		return fmt.Errorf("reading vector %q: a grpc case needs controllerReply, the reply the mocked controller answers, or expectedErrorSubstring, the text the status carries", c.Case)
+	if len(c.ControllerReply) == 0 && c.ExpectedError == "" {
+		return fmt.Errorf("reading vector %q: a grpc case needs controllerReply, the reply the mocked controller answers, or expectedError, the taxonomy member the controller answers and the status code it maps to", c.Case)
+	}
+
+	if len(c.ControllerReply) > 0 && c.ExpectedError != "" {
+		return fmt.Errorf("reading vector %q: a grpc case answers a reply or an error, never both, drop controllerReply or expectedError", c.Case)
 	}
 
 	if len(c.ControllerReply) > 0 && c.ExpectedErrorSubstring != "" {
-		return fmt.Errorf("reading vector %q: a grpc case answers a reply or a status, never both, drop controllerReply or expectedErrorSubstring", c.Case)
+		return fmt.Errorf("reading vector %q: a grpc case answers a reply or an error, never both, drop controllerReply or expectedErrorSubstring", c.Case)
 	}
 
 	if c.ExpectedStatus != 0 {

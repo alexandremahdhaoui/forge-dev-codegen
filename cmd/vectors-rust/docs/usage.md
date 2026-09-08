@@ -1,9 +1,25 @@
 # vectors-rust
 
 A forge-dev generator that turns declared behavior into rust integration
-tests. It reads an OpenAPI document and a vectors document and answers one
-file, `app/tests/zz_generated_vectors.rs`, holding one async tokio test per
-vector case.
+tests. It reads the transports a service declares and a vectors document,
+and answers one file, `app/tests/zz_generated_vectors.rs`, holding one
+async tokio test per vector case.
+
+## A service declares the transports it carries
+
+Three surfaces, each optional and each read only when the cell declares it.
+
+| Surface | Declared by | Case prefix |
+|---|---|---|
+| REST | `openapi.specPath` | the `operationId` |
+| UDP | `proto.specPath` | `udp_` |
+| gRPC | `layout.grpcProto` | `grpc_` |
+
+An absent OpenAPI document means the service carries no REST, and the
+emitted file holds no axum import. The same holds for an absent datagram
+proto and an absent grpc proto. A cell declaring none of the three is
+refused by name, because a vectors cell with nothing to drive is a
+mistake.
 
 forge-dev never writes outside the engine directory. So the app crate holds
 its own cell at its root.
@@ -60,9 +76,11 @@ to `app`. It may sit at the top level of the model or under `layout`.
 | `controllerReply` | Present on a success case. The controller mock returns it, decoded into the operation's core response type. |
 | `expectedStatus` | The HTTP status the driver must answer. |
 | `expectedBody` | Present on a success case. Compared to the response body as JSON, so field order never matters. |
+| `expectedError` | Names the taxonomy member the controller answers, or `Unauthenticated` for the driver's own bearer refusal. Required where `expectedStatus` alone is ambiguous, optional elsewhere, and checked against `expectedStatus` when both are present. |
 | `expectedErrorSubstring` | Present on an error case. The controller mock is armed to fail, and the response body's `message` field must contain this text. |
 
-A case needs `controllerReply` or `expectedErrorSubstring`, never neither.
+A case needs `controllerReply` or `expectedErrorSubstring`, never neither. A
+case carrying `controllerReply` and `expectedError` is refused.
 
 ## Guarded cases
 
@@ -74,11 +92,20 @@ An operation marked `x-auth: bearer` takes two more fields.
 | `subject` | The subject id the mocked `TicketVerifier` answers for `bearer`. Absent with a `bearer` means the verifier refuses it. |
 
 A success case on a guarded operation needs both. The mocked controller
-then expects `Subject { id: subject }` as its first argument. A 401 case
-carries `expectedErrorSubstring` and no `controllerReply`. The refusal
-the mocked verifier answers embeds that substring, and the missing header
-message names the bearer. The controller is armed with `never()`. Both
-fields are refused on an operation without `x-auth`.
+then expects `Subject { id: subject }` as its first argument. Both fields
+are refused on an operation without `x-auth`.
+
+A 401 on a guarded operation has two meanings, so the case says which in
+`expectedError`.
+
+| `expectedError` | What the test drives |
+|---|---|
+| `Unauthenticated` | The mocked verifier refuses the bearer. Its refusal embeds `expectedErrorSubstring`. The controller is armed `never`. |
+| `Authentication` | The verifier answers `subject` and the mocked controller answers `Authentication`. |
+
+A 401 on a guarded operation without `expectedError` is refused and names
+both choices. `Unauthenticated` on an operation without `x-auth` is refused
+too.
 
 ```json
 {
@@ -133,24 +160,31 @@ layout:
 `input` carries the request message fields plus a `sessionId` of exactly 16
 bytes, the one the client stamps on every datagram. `controllerReply` is
 what the mocked controller answers. `expectedBody` is what the client reads
-back. A key neither message declares is ignored, so `sessionId` may sit in
-both.
+back.
+
+A case spells a field the way the proto spells it. `character_id`, never
+`characterId`. A key no message declares is refused by name, and the
+refusal lists the fields the message does declare. `sessionId` is the one
+exception, because the frame carries it in both directions and no message
+holds it.
+
+A field holding a message reads a nested object. It becomes `Some(...)`.
+An absent one becomes `None`, which is what prost emits for an unset
+message field. A field holding `bytes` is refused by name. The proto
+parser refuses a message that reaches itself before any vector reads it.
 
 The engine folds every method name the way udp-rust does and refuses two
-rpcs that fold to one byte. A datagram vector reads strings, numbers and
-booleans only.
+rpcs that fold to one byte.
 
-An operation the engine cannot map is refused by name. Naming a `udp_` case
-without a `proto:`, a `grpc_` case without a `grpcProto:`, or an
-`operationId` the OpenAPI document never declares fails the build and names
-the case and the operation. There is no skip.
+An operation the engine cannot map is refused by name, and the refusal
+lists the surfaces the cell declares. There is no skip.
 
-An error case is armed by matching `expectedStatus` against the taxonomy the
-rest driver maps.
+An error case names its taxonomy member in `expectedError`, or lets
+`expectedStatus` name it where the status is unambiguous.
 
-| `expectedStatus` | Armed controller error | Field carrying the substring |
+| `expectedStatus` | Taxonomy member | Field carrying the substring |
 |---|---|---|
-| 401 on an `x-auth` operation | none, the mocked verifier refuses and the controller is armed `never` | the refusal |
+| 401 on an `x-auth` operation | ambiguous, name `Unauthenticated` or `Authentication` | the refusal, or `subject` |
 | 401 on any other operation | `Authentication` | `subject` |
 | 403 | `Authorization` | `subject` |
 | 404 | `NotFound` | `id` |
@@ -159,12 +193,18 @@ rest driver maps.
 | 429 | `RateLimited` | `subject` |
 | 501 | `NotImplemented` | `operation` |
 
+The table is not written here. It is read from `internal/taxonomy`, the one
+package that owns the members, the wire type string, the REST status, the
+gRPC status and the rule that a runtime failure answers a generic message.
+rest-rust, grpc-rust-tonic and vectors-rust all read it, so a ninth member
+is one edit.
+
 Anything else is refused by name. Because the engine has no business
 knowledge beyond the spec, it embeds `expectedErrorSubstring` itself into
-the chosen error's identifier field, so the constructed message is
-guaranteed to contain it wherever the driver's rejection text includes that
-field. It cannot cover the `500` reply, whose body is a fixed "internal
-error" text set by the driver, not by the controller error's message.
+the chosen member's first field, so the constructed message is guaranteed
+to contain it wherever the driver's rejection text includes that field. It
+cannot cover the `500` reply, whose body is a fixed "internal error" text
+set by the driver, not by the controller error's message.
 
 ## Query parameters
 
@@ -325,9 +365,38 @@ layout:
 
 `operation` spells the rpc as the proto does, after `grpc_`.
 `controllerReply` is what the mocked controller answers and what the client
-must read back. An error case carries `expectedErrorSubstring` instead, the
-mock answers `Invalid` with that text in its field, and the test asserts the
-status message the client reads carries it. A grpc case carries no
+must read back.
+
+A refusal case carries `expectedError` instead, naming the taxonomy member
+the controller answers. The mock answers that member and the test asserts
+the `tonic::Code` the taxonomy maps it to, walking the client error chain
+for the `tonic::Status`. Remap a member to a different code and the test
+fails.
+
+```json
+{
+  "case": "grpc_ping_with_an_empty_message_is_refused",
+  "operation": "grpc_Ping",
+  "input": { "message": "", "count": 0 },
+  "expectedError": "Invalid",
+  "expectedErrorSubstring": "message"
+}
+```
+
+| `expectedError` | Asserted code |
+|---|---|
+| `Authentication` | `Unauthenticated` |
+| `Authorization` | `PermissionDenied` |
+| `NotFound` | `NotFound` |
+| `Invalid` | `InvalidArgument` |
+| `Semantic` | `FailedPrecondition` |
+| `RateLimited` | `ResourceExhausted` |
+| `NotImplemented` | `Unimplemented` |
+
+`expectedErrorSubstring` stays optional beside it and pins the text the
+status carries. `Runtime` is refused, because the driver hides a runtime
+failure behind a generic message and no substring can pin it. A member the
+taxonomy does not declare is refused with the list. A grpc case carries no
 `expectedStatus` and no `expectedBody`, both are refused. The test runs on a
 multi thread runtime because the generated client blocks inside tokio.
 

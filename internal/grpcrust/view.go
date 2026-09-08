@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
@@ -75,6 +76,8 @@ type serviceView struct {
 	Rpcs             []rpcView
 	TraitTypes       []string
 	AllTypes         []string
+	Runtime          taxonomy.Member
+	Taxonomy         []taxonomy.Member
 }
 
 func ScalarRustType(kind string) string {
@@ -238,6 +241,8 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		ControllerError:  rustname.Pascal(svc.Name) + "ControllerError",
 		PbClientMod:      rustname.Snake(svc.Name) + "_client",
 		PbServerMod:      rustname.Snake(svc.Name) + "_server",
+		Runtime:          taxonomy.Runtime(rustname.Snake(svc.Name)),
+		Taxonomy:         taxonomy.Detailed(rustname.Snake(svc.Name)),
 	}
 
 	for _, m := range messages {

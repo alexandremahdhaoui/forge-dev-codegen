@@ -187,9 +187,7 @@ components:
           type: integer
 `
 
-const cargoVectors = `{
-  "cases": [
-    {
+const cargoRestCases = `    {
       "case": "creating_a_greeting_succeeds",
       "operation": "createGreeting",
       "input": { "name": "Songe" },
@@ -218,14 +216,20 @@ const cargoVectors = `{
       "input": { "id": "missing" },
       "expectedStatus": 404,
       "expectedErrorSubstring": "not found"
-    },
-    {
+    }`
+
+const cargoDatagramCases = `    {
       "case": "a_datagram_echo_comes_back_with_the_count_raised_by_one",
       "operation": "udp_echo",
       "input": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 7 },
       "controllerReply": { "payload": "songe", "count": 8 },
       "expectedBody": { "sessionId": "0123456789abcdef", "payload": "songe", "count": 8 }
-    }
+    }`
+
+const cargoVectors = `{
+  "cases": [
+` + cargoRestCases + `,
+` + cargoDatagramCases + `
   ]
 }`
 

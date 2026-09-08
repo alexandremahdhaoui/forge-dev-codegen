@@ -83,6 +83,14 @@ Only `Runtime` hides its message. Every other arm sends
 `error.to_string()` as the status message, so the caller reads what it
 did wrong.
 
+The table is not written in this engine. `internal/taxonomy` owns the
+members, the variant fields, the display string, the wire type, the REST
+status, the gRPC status and the generic rule. rest-rust, grpc-rust-tonic
+and vectors-rust all render from it, so this cell and the rest cell cannot
+drift. A vectors case names a member in `expectedError` and the generated
+test asserts the `tonic::Code` this table maps it to, so remapping an arm
+fails a vector.
+
 ## Where the prost types live
 
 `zz_generated_build.rs` compiles the proto with `protox`, a pure

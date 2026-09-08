@@ -577,23 +577,17 @@ use {{ $.CratePath }}types::{{ .Snake }}::{{ .Name }};
 {{ end }}
 #[derive(Debug, thiserror::Error)]
 pub enum {{ $c.Error }} {
-    #[error("calling {operation:?}: {message}")]
-    Runtime {
+    #[error("{{ $c.WireRuntime.Display }}")]
+    {{ $c.WireRuntime.Variant }} {
         operation: String,
         message: String,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
-    #[error("calling {operation:?}: authentication refused: {message}")]
-    Authentication { operation: String, message: String },
-    #[error("calling {operation:?}: authorization refused: {message}")]
-    Authorization { operation: String, message: String },
-    #[error("calling {operation:?}: validation failed: {message}")]
-    Validation { operation: String, message: String },
-    #[error("calling {operation:?}: {message}")]
-    Semantic { operation: String, message: String },
-    #[error("calling {operation:?}: rate limited: {message}")]
-    RateLimiting { operation: String, message: String },
+{{- range $c.WireTaxonomy }}
+    #[error("{{ .Display }}")]
+    {{ .Variant }} { operation: String, message: String },
+{{- end }}
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -628,20 +622,10 @@ pub enum {{ $c.Pascal }}ControllerError {
         source: {{ .Port }}Error,
     },
 {{- end }}
-    #[error("authenticating {subject:?}: {reason}")]
-    Authentication { subject: String, reason: String },
-    #[error("authorizing {subject:?}: {reason}")]
-    Authorization { subject: String, reason: String },
-    #[error("finding {{ $c.Snake }} {id:?}: not found")]
-    NotFound { id: String },
-    #[error("validating {field:?}: {reason}")]
-    Invalid { field: String, reason: String },
-    #[error("reconciling {resource:?}: {reason}")]
-    Semantic { resource: String, reason: String },
-    #[error("rate limiting {subject:?}: {reason}")]
-    RateLimited { subject: String, reason: String },
-    #[error("running {operation:?}: not implemented")]
-    NotImplemented { operation: String },
+{{- range $c.Taxonomy }}
+    #[error("{{ .Display }}")]
+    {{ .Variant }} { {{ .FieldList }} },
+{{- end }}
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -1149,13 +1133,9 @@ fn reject_{{ $c.Snake }}(error: {{ $c.Pascal }}ControllerError, invalid: StatusC
             reject(StatusCode::INTERNAL_SERVER_ERROR, "runtime", "internal error".to_string())
         }
 {{- end }}
-        {{ $c.Pascal }}ControllerError::Authentication { .. } => reject(StatusCode::UNAUTHORIZED, "authentication", error.to_string()),
-        {{ $c.Pascal }}ControllerError::Authorization { .. } => reject(StatusCode::FORBIDDEN, "authorization", error.to_string()),
-        {{ $c.Pascal }}ControllerError::NotFound { .. } => reject(StatusCode::NOT_FOUND, "semantic", error.to_string()),
-        {{ $c.Pascal }}ControllerError::Invalid { .. } => reject(invalid, "validation", error.to_string()),
-        {{ $c.Pascal }}ControllerError::Semantic { .. } => reject(StatusCode::CONFLICT, "semantic", error.to_string()),
-        {{ $c.Pascal }}ControllerError::RateLimited { .. } => reject(StatusCode::TOO_MANY_REQUESTS, "rateLimiting", error.to_string()),
-        {{ $c.Pascal }}ControllerError::NotImplemented { .. } => reject(StatusCode::NOT_IMPLEMENTED, "runtime", error.to_string()),
+{{- range $c.Taxonomy }}
+        {{ $c.Pascal }}ControllerError::{{ .Variant }} { .. } => reject({{ .RestStatusExpr }}, "{{ .Wire }}", {{ .DetailExpr }}),
+{{- end }}
     }
 }
 {{ end }}
@@ -1336,12 +1316,10 @@ async fn rejection(operation: &str, response: reqwest::Response) -> {{ $c.Error 
     };
 
     match wire.r#type.as_str() {
-        "authentication" => {{ $c.Error }}::Authentication { operation, message: wire.message },
-        "authorization" => {{ $c.Error }}::Authorization { operation, message: wire.message },
-        "validation" => {{ $c.Error }}::Validation { operation, message: wire.message },
-        "semantic" => {{ $c.Error }}::Semantic { operation, message: wire.message },
-        "rateLimiting" => {{ $c.Error }}::RateLimiting { operation, message: wire.message },
-        "runtime" => {{ $c.Error }}::Runtime {
+{{- range $c.WireTaxonomy }}
+        "{{ .Type }}" => {{ $c.Error }}::{{ .Variant }} { operation, message: wire.message },
+{{- end }}
+        "{{ $c.WireRuntime.Type }}" => {{ $c.Error }}::{{ $c.WireRuntime.Variant }} {
             operation,
             message: wire.message,
             source: None,

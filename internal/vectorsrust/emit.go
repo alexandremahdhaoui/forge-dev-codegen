@@ -67,6 +67,42 @@ type File struct {
 	Content string
 }
 
+func readRestSpec(openapiDoc []byte) (*restrust.Spec, error) {
+	if len(bytes.TrimSpace(openapiDoc)) == 0 {
+		return &restrust.Spec{}, nil
+	}
+
+	return restrust.Parse(openapiDoc)
+}
+
+func surfaceNames(spec *restrust.Spec, datagrams *datagramService, calls *callService) []string {
+	out := []string{}
+
+	if len(spec.Controllers) > 0 {
+		out = append(out, "the operationIds of the OpenAPI document")
+	}
+
+	if datagrams != nil {
+		out = append(out, "the udp_<rpc> names of "+datagrams.Pascal)
+	}
+
+	if calls != nil {
+		out = append(out, "the grpc_<Rpc> names of "+calls.Pascal)
+	}
+
+	return out
+}
+
+func checkSurfaces(spec *restrust.Spec, datagrams *datagramService, calls *callService) error {
+	if len(spec.Controllers) > 0 || datagrams != nil || calls != nil {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"emitting the vectors: the cell declares no surface to drive, name an OpenAPI document under openapi.specPath, a datagram proto under proto.specPath or a grpc proto under layout.grpcProto",
+	)
+}
+
 var serviceIdent = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
@@ -94,7 +130,7 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		return nil, err
 	}
 
-	spec, err := restrust.Parse(openapiDoc)
+	spec, err := readRestSpec(openapiDoc)
 	if err != nil {
 		return nil, err
 	}
@@ -109,10 +145,15 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 		return nil, err
 	}
 
+	if err := checkSurfaces(spec, datagrams, calls); err != nil {
+		return nil, err
+	}
+
 	vectors, err := parseVectors(vectorsDoc, declared{
 		operation: declaredOperations(spec),
 		datagram:  declaredDatagrams(datagrams),
 		grpc:      declaredCalls(calls),
+		surfaces:  surfaceNames(spec, datagrams, calls),
 		rng:       opts.Rng,
 	})
 	if err != nil {
@@ -185,7 +226,7 @@ func render(name string, data any) (string, error) {
 var templates = template.Must(template.New("vectorsrust").Parse(`
 {{- define "file" -}}
 {{ .Header }}
-
+{{ if .HasRest }}
 use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
@@ -201,7 +242,7 @@ use {{ .Crate }}::types::subject::Subject;
 {{ end -}}
 {{ range .TypeImports -}}
 use {{ $.Crate }}::{{ $.RestCell }}::types::{{ .Snake }}::{{ .Name }};
-{{ end }}
+{{ end }}{{ end }}
 {{- if .HasDatagrams }}
 {{- if .HasPush }}
 use {{ .Crate }}::{{ .Datagram.Cell }}::adapter::{{ .Datagram.Snake }}_udp_broadcast::{{ "{" }}{{ .Datagram.BroadcastStruct }}, {{ .Datagram.BroadcastConfig }}{{ "}" }};
@@ -253,6 +294,21 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     }
 
     parts.join(": ")
+}
+{{ end }}
+{{- if .HasRefusedCalls }}
+fn grpc_code(error: &(dyn std::error::Error + 'static)) -> tonic::Code {
+    let mut current = Some(error);
+
+    while let Some(node) = current {
+        if let Some(status) = node.downcast_ref::<tonic::Status>() {
+            return status.code();
+        }
+
+        current = node.source();
+    }
+
+    panic!("the error chain carries no tonic status: {}", error_chain(error));
 }
 {{ end }}
 {{- if .NeedsBodyMatcher }}
@@ -838,7 +894,7 @@ async fn {{ .Name }}() {
 #[tokio::test(flavor = "multi_thread")]
 async fn {{ .Name }}() {
     let expected_request = {{ .RequestLiteral }};
-{{- if not .HasExpectedSubstring }}
+{{- if not .Refused }}
     let controller_reply = {{ .ReplyLiteral }};
 {{- end }}
 
@@ -873,14 +929,22 @@ async fn {{ .Name }}() {
         endpoint: format!("http://127.0.0.1:{port}"),
     })
     .expect("a grpc client");
-{{ if .HasExpectedSubstring }}
+{{ if .Refused }}
     let error = client
         .{{ .ClientMethod }}({{ .RequestLiteral }})
         .expect_err("a refused call");
 
     let chain = error_chain(&error);
 
+    assert_eq!(
+        grpc_code(&error),
+        tonic::Code::{{ .ExpectedCode }},
+        "{{ .ExpectedMember }} maps to tonic::Code::{{ .ExpectedCode }}, the status carried {chain:?}"
+    );
+{{- if .HasExpectedSubstring }}
+
     assert!(chain.contains({{ .ExpectedSubstringLiteral }}), "status {chain:?} lacks {:?}", {{ .ExpectedSubstringLiteral }});
+{{- end }}
 {{- else }}
     let reply = client
         .{{ .ClientMethod }}({{ .RequestLiteral }})

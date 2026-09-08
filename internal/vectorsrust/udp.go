@@ -77,6 +77,11 @@ type datagramService struct {
 	Session     bool
 	Hello       datagramRpc
 	Rpcs        map[string]datagramRpc
+	Messages    map[string]grpcrust.Message
+}
+
+func (s *datagramService) scope() scope {
+	return scope{messages: s.Messages, reserved: []string{sessionIDField}}
 }
 
 type datagramMockOp struct {
@@ -187,6 +192,7 @@ func readDatagramService(proto []byte, cell, hello string, push []string) (*data
 		ClientTrait: rustname.Pascal(svc.Name) + "Client",
 		Session:     hello != "",
 		Rpcs:        rpcs,
+		Messages:    messagesByName(spec),
 	}
 
 	for _, r := range svc.Rpcs {
@@ -265,6 +271,15 @@ func contains(names []string, name string) bool {
 	}
 
 	return false
+}
+
+func messagesByName(spec *grpcrust.Spec) map[string]grpcrust.Message {
+	out := map[string]grpcrust.Message{}
+	for _, m := range spec.Messages {
+		out[m.Name] = m
+	}
+
+	return out
 }
 
 func messageNamed(spec *grpcrust.Spec, name string) (grpcrust.Message, error) {
@@ -383,7 +398,7 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 
 	tv.SessionLiteral = session
 
-	request, err := messageLiteral(rpc.Request, c.Input, "")
+	request, err := messageLiteral(svc.scope(), rpc.Request, c.Input)
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading input: %w", c.Case, err)
 	}
@@ -401,12 +416,12 @@ func buildDatagramTest(c VectorCase, svc *datagramService) (datagramTestView, er
 		return tv, nil
 	}
 
-	reply, err := messageLiteral(rpc.Reply, c.ControllerReply, "")
+	reply, err := messageLiteral(svc.scope(), rpc.Reply, c.ControllerReply)
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading controllerReply: %w", c.Case, err)
 	}
 
-	expected, err := messageLiteral(rpc.Reply, c.ExpectedBody, "")
+	expected, err := messageLiteral(svc.scope(), rpc.Reply, c.ExpectedBody)
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
 	}
@@ -454,7 +469,7 @@ func readSessionFlags(c VectorCase, svc *datagramService, tv *datagramTestView) 
 		return nil
 	}
 
-	hello, err := messageLiteral(svc.Hello.Request, c.Hello, "")
+	hello, err := messageLiteral(svc.scope(), svc.Hello.Request, c.Hello)
 	if err != nil {
 		return fmt.Errorf("reading vector %q: reading hello: %w", c.Case, err)
 	}
@@ -505,7 +520,7 @@ func readPushSessions(c VectorCase, tv *datagramTestView) error {
 	return nil
 }
 
-func readPushPayload(c VectorCase, pushed datagramRpc, tv *datagramTestView) error {
+func readPushPayload(c VectorCase, svc *datagramService, pushed datagramRpc, tv *datagramTestView) error {
 	seedExpression := ""
 	seedLiteral := ""
 
@@ -514,12 +529,12 @@ func readPushPayload(c VectorCase, pushed datagramRpc, tv *datagramTestView) err
 		seedLiteral = strconv.FormatInt(*c.Seed, 10)
 	}
 
-	sent, drawn, err := seededMessageLiteral(pushed.Request, c.ExpectPush.Payload, "", seedExpression)
+	sent, drawn, err := seededMessageLiteral(svc.scope(), pushed.Request, c.ExpectPush.Payload, seedExpression)
 	if err != nil {
 		return fmt.Errorf("reading vector %q: reading expectPush.payload: %w", c.Case, err)
 	}
 
-	expected, _, err := seededMessageLiteral(pushed.Request, c.ExpectPush.Payload, "", seedLiteral)
+	expected, _, err := seededMessageLiteral(svc.scope(), pushed.Request, c.ExpectPush.Payload, seedLiteral)
 	if err != nil {
 		return fmt.Errorf("reading vector %q: reading expectPush.payload: %w", c.Case, err)
 	}
@@ -547,7 +562,7 @@ func buildPushTest(c VectorCase, svc *datagramService, rpc datagramRpc, tv datag
 		return datagramTestView{}, err
 	}
 
-	if err := readPushPayload(c, pushed, &tv); err != nil {
+	if err := readPushPayload(c, svc, pushed, &tv); err != nil {
 		return datagramTestView{}, err
 	}
 
@@ -563,10 +578,10 @@ func buildPushTest(c VectorCase, svc *datagramService, rpc datagramRpc, tv datag
 		return tv, nil
 	}
 
-	return buildRequestPushTest(c, rpc, tv)
+	return buildRequestPushTest(c, svc, rpc, tv)
 }
 
-func buildRequestPushTest(c VectorCase, rpc datagramRpc, tv datagramTestView) (datagramTestView, error) {
+func buildRequestPushTest(c VectorCase, svc *datagramService, rpc datagramRpc, tv datagramTestView) (datagramTestView, error) {
 	if rpc.Hello {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: the hello rpc opens the session, name an rpc a registered peer sends and let the push answer it", c.Case)
 	}
@@ -581,7 +596,7 @@ func buildRequestPushTest(c VectorCase, rpc datagramRpc, tv datagramTestView) (d
 	tv.Silent = rpc.Silent
 	tv.AskingIndex = indexOf(tv.SessionLiterals, session)
 
-	request, err := messageLiteral(rpc.Request, c.Input, "")
+	request, err := messageLiteral(svc.scope(), rpc.Request, c.Input)
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading input: %w", c.Case, err)
 	}
@@ -602,7 +617,7 @@ func buildRequestPushTest(c VectorCase, rpc datagramRpc, tv datagramTestView) (d
 		return datagramTestView{}, fmt.Errorf("reading vector %q: %s answers %s, so the case needs controllerReply, what the mocked controller answers the caller", c.Case, rpc.Pascal, rustname.Pascal(rpc.Reply.Name))
 	}
 
-	reply, err := messageLiteral(rpc.Reply, c.ControllerReply, "")
+	reply, err := messageLiteral(svc.scope(), rpc.Reply, c.ControllerReply)
 	if err != nil {
 		return datagramTestView{}, fmt.Errorf("reading vector %q: reading controllerReply: %w", c.Case, err)
 	}
@@ -610,7 +625,7 @@ func buildRequestPushTest(c VectorCase, rpc datagramRpc, tv datagramTestView) (d
 	expected := reply
 
 	if len(c.ExpectedBody) > 0 {
-		expected, err = messageLiteral(rpc.Reply, c.ExpectedBody, "")
+		expected, err = messageLiteral(svc.scope(), rpc.Reply, c.ExpectedBody)
 		if err != nil {
 			return datagramTestView{}, fmt.Errorf("reading vector %q: reading expectedBody: %w", c.Case, err)
 		}
@@ -655,13 +670,45 @@ func sessionLiteral(c VectorCase) (string, error) {
 	return strconv.Quote(value), nil
 }
 
-func messageLiteral(m grpcrust.Message, raw json.RawMessage, typesPrefix string) (string, error) {
-	literal, _, err := seededMessageLiteral(m, raw, typesPrefix, "")
+type scope struct {
+	messages map[string]grpcrust.Message
+	prefix   string
+	reserved []string
+}
+
+func (s scope) typeName(name string) string {
+	pascal := rustname.Pascal(name)
+
+	if s.prefix == "" {
+		return pascal
+	}
+
+	return s.prefix + "::" + pascal
+}
+
+func (s scope) message(name string) (grpcrust.Message, bool) {
+	m, ok := s.messages[name]
+
+	return m, ok
+}
+
+func messageLiteral(sc scope, m grpcrust.Message, raw json.RawMessage) (string, error) {
+	literal, _, err := seededMessageLiteral(sc, m, raw, "")
 
 	return literal, err
 }
 
-func seededMessageLiteral(m grpcrust.Message, raw json.RawMessage, typesPrefix, seedExpression string) (string, bool, error) {
+func seededMessageLiteral(sc scope, m grpcrust.Message, raw json.RawMessage, seedExpression string) (string, bool, error) {
+	return buildMessageLiteral(sc, m, raw, seedExpression, sc.reserved)
+}
+
+func buildMessageLiteral(
+	sc scope,
+	m grpcrust.Message,
+	raw json.RawMessage,
+	seedExpression string,
+	reserved []string,
+) (string, bool, error) {
 	if string(raw) == "null" {
 		raw = nil
 	}
@@ -671,44 +718,107 @@ func seededMessageLiteral(m grpcrust.Message, raw json.RawMessage, typesPrefix, 
 		return "", false, err
 	}
 
+	if err := checkKnownKeys(m, fields, reserved); err != nil {
+		return "", false, err
+	}
+
 	parts := make([]string, 0, len(m.Fields))
 	drawn := false
 
 	for _, f := range m.Fields {
-		if f.Kind != grpcrust.FieldScalar {
-			return "", false, fmt.Errorf("field %q holds a message, a datagram vector reads scalar fields only", f.Name)
-		}
-
-		if isSeedPlaceholder(fields[f.Name]) {
-			if seedExpression == "" {
-				return "", false, fmt.Errorf("field %q reads %s and the case carries no seed", f.Name, seedPlaceholder)
-			}
-
-			drawn = true
-
-			parts = append(parts, rustname.RustIdent(f.Name)+": "+seedExpression)
-
-			continue
-		}
-
-		literal, err := scalarLiteral(f, fields[f.Name])
+		literal, fieldDrawn, err := fieldLiteral(sc, f, fields[f.Name], seedExpression)
 		if err != nil {
 			return "", false, err
 		}
 
+		drawn = drawn || fieldDrawn
+
 		parts = append(parts, rustname.RustIdent(f.Name)+": "+literal)
 	}
 
-	name := typesPrefix + rustname.Pascal(m.Name)
-	if typesPrefix != "" {
-		name = typesPrefix + "::" + rustname.Pascal(m.Name)
-	}
+	name := sc.typeName(m.Name)
 
 	if len(parts) == 0 {
 		return name + " {}", drawn, nil
 	}
 
 	return name + " { " + strings.Join(parts, ", ") + " }", drawn, nil
+}
+
+func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {
+	if isSeedPlaceholder(raw) {
+		if seedExpression == "" {
+			return "", false, fmt.Errorf("field %q reads %s and the case carries no seed", f.Name, seedPlaceholder)
+		}
+
+		return seedExpression, true, nil
+	}
+
+	if f.Kind == grpcrust.FieldMessage {
+		return nestedLiteral(sc, f, raw, seedExpression)
+	}
+
+	literal, err := scalarLiteral(f, raw)
+	if err != nil {
+		return "", false, err
+	}
+
+	return literal, false, nil
+}
+
+func nestedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "None", false, nil
+	}
+
+	nested, ok := sc.message(f.Message)
+	if !ok {
+		return "", false, fmt.Errorf("field %q holds message %q and the proto declares no such message", f.Name, f.Message)
+	}
+
+	literal, drawn, err := buildMessageLiteral(sc, nested, raw, seedExpression, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("reading field %q: %w", f.Name, err)
+	}
+
+	return "Some(" + literal + ")", drawn, nil
+}
+
+func checkKnownKeys(m grpcrust.Message, fields map[string]json.RawMessage, reserved []string) error {
+	declared := make([]string, 0, len(m.Fields))
+	known := map[string]bool{}
+
+	for _, f := range m.Fields {
+		declared = append(declared, f.Name)
+		known[f.Name] = true
+	}
+
+	for _, name := range reserved {
+		known[name] = true
+	}
+
+	unknown := make([]string, 0, len(fields))
+
+	for name := range fields {
+		if !known[name] {
+			unknown = append(unknown, name)
+		}
+	}
+
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(unknown)
+
+	if len(declared) == 0 {
+		return fmt.Errorf("message %q declares no field and the case names %s", m.Name, strings.Join(unknown, ", "))
+	}
+
+	return fmt.Errorf(
+		"message %q declares no field named %s, it declares %s, a case spells a field the way the proto spells it",
+		m.Name, strings.Join(unknown, ", "), strings.Join(declared, ", "),
+	)
 }
 
 const seedPlaceholder = "<seed>"

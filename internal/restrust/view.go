@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
@@ -159,6 +160,7 @@ type controllerView struct {
 	Ports       []portView
 	Ops         []opView
 	TypeImports []importView
+	Taxonomy    []taxonomy.Member
 }
 
 type clientView struct {
@@ -173,10 +175,12 @@ type clientView struct {
 	AdapterName string
 	Ops         []opView
 	TypeImports []importView
-	Auth        bool
-	HasStream   bool
-	HasQuery    bool
-	UsesJson    bool
+	Auth         bool
+	HasStream    bool
+	HasQuery     bool
+	UsesJson     bool
+	WireRuntime  taxonomy.WireMember
+	WireTaxonomy []taxonomy.WireMember
 }
 
 func buildView(spec *Spec, opts Options) view {
@@ -455,6 +459,7 @@ func buildControllerView(c Controller, portsByName map[string]portView) controll
 	}
 
 	cv.TypeImports = typeImports(c.Operations)
+	cv.Taxonomy = taxonomy.Detailed(c.Snake)
 
 	return cv
 }
@@ -494,8 +499,10 @@ func buildClientView(c Controller, cv controllerView, cell string) clientView {
 		Module:      c.Snake + "_rest_client",
 		PortModule:  c.Snake + "_client",
 		AdapterName: adapterName,
-		Ops:         cv.Ops,
-		TypeImports: cv.TypeImports,
+		Ops:          cv.Ops,
+		TypeImports:  cv.TypeImports,
+		WireRuntime:  taxonomy.WireRuntime(),
+		WireTaxonomy: taxonomy.WireDetailed(),
 	}
 
 	for _, op := range cv.Ops {

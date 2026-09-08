@@ -308,7 +308,7 @@ func TestAVectorWhoseOperationTheEngineCannotMapIsRefusedInsteadOfSkipped(t *tes
 
 	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(mixedCases), vectorsrust.Options{Service: "songe-hello"})
 
-	want := `reading vector "udp_echo_returns_the_payload": operation "udp_echo" names no operationId of the OpenAPI document, no udp_<rpc> of the datagram service and no grpc_<Rpc> of the grpc service`
+	want := `reading vector "udp_echo_returns_the_payload": operation "udp_echo" names nothing the cell declares, the cell declares the operationIds of the OpenAPI document`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("generating reported %v, want %q", err, want)
 	}
@@ -395,7 +395,7 @@ func TestAnErrorStatusThatMatchesNoKnownControllerErrorIsRefused(t *testing.T) {
 	badCases := `{"cases": [{"case": "bogus", "operation": "createGreeting", "input": {"name": "x"}, "expectedStatus": 500, "expectedErrorSubstring": "boom"}]}`
 
 	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(badCases), vectorsrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), `expectedStatus 500 matches none of Authentication (401), Authorization (403), NotFound (404), Invalid (422), Semantic (409), RateLimited (429), NotImplemented (501) or a refused bearer on an x-auth operation (401)`) {
+	if err == nil || !strings.Contains(err.Error(), `expectedStatus 500 matches no taxonomy member, the members are Authentication (401), Authorization (403), NotFound (404), Invalid (the operation's invalid status), Semantic (409), RateLimited (429), NotImplemented (501), and Invalid reads 422 on "createGreeting"`) {
 		t.Fatalf("want a refusal naming the case and the unmatched status, got %v", err)
 	}
 }
@@ -686,7 +686,7 @@ func TestADatagramVectorWithoutAControllerReplyIsRefused(t *testing.T) {
 func TestWithoutAProtoADatagramVectorIsRefusedByName(t *testing.T) {
 	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(datagramCases), vectorsrust.Options{Service: "songe-hello"})
 
-	want := `no udp_<rpc> of the datagram service`
+	want := `names nothing the cell declares, the cell declares the operationIds of the OpenAPI document`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("generating reported %v, want %q", err, want)
 	}
