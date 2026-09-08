@@ -115,9 +115,15 @@ func Combine(opts CombineOptions) ([]File, error) {
 		return nil, fmt.Errorf("combining %q: %w", opts.Name, err)
 	}
 
+	wire, err := composeWire(opts.Name, schema, loaded)
+	if err != nil {
+		return nil, err
+	}
+
 	files := []File{
 		{Path: modelFile, Content: emitMod(schema, loaded)},
 		{Path: combinedTestsPath, Content: tests},
+		{Path: combinedWirePath, Content: wire},
 	}
 
 	for _, one := range loaded {

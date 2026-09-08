@@ -4,8 +4,8 @@ A forge-dev generator with two kinds.
 
 | Kind | Reads | Writes |
 |---|---|---|
-| `authz` | one service's `authz.yaml` | the OpenFGA module, its test file, its manifest |
-| `combine` | the manifests of several modules | `zz_generated_fga.mod`, one merged `zz_generated_fga.yaml`, a copy of every module file |
+| `authz` | one service's `authz.yaml` | the OpenFGA module, its test file, its wire form, its manifest |
+| `combine` | the manifests of several modules | `zz_generated_fga.mod`, one merged `zz_generated_fga.yaml`, one merged `zz_generated_fga.model.json`, a copy of every module file |
 
 The internal model is backend neutral. A Cedar emitter lands beside the
 Cedar adapter.
@@ -282,6 +282,56 @@ tests:
           "attack": false
 ```
 
+`zz_generated_<module>.model.json` is the wire form. It is what a module
+travels as. songe-authz reads it, merges every saved module into one
+model and writes that to the backend, so no service parses the DSL.
+`github.com/openfga/language/pkg/go` makes it from the module file, the
+same package the `fga` binary uses, so nothing here writes JSON by hand.
+
+The module name rides on three places, and the third one is narrower
+than it looks.
+
+| Where | Field | When |
+|---|---|---|
+| a type | `type_definitions[].metadata.module` | always |
+| a condition | `conditions[<name>].metadata.module` | always |
+| a relation | `type_definitions[].metadata.relations[<name>].module` | only when the relation extends a type of another module |
+
+A relation of a type the module declares carries no module of its own.
+It inherits the module on its type. That is what makes a merge possible.
+A type definition whose relations carry a module is an extension of a
+type another module owns, and the merge folds its relations into that
+type. The proto says so at `openfga/v1/authzmodel.proto`, `Metadata`,
+`RelationMetadata` and `ConditionMetadata`.
+
+```json
+{
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "type": "monster",
+      "metadata": {
+        "module": "play",
+        "relations": {"alive": {}, "attack": {}, "session": {}}
+      }
+    },
+    {
+      "type": "session",
+      "metadata": {
+        "module": "play",
+        "relations": {"turn_owner": {"module": "play"}}
+      }
+    }
+  ],
+  "conditions": {
+    "monster_alive": {"metadata": {"module": "play"}}
+  }
+}
+```
+
+The module file carries no schema line, so the wire form carries the
+schema version the `fga.mod` names.
+
 `zz_generated_authz.json` is the manifest. The combine kind reads one
 per module.
 
@@ -291,6 +341,7 @@ per module.
   "schema": "1.2",
   "model": "zz_generated_play.fga",
   "tests": "zz_generated_play.fga.yaml",
+  "wire": "zz_generated_play.model.json",
   "types": ["monster"],
   "references": [{"module": "session", "types": ["character", "session"]}],
   "extends": [{"module": "session", "types": ["session"]}],
@@ -340,7 +391,8 @@ twice, a manifest that is not on disk and two modules on different
 schemas.
 
 The cell answers `zz_generated_fga.mod`, one merged
-`zz_generated_fga.yaml` and a copy of every module file.
+`zz_generated_fga.yaml`, one merged `zz_generated_fga.model.json` and a
+copy of every module file.
 
 ```yaml
 schema: "1.2"
@@ -359,6 +411,11 @@ model_file: "zz_generated_fga.mod"
 tests:
   - name: "session: a member may join"
 ```
+
+`zz_generated_fga.model.json` is the same model the `fga.mod` describes,
+in one document, so a consumer seeds a store in one call. Every
+extension is folded into the type it extends and keeps the extending
+module on each relation it added.
 
 ## Running the vectors in a spec repo
 

@@ -12,4 +12,5 @@ inputs:
 files:
   - zz_generated_chat.fga
   - zz_generated_chat.fga.yaml
+  - zz_generated_chat.model.json
   - zz_generated_authz.json

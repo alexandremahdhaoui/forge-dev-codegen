@@ -12,4 +12,5 @@ inputs:
 files:
   - zz_generated_session.fga
   - zz_generated_session.fga.yaml
+  - zz_generated_session.model.json
   - zz_generated_authz.json

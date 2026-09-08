@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "chat",
+        "relations": {
+          "member": {},
+          "post": {},
+          "session": {
+            "directly_related_user_types": [
+              {
+                "type": "session"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "member": {
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "member"
+            },
+            "tupleset": {
+              "relation": "session"
+            }
+          }
+        },
+        "post": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "session": {
+          "this": {}
+        }
+      },
+      "type": "channel"
+    }
+  ]
+}

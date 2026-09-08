@@ -148,6 +148,7 @@ func TestTheCombinationWritesTheModFileTheMergedTestsAndACopyOfEveryModule(t *te
 	for _, path := range []string{
 		"zz_generated_fga.mod",
 		"zz_generated_fga.yaml",
+		"zz_generated_fga.model.json",
 		"zz_generated_session.fga",
 		"zz_generated_chat.fga",
 	} {
@@ -156,7 +157,7 @@ func TestTheCombinationWritesTheModFileTheMergedTestsAndACopyOfEveryModule(t *te
 		}
 	}
 
-	if len(files) != 4 {
+	if len(files) != 5 {
 		t.Fatalf("the combination wrote %d files", len(files))
 	}
 }

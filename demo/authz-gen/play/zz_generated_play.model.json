@@ -1,0 +1,131 @@
+{
+  "conditions": {
+    "monster_alive": {
+      "expression": "hp \u003e 0",
+      "metadata": {
+        "module": "play"
+      },
+      "name": "monster_alive",
+      "parameters": {
+        "hp": {
+          "type_name": "TYPE_NAME_INT"
+        }
+      }
+    }
+  },
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "play",
+        "relations": {
+          "alive": {
+            "directly_related_user_types": [
+              {
+                "condition": "monster_alive",
+                "type": "character",
+                "wildcard": {}
+              }
+            ]
+          },
+          "attack": {},
+          "session": {
+            "directly_related_user_types": [
+              {
+                "type": "session"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "alive": {
+          "this": {}
+        },
+        "attack": {
+          "intersection": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "alive"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "turn_owner"
+                  },
+                  "tupleset": {
+                    "relation": "session"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "member"
+                  },
+                  "tupleset": {
+                    "relation": "session"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "session": {
+          "this": {}
+        }
+      },
+      "type": "monster"
+    },
+    {
+      "metadata": {
+        "module": "play",
+        "relations": {
+          "end_turn": {
+            "module": "play"
+          },
+          "move": {
+            "module": "play"
+          },
+          "turn_owner": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ],
+            "module": "play"
+          }
+        }
+      },
+      "relations": {
+        "end_turn": {
+          "computedUserset": {
+            "relation": "turn_owner"
+          }
+        },
+        "move": {
+          "intersection": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "turn_owner"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
+          }
+        },
+        "turn_owner": {
+          "this": {}
+        }
+      },
+      "type": "session"
+    }
+  ]
+}

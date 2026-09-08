@@ -12,6 +12,7 @@ inputs:
 files:
   - zz_generated_fga.mod
   - zz_generated_fga.yaml
+  - zz_generated_fga.model.json
   - zz_generated_session.fga
   - zz_generated_chat.fga
   - zz_generated_play.fga

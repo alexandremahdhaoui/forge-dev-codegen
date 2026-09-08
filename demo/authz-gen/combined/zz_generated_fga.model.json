@@ -1,0 +1,265 @@
+{
+  "conditions": {
+    "monster_alive": {
+      "expression": "hp \u003e 0",
+      "metadata": {
+        "module": "play",
+        "source_info": {
+          "file": "zz_generated_play.fga"
+        }
+      },
+      "name": "monster_alive",
+      "parameters": {
+        "hp": {
+          "type_name": "TYPE_NAME_INT"
+        }
+      }
+    }
+  },
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "session",
+        "source_info": {
+          "file": "zz_generated_session.fga"
+        }
+      },
+      "type": "account"
+    },
+    {
+      "metadata": {
+        "module": "session",
+        "relations": {
+          "create_session": {},
+          "delete_character": {},
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        },
+        "source_info": {
+          "file": "zz_generated_session.fga"
+        }
+      },
+      "relations": {
+        "create_session": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "delete_character": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "owner": {
+          "this": {}
+        }
+      },
+      "type": "character"
+    },
+    {
+      "metadata": {
+        "module": "session",
+        "relations": {
+          "end_turn": {
+            "module": "play",
+            "source_info": {
+              "file": "zz_generated_play.fga"
+            }
+          },
+          "host": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ]
+          },
+          "join": {},
+          "leave": {},
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ]
+          },
+          "move": {
+            "module": "play",
+            "source_info": {
+              "file": "zz_generated_play.fga"
+            }
+          },
+          "turn_owner": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ],
+            "module": "play",
+            "source_info": {
+              "file": "zz_generated_play.fga"
+            }
+          }
+        },
+        "source_info": {
+          "file": "zz_generated_session.fga"
+        }
+      },
+      "relations": {
+        "end_turn": {
+          "computedUserset": {
+            "relation": "turn_owner"
+          }
+        },
+        "host": {
+          "this": {}
+        },
+        "join": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "leave": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "member": {
+          "this": {}
+        },
+        "move": {
+          "intersection": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "turn_owner"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
+          }
+        },
+        "turn_owner": {
+          "this": {}
+        }
+      },
+      "type": "session"
+    },
+    {
+      "metadata": {
+        "module": "chat",
+        "relations": {
+          "member": {},
+          "post": {},
+          "session": {
+            "directly_related_user_types": [
+              {
+                "type": "session"
+              }
+            ]
+          }
+        },
+        "source_info": {
+          "file": "zz_generated_chat.fga"
+        }
+      },
+      "relations": {
+        "member": {
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "member"
+            },
+            "tupleset": {
+              "relation": "session"
+            }
+          }
+        },
+        "post": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "session": {
+          "this": {}
+        }
+      },
+      "type": "channel"
+    },
+    {
+      "metadata": {
+        "module": "play",
+        "relations": {
+          "alive": {
+            "directly_related_user_types": [
+              {
+                "condition": "monster_alive",
+                "type": "character",
+                "wildcard": {}
+              }
+            ]
+          },
+          "attack": {},
+          "session": {
+            "directly_related_user_types": [
+              {
+                "type": "session"
+              }
+            ]
+          }
+        },
+        "source_info": {
+          "file": "zz_generated_play.fga"
+        }
+      },
+      "relations": {
+        "alive": {
+          "this": {}
+        },
+        "attack": {
+          "intersection": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "alive"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "turn_owner"
+                  },
+                  "tupleset": {
+                    "relation": "session"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "member"
+                  },
+                  "tupleset": {
+                    "relation": "session"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "session": {
+          "this": {}
+        }
+      },
+      "type": "monster"
+    }
+  ]
+}

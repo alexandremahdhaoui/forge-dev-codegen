@@ -118,6 +118,7 @@ const wantPlayManifest = `{
   "schema": "1.2",
   "model": "zz_generated_play.fga",
   "tests": "zz_generated_play.fga.yaml",
+  "wire": "zz_generated_play.model.json",
   "types": [
     "monster"
   ],
@@ -160,7 +161,7 @@ func generate(t *testing.T, doc string) map[string]string {
 	return byPath
 }
 
-func TestGeneratingAModuleEmitsTheModelTheTestsAndTheManifest(t *testing.T) {
+func TestGeneratingAModuleEmitsTheModelTheTestsTheWireFormAndTheManifest(t *testing.T) {
 	files, err := authzgen.Generate([]byte(playSpec))
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -171,7 +172,7 @@ func TestGeneratingAModuleEmitsTheModelTheTestsAndTheManifest(t *testing.T) {
 		got = append(got, f.Path)
 	}
 
-	want := "zz_generated_play.fga,zz_generated_play.fga.yaml,zz_generated_authz.json"
+	want := "zz_generated_play.fga,zz_generated_play.fga.yaml,zz_generated_play.model.json,zz_generated_authz.json"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("emitted paths\n got %q\nwant %q", got, want)
 	}

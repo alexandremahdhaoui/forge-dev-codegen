@@ -46,8 +46,8 @@ func TestTheEngineFillsTheAuthzCellAndTheCombineCellOnly(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if len(out.Files) != 3 {
-		t.Fatalf("want three files, got %d", len(out.Files))
+	if len(out.Files) != 4 {
+		t.Fatalf("want four files, got %d", len(out.Files))
 	}
 }
 
@@ -90,8 +90,8 @@ func TestACombineCellReadsItsModulesRelativeToTheCellDirectory(t *testing.T) {
 		t.Fatalf("combining: %v", err)
 	}
 
-	if len(out.Files) != 3 {
-		t.Fatalf("want three files, got %d", len(out.Files))
+	if len(out.Files) != 4 {
+		t.Fatalf("want four files, got %d", len(out.Files))
 	}
 }
 

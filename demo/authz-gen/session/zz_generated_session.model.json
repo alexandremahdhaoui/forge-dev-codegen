@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "session"
+      },
+      "type": "account"
+    },
+    {
+      "metadata": {
+        "module": "session",
+        "relations": {
+          "create_session": {},
+          "delete_character": {},
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "create_session": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "delete_character": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "owner": {
+          "this": {}
+        }
+      },
+      "type": "character"
+    },
+    {
+      "metadata": {
+        "module": "session",
+        "relations": {
+          "host": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ]
+          },
+          "join": {},
+          "leave": {},
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "character"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "host": {
+          "this": {}
+        },
+        "join": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "leave": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "member": {
+          "this": {}
+        }
+      },
+      "type": "session"
+    }
+  ]
+}

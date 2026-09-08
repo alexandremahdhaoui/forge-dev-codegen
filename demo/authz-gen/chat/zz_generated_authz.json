@@ -3,6 +3,7 @@
   "schema": "1.2",
   "model": "zz_generated_chat.fga",
   "tests": "zz_generated_chat.fga.yaml",
+  "wire": "zz_generated_chat.model.json",
   "types": [
     "channel"
   ],

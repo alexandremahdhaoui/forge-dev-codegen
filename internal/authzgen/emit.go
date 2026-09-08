@@ -50,9 +50,15 @@ func Generate(doc []byte) ([]File, error) {
 		return nil, fmt.Errorf("emitting the tests of module %q: %w", m.Name, err)
 	}
 
+	wire, err := emitWire(m, model)
+	if err != nil {
+		return nil, fmt.Errorf("emitting the wire form of module %q: %w", m.Name, err)
+	}
+
 	return []File{
 		{Path: modelPath(m), Content: model},
 		{Path: testsPath(m), Content: tests},
+		{Path: wirePath(m), Content: wire},
 		{Path: manifestPath, Content: manifest},
 	}, nil
 }
@@ -342,6 +348,7 @@ type manifest struct {
 	Schema     string             `json:"schema"`
 	Model      string             `json:"model"`
 	Tests      string             `json:"tests"`
+	Wire       string             `json:"wire"`
 	Types      []string           `json:"types"`
 	References []manifestExternal `json:"references"`
 	Extends    []manifestExternal `json:"extends"`
@@ -359,6 +366,7 @@ func emitManifest(m Module) (string, error) {
 		Schema:     schemaVersion,
 		Model:      modelPath(m),
 		Tests:      testsPath(m),
+		Wire:       wirePath(m),
 		Types:      []string{},
 		References: []manifestExternal{},
 		Extends:    []manifestExternal{},
