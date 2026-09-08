@@ -295,14 +295,21 @@ than it looks.
 |---|---|---|
 | a type | `type_definitions[].metadata.module` | always |
 | a condition | `conditions[<name>].metadata.module` | always |
-| a relation | `type_definitions[].metadata.relations[<name>].module` | only when the relation extends a type of another module |
+| a relation | `type_definitions[].metadata.relations[<name>].module` | only when the relation is written inside an `extend type` block |
 
-A relation of a type the module declares carries no module of its own.
-It inherits the module on its type. That is what makes a merge possible.
-A type definition whose relations carry a module is an extension of a
-type another module owns, and the merge folds its relations into that
-type. The proto says so at `openfga/v1/authzmodel.proto`, `Metadata`,
-`RelationMetadata` and `ConditionMetadata`.
+A relation a type declares in its own `type` block carries no module of
+its own. It inherits the module on its type. That is what makes a merge
+possible. A relation written inside an `extend type` block carries its
+file's module, and the merge folds it into the type the extend block
+names.
+
+The rule is syntactic. In a modular model the listener sets the module on
+every relation whose block carries the `extend` keyword. It never asks
+which module owns the type, so a block that extends a type of this same
+module tags its relations too. `github.com/openfga/language/pkg/go`
+decides it in `transformer/dsltojson.go`, `ExitRelationDeclaration`. The
+proto at `openfga/v1/authzmodel.proto` only declares the field on
+`RelationMetadata`.
 
 ```json
 {
@@ -440,5 +447,8 @@ fga model test --tests authz/zz_generated_fga.yaml
 `demo/authz-gen/combined` is the living proof. Its stage is
 `demo-authz-fga`.
 
-A module change reaches the combination on `forge build --force`. forge
-tracks `combine.yaml`, not the manifests it names.
+A module change does not reach the combination on an ordinary build. forge
+tracks `combine.yaml`, not the manifests it names, so the combine cell is
+skipped as unchanged. The `generated` stage catches it. It builds with no
+artifact store, so every cell regenerates, and it names any file that no
+longer matches what is committed.

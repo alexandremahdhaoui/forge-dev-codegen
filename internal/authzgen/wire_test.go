@@ -156,7 +156,7 @@ func TestTheWireFormTagsEveryConditionWithTheModuleThatDeclaredIt(t *testing.T) 
 	}
 }
 
-func TestTheWireFormTagsARelationOnlyWhenItExtendsATypeOfAnotherModule(t *testing.T) {
+func TestTheWireFormTagsARelationOnlyWhenItIsWrittenInsideAnExtendBlock(t *testing.T) {
 	byType := map[string]wireType{}
 	for _, one := range demoWire(t, "play").TypeDefinitions {
 		byType[one.Type] = one
