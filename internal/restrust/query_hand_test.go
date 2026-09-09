@@ -114,19 +114,36 @@ components:
       properties:
         millis:
           type: integer
+    Label:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
 `
 
-func queriedFiles(t *testing.T) map[string]string {
+func generatedByPath(t *testing.T, spec string) (map[string]string, error) {
 	t.Helper()
 
-	files, err := restrust.Generate([]byte(queriedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
 	if err != nil {
-		t.Fatalf("generating: %v", err)
+		return nil, err
 	}
 
 	byPath := map[string]string{}
 	for _, f := range files {
 		byPath[f.Path] = f.Content
+	}
+
+	return byPath, nil
+}
+
+func queriedFiles(t *testing.T) map[string]string {
+	t.Helper()
+
+	byPath, err := generatedByPath(t, queriedSpec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
 	}
 
 	return byPath
@@ -314,6 +331,10 @@ func TestTheControllerPortsOfTheManifestHoldTheDeclaredPortBesideTheStore(t *tes
 
 const clockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]"
 
+const systemClockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [system]"
+
+const bothClocksDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory, system]"
+
 func TestAClockPortKindEmitsItsMemoryAdapterAndProvidesItInsteadOfRequiringThePort(t *testing.T) {
 	files := queriedFiles(t)
 
@@ -338,6 +359,131 @@ func TestAClockPortKindEmitsItsMemoryAdapterAndProvidesItInsteadOfRequiringThePo
 			t.Error("the cell provides the clock adapter and still requires the port")
 		}
 	}
+}
+
+func TestTheSystemClockReadsTheRealClockThroughTheStandardLibraryAndTakesNoConfiguration(t *testing.T) {
+	spec := strings.Replace(queriedSpec, clockDeclaration, systemClockDeclaration, 1)
+
+	files, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	system, emitted := files["adapter/zz_generated_greeting_clock_system.rs"]
+	if !emitted {
+		t.Fatalf("the system clock was not emitted, the cell wrote %d files", len(files))
+	}
+
+	for _, want := range []string{
+		"use std::time::{SystemTime, UNIX_EPOCH};",
+		"SystemTime::now()",
+		".duration_since(UNIX_EPOCH)",
+		"pub struct GreetingClockSystemConfig {}",
+		"impl GreetingClock for GreetingClockSystem",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the system clock never carried %q:\n%s", want, system)
+		}
+	}
+
+	if strings.Contains(system, "AtomicI64") {
+		t.Error("the system clock counts its own moments instead of reading the machine")
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "greeting_clock_system" {
+			continue
+		}
+
+		if len(adapter.Config) != 0 {
+			t.Fatalf("the system clock declares configuration, a machine clock starts where the machine is: %v", adapter.Config)
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provides the system clock: %+v", m.Provides.Adapters)
+}
+
+func TestBothClockAdaptersStandBesideEachOtherBehindOnePort(t *testing.T) {
+	spec := strings.Replace(queriedSpec, clockDeclaration, bothClocksDeclaration, 1)
+
+	files, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, want := range []string{
+		"adapter/zz_generated_greeting_clock_memory.rs",
+		"adapter/zz_generated_greeting_clock_system.rs",
+	} {
+		if _, emitted := files[want]; !emitted {
+			t.Errorf("the cell never wrote %q", want)
+		}
+	}
+
+	mod := files["adapter/mod.rs"]
+	for _, want := range []string{"pub mod zz_generated_greeting_clock_memory;", "pub mod zz_generated_greeting_clock_system;"} {
+		if !strings.Contains(mod, want) {
+			t.Errorf("the adapter mod.rs never mounted %q:\n%s", want, mod)
+		}
+	}
+}
+
+func TestAClockTakesItsPropertyNamesFromTheSchemasItDeclaresAndNeverFromTheEngine(t *testing.T) {
+	spec := strings.Replace(queriedSpec, "        epochMs:\n          type: integer", "        atMillis:\n          type: integer", 1)
+	spec = strings.Replace(spec, "required: [epochMs]", "required: [atMillis]", 1)
+	spec = strings.Replace(spec, "        millis:\n          type: integer", "        howLong:\n          type: integer", 1)
+	spec = strings.Replace(spec, "required: [millis]", "required: [howLong]", 1)
+
+	files, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	clock := files["adapter/zz_generated_greeting_clock_memory.rs"]
+
+	for _, want := range []string{
+		"pub at_millis: i64,",
+		"at_millis: AtomicI64::new(config.at_millis),",
+		"Instant {\n            at_millis:",
+		"let how_long = now",
+		"Ok(Span { how_long })",
+	} {
+		if !strings.Contains(clock, want) {
+			t.Errorf("the memory clock never carried %q:\n%s", want, clock)
+		}
+	}
+
+	for _, invented := range []string{"epoch_ms", "Span { millis }", "let millis = now"} {
+		if strings.Contains(clock, invented) {
+			t.Errorf("the memory clock still spells %q, a name the engine invented:\n%s", invented, clock)
+		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "greeting_clock_memory" {
+			continue
+		}
+
+		if _, named := adapter.Config["at_millis"]; !named {
+			t.Fatalf("the memory clock config never took the name the schema declares: %v", adapter.Config)
+		}
+
+		return
+	}
+
+	t.Fatal("the manifest never provides the memory clock")
 }
 
 func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
@@ -374,7 +520,17 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 		{
 			name:    "an unknown adapter kind",
 			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [ntp]",
-			want:    `adapter kind "ntp", a clock adapter is one of memory`,
+			want:    `adapter kind "ntp", a clock adapter is one of memory, system`,
+		},
+		{
+			name:    "an instant carrying more than one property",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Greeting\n          span: Span\n          adapters: [memory]",
+			want:    `names instant "Greeting", which declares 3 properties`,
+		},
+		{
+			name:    "a span whose one property is no integer",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Label\n          adapters: [memory]",
+			want:    `whose one property "text" is of type string, a clock counts in whole units so that property is a required integer`,
 		},
 		{
 			name:    "methods a clock never declares",
@@ -594,7 +750,9 @@ func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerIm
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(queriedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	spec := strings.Replace(queriedSpec, clockDeclaration, bothClocksDeclaration, 1)
+
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

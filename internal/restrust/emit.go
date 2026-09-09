@@ -273,11 +273,13 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 			return add(path.Join("port", "zz_generated_"+h.PortSnake+".rs"), "hand_port", map[string]any{"Header": v.Header, "Port": h, "CratePath": v.CratePath})
 		})
 
-		if h.HasMemory {
-			mount("adapter", modEntry{Module: "zz_generated_" + h.MemoryModule, Alias: h.MemoryModule})
+		for _, a := range h.Adapters {
+			a := a
+
+			mount("adapter", modEntry{Module: "zz_generated_" + a.Module, Alias: a.Module})
 
 			steps = append(steps, func() error {
-				return add(path.Join("adapter", "zz_generated_"+h.MemoryModule+".rs"), h.Kind+"_memory", map[string]any{"Header": v.Header, "Port": h, "CratePath": v.CratePath})
+				return add(path.Join("adapter", "zz_generated_"+a.Module+".rs"), a.Template, map[string]any{"Header": v.Header, "Port": h, "Adapter": a, "CratePath": v.CratePath})
 			})
 		}
 	}
@@ -467,25 +469,35 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Module: v.ModulePrefix + "port::" + h.PortSnake,
 		})
 
-		if !h.HasMemory {
+		if len(h.Adapters) == 0 {
 			m.Requires.Ports = append(m.Requires.Ports, h.Name)
 
 			continue
 		}
 
-		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
-			Name:       h.MemoryAdapterName,
-			Type:       h.MemoryStruct,
-			Module:     v.ModulePrefix + "adapter::" + h.MemoryModule,
-			Implements: h.Name,
-			Config: map[string]cellmanifest.ConfigField{
-				"epoch_ms": {
-					Type:        cellmanifest.FieldTypeInteger,
-					Default:     0,
-					Description: "The moment the " + h.Snake + " memory clock starts at, in milliseconds since the epoch",
-				},
-			},
-		})
+		for _, a := range h.Adapters {
+			m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+				Name:       a.AdapterName,
+				Type:       a.Struct,
+				Module:     v.ModulePrefix + "adapter::" + a.Module,
+				Implements: h.Name,
+				Config:     handAdapterConfig(h, a),
+			})
+		}
+	}
+}
+
+func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifest.ConfigField {
+	if a.Kind != ClockAdapterMemory {
+		return map[string]cellmanifest.ConfigField{}
+	}
+
+	return map[string]cellmanifest.ConfigField{
+		h.InstantField: {
+			Type:        cellmanifest.FieldTypeInteger,
+			Default:     0,
+			Description: "The moment the " + h.Snake + " memory clock starts at, read as the " + h.Instant + " the port answers",
+		},
 	}
 }
 
@@ -1163,51 +1175,106 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
 
 {{- define "clock_memory" -}}
 {{ .Header }}
-{{ $p := .Port }}
+{{ $p := .Port }}{{ $a := .Adapter }}
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
 use {{ .CratePath }}types::{{ $p.InstantSnake }}::{{ $p.Instant }};
 use {{ .CratePath }}types::{{ $p.SpanSnake }}::{{ $p.Span }};
 
-const STEP_MS: i64 = 1;
+const STEP: i64 = 1;
 
 #[derive(Default)]
-pub struct {{ $p.MemoryConfigStruct }} {
-    pub epoch_ms: i64,
+pub struct {{ $a.ConfigStruct }} {
+    pub {{ $p.InstantField }}: i64,
 }
 
-pub struct {{ $p.MemoryStruct }} {
-    epoch_ms: AtomicI64,
+pub struct {{ $a.Struct }} {
+    {{ $p.InstantField }}: AtomicI64,
 }
 
-impl {{ $p.MemoryStruct }} {
-    pub fn new(config: {{ $p.MemoryConfigStruct }}) -> Self {
+impl {{ $a.Struct }} {
+    pub fn new(config: {{ $a.ConfigStruct }}) -> Self {
         Self {
-            epoch_ms: AtomicI64::new(config.epoch_ms),
+            {{ $p.InstantField }}: AtomicI64::new(config.{{ $p.InstantField }}),
         }
     }
 }
 
-impl {{ $p.Name }} for {{ $p.MemoryStruct }} {
+impl {{ $p.Name }} for {{ $a.Struct }} {
     fn now(&self) -> Result<{{ $p.Instant }}, {{ $p.Error }}> {
         Ok({{ $p.Instant }} {
-            epoch_ms: self.epoch_ms.fetch_add(STEP_MS, Ordering::Relaxed),
+            {{ $p.InstantField }}: self.{{ $p.InstantField }}.fetch_add(STEP, Ordering::Relaxed),
         })
     }
 
     fn elapsed(&self, request: {{ $p.Instant }}) -> Result<{{ $p.Span }}, {{ $p.Error }}> {
-        let now = self.epoch_ms.load(Ordering::Relaxed);
+        let now = self.{{ $p.InstantField }}.load(Ordering::Relaxed);
 
-        let millis = now
-            .checked_sub(request.epoch_ms)
-            .filter(|millis| *millis >= 0)
+        let {{ $p.SpanField }} = now
+            .checked_sub(request.{{ $p.InstantField }})
+            .filter(|{{ $p.SpanField }}| *{{ $p.SpanField }} >= 0)
             .ok_or_else(|| {{ $p.Error }}::Refused {
                 method: "elapsed".to_string(),
-                reason: format!("{} is not a moment this clock has reached", request.epoch_ms),
+                reason: format!("{} is not a moment this clock has reached", request.{{ $p.InstantField }}),
             })?;
 
-        Ok({{ $p.Span }} { millis })
+        Ok({{ $p.Span }} { {{ $p.SpanField }} })
+    }
+}
+{{ end -}}
+
+{{- define "clock_system" -}}
+{{ .Header }}
+{{ $p := .Port }}{{ $a := .Adapter }}
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
+use {{ .CratePath }}types::{{ $p.InstantSnake }}::{{ $p.Instant }};
+use {{ .CratePath }}types::{{ $p.SpanSnake }}::{{ $p.Span }};
+
+#[derive(Default)]
+pub struct {{ $a.ConfigStruct }} {}
+
+#[derive(Default)]
+pub struct {{ $a.Struct }} {}
+
+impl {{ $a.Struct }} {
+    pub fn new(_config: {{ $a.ConfigStruct }}) -> Self {
+        Self {}
+    }
+}
+
+impl {{ $p.Name }} for {{ $a.Struct }} {
+    fn now(&self) -> Result<{{ $p.Instant }}, {{ $p.Error }}> {
+        let since_epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|source| {{ $p.Error }}::Call {
+                method: "now".to_string(),
+                source: Box::new(source),
+            })?;
+
+        let {{ $p.InstantField }} = i64::try_from(since_epoch.as_millis()).map_err(|source| {{ $p.Error }}::Call {
+            method: "now".to_string(),
+            source: Box::new(source),
+        })?;
+
+        Ok({{ $p.Instant }} { {{ $p.InstantField }} })
+    }
+
+    fn elapsed(&self, request: {{ $p.Instant }}) -> Result<{{ $p.Span }}, {{ $p.Error }}> {
+        let now = self.now()?;
+
+        let {{ $p.SpanField }} = now
+            .{{ $p.InstantField }}
+            .checked_sub(request.{{ $p.InstantField }})
+            .filter(|{{ $p.SpanField }}| *{{ $p.SpanField }} >= 0)
+            .ok_or_else(|| {{ $p.Error }}::Refused {
+                method: "elapsed".to_string(),
+                reason: format!("{} is not a moment this clock has reached", request.{{ $p.InstantField }}),
+            })?;
+
+        Ok({{ $p.Span }} { {{ $p.SpanField }} })
     }
 }
 {{ end -}}

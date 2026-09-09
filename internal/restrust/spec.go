@@ -197,13 +197,15 @@ type HandMethod struct {
 }
 
 type HandPort struct {
-	Name     string
-	Snake    string
-	Kind     string
-	Instant  string
-	Span     string
-	Adapters []string
-	Methods  []HandMethod
+	Name         string
+	Snake        string
+	Kind         string
+	Instant      string
+	InstantField string
+	Span         string
+	SpanField    string
+	Adapters     []string
+	Methods      []HandMethod
 }
 
 type Operation struct {
@@ -270,14 +272,17 @@ const SubscribePortSuffix = "Subscribe"
 
 const ClockPortKind = "clock"
 
-const ClockAdapterMemory = "memory"
+const (
+	ClockAdapterMemory = "memory"
+	ClockAdapterSystem = "system"
+)
 
 func PortKinds() []string {
 	return []string{ClockPortKind}
 }
 
 func ClockAdapterKinds() []string {
-	return []string{ClockAdapterMemory}
+	return []string{ClockAdapterMemory, ClockAdapterSystem}
 }
 
 const (
@@ -631,7 +636,7 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 		storeTypes[s.Name] = s
 	}
 
-	hands, err := collectHandPorts(paths, schemas, storeNames)
+	hands, err := collectHandPorts(paths, byName, storeNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -670,8 +675,8 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 	return ops, hands, nil
 }
 
-func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[string]schema, storeNames map[string]bool) ([]HandPort, error) {
-	byName := map[string]HandPort{}
+func collectHandPorts(paths map[string]map[string]json.RawMessage, byName map[string]TypeDef, storeNames map[string]bool) ([]HandPort, error) {
+	handsByName := map[string]HandPort{}
 
 	for _, path := range sortedKeys(paths) {
 		for _, method := range methods {
@@ -692,38 +697,38 @@ func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[s
 					continue
 				}
 
-				hand, err := parseHandPort(where, ref, schemas, storeNames)
+				hand, err := parseHandPort(where, ref, byName, storeNames)
 				if err != nil {
 					return nil, err
 				}
 
-				known, seen := byName[hand.Name]
+				known, seen := handsByName[hand.Name]
 				if seen && !reflect.DeepEqual(known, hand) {
 					return nil, fmt.Errorf("reading %s: x-ports declares port %q a second time with a different declaration, declare it once and name it by its name everywhere else", where, hand.Name)
 				}
 
-				byName[hand.Name] = hand
+				handsByName[hand.Name] = hand
 			}
 		}
 	}
 
-	hands := make([]HandPort, 0, len(byName))
-	for _, name := range sortedKeys(byName) {
-		hands = append(hands, byName[name])
+	hands := make([]HandPort, 0, len(handsByName))
+	for _, name := range sortedKeys(handsByName) {
+		hands = append(hands, handsByName[name])
 	}
 
 	return hands, nil
 }
 
-func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
+func parseHandPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
 	if ref.Kind != ClockPortKind {
 		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the declared kinds are %s, every other entry is the name of a store or subscribe port", where, ref.Kind, list(PortKinds()))
 	}
 
-	return parseClockPort(where, ref, schemas, storeNames)
+	return parseClockPort(where, ref, byName, storeNames)
 }
 
-func parseClockPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
+func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
 	if err := checkPortName(where, ClockPortKind, ref.Name, storeNames); err != nil {
 		return HandPort{}, err
 	}
@@ -732,14 +737,14 @@ func parseClockPort(where string, ref portRef, schemas map[string]schema, storeN
 		return HandPort{}, fmt.Errorf("reading %s: clock port %q declares methods, a clock answers now and elapsed and the engine writes both", where, ref.Name)
 	}
 
-	for label, name := range map[string]string{"instant": ref.Instant, "span": ref.Span} {
-		if name == "" {
-			return HandPort{}, fmt.Errorf("reading %s: clock port %q names no %s, a clock declaration names the two schemas it speaks", where, ref.Name, label)
-		}
+	instantField, err := clockField(where, ref.Name, "instant", ref.Instant, byName)
+	if err != nil {
+		return HandPort{}, err
+	}
 
-		if _, ok := schemas[name]; !ok {
-			return HandPort{}, fmt.Errorf("reading %s: clock port %q names %s %q, which is not a schema of components.schemas", where, ref.Name, label, name)
-		}
+	spanField, err := clockField(where, ref.Name, "span", ref.Span, byName)
+	if err != nil {
+		return HandPort{}, err
 	}
 
 	if ref.Instant == ref.Span {
@@ -755,23 +760,65 @@ func parseClockPort(where string, ref portRef, schemas map[string]schema, storeN
 	}
 
 	for _, kind := range *ref.Adapters {
-		if kind != ClockAdapterMemory {
+		if !holds(ClockAdapterKinds(), kind) {
 			return HandPort{}, fmt.Errorf("reading %s: clock port %q names adapter kind %q, a clock adapter is one of %s", where, ref.Name, kind, list(ClockAdapterKinds()))
 		}
 	}
 
 	return HandPort{
-		Name:     ref.Name,
-		Snake:    rustname.Snake(ref.Name),
-		Kind:     ClockPortKind,
-		Instant:  ref.Instant,
-		Span:     ref.Span,
-		Adapters: *ref.Adapters,
+		Name:         ref.Name,
+		Snake:        rustname.Snake(ref.Name),
+		Kind:         ClockPortKind,
+		Instant:      ref.Instant,
+		InstantField: instantField,
+		Span:         ref.Span,
+		SpanField:    spanField,
+		Adapters:     *ref.Adapters,
 		Methods: []HandMethod{
 			{Name: "now", Ident: "now", Reply: ref.Instant},
 			{Name: "elapsed", Ident: "elapsed", Request: ref.Instant, Reply: ref.Span},
 		},
 	}, nil
+}
+
+func clockField(where, port, label, name string, byName map[string]TypeDef) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("reading %s: clock port %q names no %s, a clock declaration names the two schemas it speaks", where, port, label)
+	}
+
+	declared, ok := byName[name]
+	if !ok {
+		return "", fmt.Errorf("reading %s: clock port %q names %s %q, which is not a schema of components.schemas", where, port, label, name)
+	}
+
+	if len(declared.Fields) != 1 {
+		return "", fmt.Errorf("reading %s: clock port %q names %s %q, which declares %d properties, a clock reads and writes one number so its %s carries one property and the engine takes that property's name from the schema", where, port, label, name, len(declared.Fields), label)
+	}
+
+	field := declared.Fields[0]
+	if field.Type.Kind != "integer" || field.Optional {
+		return "", fmt.Errorf("reading %s: clock port %q names %s %q, whose one property %q is %s, a clock counts in whole units so that property is a required integer", where, port, label, name, field.Name, describeClockField(field))
+	}
+
+	return field.Ident, nil
+}
+
+func holds(declared []string, name string) bool {
+	for _, entry := range declared {
+		if entry == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func describeClockField(field Field) string {
+	if field.Optional {
+		return "optional and of type " + field.Type.Kind
+	}
+
+	return "of type " + field.Type.Kind
 }
 
 func checkPortName(where, kind, name string, storeNames map[string]bool) error {

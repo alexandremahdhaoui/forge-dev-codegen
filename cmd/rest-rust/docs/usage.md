@@ -126,7 +126,7 @@ x-ports:
     name: GreetingClock
     instant: Instant
     span: Span
-    adapters: [memory]
+    adapters: [memory, system]
 ```
 
 The name is Pascal case and may not take the name of a store or
@@ -134,6 +134,17 @@ subscribe port. A kind says what the port is, so the engine writes both
 its trait and every adapter its `adapters` list names. There is no kind
 that carries raw Rust signatures and leaves the adapter to the user. A
 port the engine cannot write is a port that belongs in its own spec.
+
+A clock adapter is `memory` or `system`. The memory clock starts at the
+moment its configuration names and steps one unit per call, so a vector
+reads the same stamp on every run. The system clock reads the machine
+through the standard library and takes no configuration. A service that
+expires anything wires `system`.
+
+A clock names two schemas and each carries one required integer
+property. The engine takes the field names from those schemas, so the
+declaration owns them and the engine invents nothing. A schema carrying
+any other shape is refused by name.
 
 The engine writes `port/zz_generated_<snake>.rs` holding
 `<Name>Error` with a `Refused` and a `Call` arm and the trait under

@@ -135,22 +135,29 @@ type handMethodView struct {
 }
 
 type handPortView struct {
-	Name               string
-	Snake              string
-	PortSnake          string
-	Error              string
-	Kind               string
-	Instant            string
-	InstantSnake       string
-	Span               string
-	SpanSnake          string
-	HasMemory          bool
-	MemoryStruct       string
-	MemoryConfigStruct string
-	MemoryAdapterName  string
-	MemoryModule       string
-	Imports            []importView
-	Methods            []handMethodView
+	Name         string
+	Snake        string
+	PortSnake    string
+	Error        string
+	Kind         string
+	Instant      string
+	InstantSnake string
+	InstantField string
+	Span         string
+	SpanSnake    string
+	SpanField    string
+	Adapters     []handAdapterView
+	Imports      []importView
+	Methods      []handMethodView
+}
+
+type handAdapterView struct {
+	Kind         string
+	Template     string
+	Struct       string
+	ConfigStruct string
+	AdapterName  string
+	Module       string
 }
 
 type paramView struct {
@@ -549,23 +556,28 @@ func convert(expr string, ft fieldType, optional bool) (string, bool) {
 
 func buildHandPortView(h HandPort) handPortView {
 	hv := handPortView{
-		Name:               h.Name,
-		Snake:              h.Snake,
-		PortSnake:          h.Snake,
-		Error:              h.Name + "Error",
-		Kind:               h.Kind,
-		Instant:            h.Instant,
-		InstantSnake:       rustname.Snake(h.Instant),
-		Span:               h.Span,
-		SpanSnake:          rustname.Snake(h.Span),
-		MemoryStruct:       h.Name + "Memory",
-		MemoryConfigStruct: h.Name + "MemoryConfig",
-		MemoryAdapterName:  h.Snake + "_memory",
-		MemoryModule:       h.Snake + "_memory",
+		Name:         h.Name,
+		Snake:        h.Snake,
+		PortSnake:    h.Snake,
+		Error:        h.Name + "Error",
+		Kind:         h.Kind,
+		Instant:      h.Instant,
+		InstantSnake: rustname.Snake(h.Instant),
+		InstantField: h.InstantField,
+		Span:         h.Span,
+		SpanSnake:    rustname.Snake(h.Span),
+		SpanField:    h.SpanField,
 	}
 
 	for _, kind := range h.Adapters {
-		hv.HasMemory = hv.HasMemory || kind == ClockAdapterMemory
+		hv.Adapters = append(hv.Adapters, handAdapterView{
+			Kind:         kind,
+			Template:     h.Kind + "_" + kind,
+			Struct:       h.Name + rustname.Pascal(kind),
+			ConfigStruct: h.Name + rustname.Pascal(kind) + "Config",
+			AdapterName:  h.Snake + "_" + kind,
+			Module:       h.Snake + "_" + kind,
+		})
 	}
 
 	imports := map[string]bool{}
