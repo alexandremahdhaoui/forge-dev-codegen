@@ -31,11 +31,17 @@ components:
       required: [name]
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups: []
+        adapters: [sqlite]
       required: [id, name, count]
     PlayerScore:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups: []
+        adapters: [sqlite]
       required: [id, score]
 `
 
@@ -104,7 +110,7 @@ func TestStoresRefusesADocumentThatIsNotYaml(t *testing.T) {
 }
 
 func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
-	doc := "components:\n  schemas:\n    \"Bad; DROP\":\n      x-store: true\n    \"9Lives\":\n      x-store: true\n"
+	doc := "components:\n  schemas:\n    \"Bad; DROP\":\n      x-store:\n        key: id\n    \"9Lives\":\n      x-store:\n        key: id\n"
 
 	for _, name := range []string{"Bad; DROP", "9Lives"} {
 		if _, err := Stores([]byte(doc), []string{name}); err == nil {
@@ -114,11 +120,46 @@ func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
 }
 
 func TestDDLMatchesTheSchemaTheHexagonalRustSqliteAdapterCreates(t *testing.T) {
-	want := "CREATE TABLE IF NOT EXISTS \"greeting\" (id TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
+	want := "CREATE TABLE IF NOT EXISTS \"greeting\" (\"id\" TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
 		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
 
-	if got := DDL("greeting"); got != want {
+	if got := DDL("greeting", "id"); got != want {
 		t.Errorf("DDL:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
+	doc := "components:\n  schemas:\n    Account:\n      type: object\n      x-store:\n        key: subject\n        lookups: []\n        adapters: [sqlite]\n"
+
+	stores, err := Stores([]byte(doc), []string{"Account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if stores[0].Key != "subject" {
+		t.Fatalf("key: %q", stores[0].Key)
+	}
+
+	if !strings.Contains(DDL(stores[0].Snake, stores[0].Key), `"subject" TEXT PRIMARY KEY`) {
+		t.Errorf("DDL: %s", DDL(stores[0].Snake, stores[0].Key))
+	}
+}
+
+func TestTheBooleanFormOfXStoreIsRefusedNamingTheSchema(t *testing.T) {
+	doc := "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store: true\n"
+
+	_, err := Stores([]byte(doc), []string{"Greeting"})
+	if err == nil || !strings.Contains(err.Error(), `finding store "Greeting": x-store is a boolean`) {
+		t.Fatalf("the boolean form was not refused by name: %v", err)
+	}
+}
+
+func TestAStoreThatNamesNoKeyIsRefusedByName(t *testing.T) {
+	doc := "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store:\n        lookups: []\n        adapters: [sqlite]\n"
+
+	_, err := Stores([]byte(doc), []string{"Greeting"})
+	if err == nil || !strings.Contains(err.Error(), "x-store names no key") {
+		t.Fatalf("a store with no key was not refused by name: %v", err)
 	}
 }
 
@@ -206,9 +247,9 @@ func TestSeedsRefusesABrokenVectorsFileAndANonObjectReply(t *testing.T) {
 }
 
 func TestScriptQuotesEveryValueAndWritesOneAuditRowPerSeed(t *testing.T) {
-	script := Script("greeting", []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
+	script := Script("greeting", "id", []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
 
-	if !strings.Contains(script, "INSERT OR REPLACE INTO \"greeting\" (id, body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
+	if !strings.Contains(script, "INSERT OR REPLACE INTO \"greeting\" (\"id\", body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
 		t.Errorf("script:\n%s", script)
 	}
 
@@ -227,7 +268,7 @@ func TestPlanPairsEveryStoreWithItsRowsAndScript(t *testing.T) {
 		t.Fatalf("databases: %+v", databases)
 	}
 
-	if !strings.HasPrefix(databases[0].Script, DDL("greeting")) {
+	if !strings.HasPrefix(databases[0].Script, DDL("greeting", "id")) {
 		t.Errorf("script: %s", databases[0].Script)
 	}
 }
@@ -238,7 +279,7 @@ func TestPlanWithoutVectorsYieldsEmptyStores(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(databases[0].Rows) != 0 || databases[0].Script != DDL("greeting")+"\n" {
+	if len(databases[0].Rows) != 0 || databases[0].Script != DDL("greeting", "id")+"\n" {
 		t.Errorf("databases: %+v", databases)
 	}
 }
@@ -261,7 +302,7 @@ func TestTheDetectedWriterCreatesAFileThatHoldsTheSeededRows(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "greeting.db")
 
-	if err := writer.Write(context.Background(), path, Script("greeting", []Row{{ID: "1", Body: `{"id":"1"}`}})); err != nil {
+	if err := writer.Write(context.Background(), path, Script("greeting", "id", []Row{{ID: "1", Body: `{"id":"1"}`}})); err != nil {
 		t.Fatal(err)
 	}
 

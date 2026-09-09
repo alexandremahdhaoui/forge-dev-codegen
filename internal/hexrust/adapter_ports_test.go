@@ -40,7 +40,9 @@ paths:
       operationId: streamGreetingEvents
       x-controller: greeting
       x-auth: bearer
-      x-stream: events
+      x-stream:
+        from: Greeting
+        adapters: [memory]
       parameters:
         - name: id
           in: path
@@ -58,7 +60,10 @@ components:
   schemas:
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups: []
+        adapters: [sqlite]
       required: [id, name]
       properties:
         id:

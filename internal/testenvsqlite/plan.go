@@ -45,7 +45,7 @@ func Plan(doc []byte, names []string, vectors []byte) ([]Database, error) {
 		databases = append(databases, Database{
 			Store:  store,
 			Rows:   rows[store.Snake],
-			Script: Script(store.Snake, rows[store.Snake]),
+			Script: Script(store.Snake, store.Key, rows[store.Snake]),
 		})
 	}
 

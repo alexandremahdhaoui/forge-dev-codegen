@@ -150,36 +150,6 @@ impl TicketVerifier for TicketMemoryVerifier {
 }
 `
 
-const guardedEventMemory = `use crate::adapter::GreetingEventMemoryFeedConfig;
-use crate::rest::port::greeting_event_subscribe::{
-    GreetingEventSubscribe, GreetingEventSubscribeError,
-};
-use crate::rest::types::greeting_event::GreetingEvent;
-
-pub struct GreetingEventMemoryFeed;
-
-impl GreetingEventMemoryFeed {
-    pub fn new(_config: GreetingEventMemoryFeedConfig) -> Self {
-        Self
-    }
-}
-
-impl GreetingEventSubscribe for GreetingEventMemoryFeed {
-    fn subscribe(&self, key: &str) -> Result<std::sync::mpsc::Receiver<GreetingEvent>, GreetingEventSubscribeError> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-
-        sender
-            .send(GreetingEvent { id: key.to_string() })
-            .map_err(|source| GreetingEventSubscribeError::Subscribe {
-                key: key.to_string(),
-                source: Box::new(source),
-            })?;
-
-        Ok(receiver)
-    }
-}
-`
-
 func TestTwoRestCellsShareTheCrateRootPortsAndTheCrateCompiles(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
@@ -210,12 +180,6 @@ ports:
         module: adapter::ticket_memory
         config:
           secret: { type: string, default: open }
-  GreetingEventSubscribe:
-    default: memory
-    adapters:
-      memory:
-        type: GreetingEventMemoryFeed
-        module: adapter::greeting_event_memory
 drivers:
   rest: { enabled: true }
 `),
@@ -233,7 +197,6 @@ drivers:
 	write("Cargo.toml", strings.ReplaceAll(guardedCrateManifest, "SONGE_COMMON_DIR", songeCommonDir(t)))
 	write("src/config/zz_generated_config.rs", guardedConfigLoader)
 	write("src/adapter/ticket_memory.rs", guardedTicketMemory)
-	write("src/adapter/greeting_event_memory.rs", guardedEventMemory)
 	write("src/rest/controller/greeting_controller.rs", guardedControllerImpl)
 
 	out, err := runCargo(t, cargo, root, "check", "--workspace", "--all-targets")

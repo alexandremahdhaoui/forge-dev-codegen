@@ -43,7 +43,10 @@ components:
   schemas:
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups: []
+        adapters: [sqlite]
       required: [id]
       properties:
         id:

@@ -60,8 +60,8 @@ func Seeds(vectors []byte, stores []Store) (map[string][]Row, error) {
 		}
 
 		var id string
-		if err := json.Unmarshal(reply["id"], &id); err != nil {
-			return nil, fmt.Errorf("reading the id of case %q: %w", v.Case, err)
+		if err := json.Unmarshal(reply[store.Key], &id); err != nil {
+			return nil, fmt.Errorf("reading the %s of case %q: %w", store.Key, v.Case, err)
 		}
 
 		var body bytes.Buffer
@@ -76,25 +76,29 @@ func Seeds(vectors []byte, stores []Store) (map[string][]Row, error) {
 }
 
 func storeOf(operation string, reply map[string]json.RawMessage, stores []Store) (Store, bool) {
-	if _, ok := reply["id"]; !ok {
-		return Store{}, false
-	}
-
 	named := strings.ToLower(strings.TrimPrefix(operation, "create"))
 
 	for _, s := range stores {
-		if strings.ToLower(s.Name) == named && covers(reply, s.Required) {
+		if strings.ToLower(s.Name) == named && keyed(reply, s) {
 			return s, true
 		}
 	}
 
 	for _, s := range stores {
-		if covers(reply, s.Required) {
+		if keyed(reply, s) {
 			return s, true
 		}
 	}
 
 	return Store{}, false
+}
+
+func keyed(reply map[string]json.RawMessage, s Store) bool {
+	if _, ok := reply[s.Key]; !ok {
+		return false
+	}
+
+	return covers(reply, s.Required)
 }
 
 func covers(reply map[string]json.RawMessage, required []string) bool {

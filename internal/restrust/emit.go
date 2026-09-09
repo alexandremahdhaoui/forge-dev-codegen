@@ -36,6 +36,10 @@ const DefaultAddress = "127.0.0.1:0"
 
 const DefaultStorePath = ":memory:"
 
+const DefaultStoreCapacity = 100
+
+const DefaultFeedBacklog = 64
+
 const DefaultBaseURL = "http://127.0.0.1:8080"
 
 const (
@@ -222,16 +226,26 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		s := s
 
 		mount("port", modEntry{Module: "zz_generated_" + s.PortSnake, Alias: s.PortSnake})
-		mount("adapter", modEntry{Module: "zz_generated_" + s.Module, Alias: s.Module})
 
-		steps = append(steps,
-			func() error {
-				return add(path.Join("port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
-			},
-			func() error {
+		steps = append(steps, func() error {
+			return add(path.Join("port", "zz_generated_"+s.PortSnake+".rs"), "port", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
+		})
+
+		if s.HasSqlite {
+			mount("adapter", modEntry{Module: "zz_generated_" + s.Module, Alias: s.Module})
+
+			steps = append(steps, func() error {
 				return add(path.Join("adapter", "zz_generated_"+s.Module+".rs"), "sqlite", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
-			},
-		)
+			})
+		}
+
+		if s.HasMemory {
+			mount("adapter", modEntry{Module: "zz_generated_" + s.MemoryModule, Alias: s.MemoryModule})
+
+			steps = append(steps, func() error {
+				return add(path.Join("adapter", "zz_generated_"+s.MemoryModule+".rs"), "memory_store", map[string]any{"Header": v.Header, "Store": s, "CratePath": v.CratePath})
+			})
+		}
 	}
 
 	for _, e := range v.Events {
@@ -242,6 +256,14 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		steps = append(steps, func() error {
 			return add(path.Join("port", "zz_generated_"+e.PortSnake+".rs"), "subscribe_port", map[string]any{"Header": v.Header, "Event": e, "CratePath": v.CratePath})
 		})
+
+		if e.HasMemory {
+			mount("adapter", modEntry{Module: "zz_generated_" + e.MemoryModule, Alias: e.MemoryModule})
+
+			steps = append(steps, func() error {
+				return add(path.Join("adapter", "zz_generated_"+e.MemoryModule+".rs"), "memory_feed", map[string]any{"Header": v.Header, "Event": e, "CratePath": v.CratePath})
+			})
+		}
 	}
 
 	for _, h := range v.HandPorts {
@@ -370,20 +392,46 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Module: v.ModulePrefix + "port::" + s.PortSnake,
 		})
 
-		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
-			Name:       s.AdapterName,
-			Type:       s.Struct,
-			Module:     v.ModulePrefix + "adapter::" + s.Module,
-			Implements: s.Port,
-			Fallible:   true,
-			Config: map[string]cellmanifest.ConfigField{
-				"path": {
-					Type:        cellmanifest.FieldTypeString,
-					Default:     DefaultStorePath,
-					Description: "The sqlite file the " + s.Snake + " store opens",
+		consumed := []string{}
+		if s.Publishes != nil {
+			consumed = append(consumed, s.Publishes.Port)
+		}
+
+		if s.HasSqlite {
+			m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+				Name:       s.AdapterName,
+				Type:       s.Struct,
+				Module:     v.ModulePrefix + "adapter::" + s.Module,
+				Implements: s.Port,
+				Fallible:   true,
+				Ports:      consumed,
+				Config: map[string]cellmanifest.ConfigField{
+					"path": {
+						Type:        cellmanifest.FieldTypeString,
+						Default:     DefaultStorePath,
+						Description: "The sqlite file the " + s.Snake + " store opens",
+					},
 				},
-			},
-		})
+			})
+		}
+
+		if s.HasMemory {
+			m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+				Name:       s.MemoryAdapterName,
+				Type:       s.MemoryStruct,
+				Module:     v.ModulePrefix + "adapter::" + s.MemoryModule,
+				Implements: s.Port,
+				Fallible:   true,
+				Ports:      consumed,
+				Config: map[string]cellmanifest.ConfigField{
+					"capacity": {
+						Type:        cellmanifest.FieldTypeInteger,
+						Default:     DefaultStoreCapacity,
+						Description: "How many " + s.Snake + " rows the memory store holds before it refuses a new one",
+					},
+				},
+			})
+		}
 	}
 
 	for _, e := range v.Events {
@@ -391,7 +439,20 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Trait:  e.Port,
 			Module: v.ModulePrefix + "port::" + e.PortSnake,
 		})
-		m.Requires.Ports = append(m.Requires.Ports, e.Port)
+
+		if !e.HasMemory {
+			m.Requires.Ports = append(m.Requires.Ports, e.Port)
+
+			continue
+		}
+
+		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+			Name:       e.MemoryAdapterName,
+			Type:       e.MemoryStruct,
+			Module:     v.ModulePrefix + "adapter::" + e.MemoryModule,
+			Implements: e.Port,
+			Config:     map[string]cellmanifest.ConfigField{},
+		})
 	}
 
 	for _, h := range v.HandPorts {
@@ -513,12 +574,26 @@ pub enum {{ .Store.Port }}Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("looking {{ .Store.Snake }} up by {by} {value:?}")]
+    Lookup {
+        by: String,
+        value: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .Store.Port }}: Send + Sync {
     fn put(&self, v: {{ .Store.Name }}) -> Result<(), {{ .Store.Port }}Error>;
-    fn get(&self, id: &str) -> Result<Option<{{ .Store.Name }}>, {{ .Store.Port }}Error>;
+    fn get(&self, {{ .Store.KeyIdent }}: &str) -> Result<Option<{{ .Store.Name }}>, {{ .Store.Port }}Error>;
+{{- range .Store.Lookups }}
+{{- if .Page }}
+    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
+{{- else }}
+    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
+{{- end }}
+{{- end }}
 }
 {{ end -}}
 
@@ -535,11 +610,18 @@ pub enum {{ .Event.Port }}Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("publishing a {{ .Event.Snake }} event for {key:?}")]
+    Publish {
+        key: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .Event.Port }}: Send + Sync {
     fn subscribe(&self, key: &str) -> Result<std::sync::mpsc::Receiver<{{ .Event.Name }}>, {{ .Event.Port }}Error>;
+    fn publish(&self, key: &str, event: {{ .Event.Name }}) -> Result<(), {{ .Event.Port }}Error>;
 }
 {{ end -}}
 
@@ -652,13 +734,20 @@ impl {{ $c.Pascal }}ControllerImpl {
 {{ .Header }}
 {{ $s := .Store }}
 use std::sync::Mutex;
+{{- if $s.Publishes }}
+use std::sync::Arc;
+{{- end }}
 
 use rusqlite::OptionalExtension;
 
 use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ "}" }};
 use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
+{{- if $s.Publishes }}
+use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
+use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
+{{- end }}
 
-const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS {{ $s.Snake }} (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS {{ $s.Snake }} ({{ $s.Key }} TEXT PRIMARY KEY, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);";
 
 pub struct {{ $s.ConfigStruct }} {
@@ -705,10 +794,13 @@ pub enum {{ $s.Name }}SqliteError {
 
 pub struct {{ $s.Struct }} {
     connection: Mutex<rusqlite::Connection>,
+{{- if $s.Publishes }}
+    {{ $s.Publishes.PortSnake }}: Arc<dyn {{ $s.Publishes.Port }} + Send + Sync>,
+{{- end }}
 }
 
 impl {{ $s.Struct }} {
-    pub fn new(config: {{ $s.ConfigStruct }}) -> Result<Self, {{ $s.Name }}SqliteError> {
+    pub fn new(config: {{ $s.ConfigStruct }}{{ if $s.Publishes }}, {{ $s.Publishes.PortSnake }}: Arc<dyn {{ $s.Publishes.Port }} + Send + Sync>{{ end }}) -> Result<Self, {{ $s.Name }}SqliteError> {
         let path = config.path;
         let connection = rusqlite::Connection::open(&path).map_err(|source| {{ $s.Name }}SqliteError::Open {
             path: path.clone(),
@@ -719,11 +811,44 @@ impl {{ $s.Struct }} {
             .map_err(|source| {{ $s.Name }}SqliteError::Schema { path, source })?;
         Ok(Self {
             connection: Mutex::new(connection),
+{{- if $s.Publishes }}
+            {{ $s.Publishes.PortSnake }},
+{{- end }}
         })
     }
 
+    fn rows_where(&self, column: &str, value: &str, after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+        let sql = |source| {{ $s.Name }}SqliteError::Sql {
+            id: value.to_string(),
+            source,
+        };
+        let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
+        let statement = format!(
+            "SELECT body FROM {{ $s.Snake }} WHERE json_extract(body, '$.{}') = ?1 AND {{ $s.Key }} > ?2 ORDER BY {{ $s.Key }} LIMIT ?3",
+            column
+        );
+        let mut prepared = connection.prepare(&statement).map_err(sql)?;
+        let bodies = prepared
+            .query_map(
+                rusqlite::params![value, after.unwrap_or(""), limit.unwrap_or(-1)],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(sql)?
+            .collect::<Result<Vec<String>, rusqlite::Error>>()
+            .map_err(sql)?;
+
+        bodies
+            .iter()
+            .map(|text| serde_json::from_str(text))
+            .collect::<Result<Vec<{{ $s.Name }}>, serde_json::Error>>()
+            .map_err(|source| {{ $s.Name }}SqliteError::Json {
+                id: value.to_string(),
+                source,
+            })
+    }
+
     fn put_row(&self, v: &{{ $s.Name }}) -> Result<(), {{ $s.Name }}SqliteError> {
-        let id = v.id.clone();
+        let id = v.{{ $s.KeyIdent }}.clone();
         let sql = |source| {{ $s.Name }}SqliteError::Sql {
             id: id.clone(),
             source,
@@ -735,11 +860,11 @@ impl {{ $s.Struct }} {
         let mut connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
         let tx = connection.transaction().map_err(sql)?;
         let before: Option<String> = tx
-            .query_row("SELECT body FROM {{ $s.Snake }} WHERE id = ?1", [&id], |row| row.get(0))
+            .query_row("SELECT body FROM {{ $s.Snake }} WHERE {{ $s.Key }} = ?1", [&id], |row| row.get(0))
             .optional()
             .map_err(sql)?;
         tx.execute(
-            "INSERT INTO {{ $s.Snake }} (id, body) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET body = excluded.body",
+            "INSERT INTO {{ $s.Snake }} ({{ $s.Key }}, body) VALUES (?1, ?2) ON CONFLICT({{ $s.Key }}) DO UPDATE SET body = excluded.body",
             (&id, &after),
         )
         .map_err(sql)?;
@@ -751,6 +876,13 @@ impl {{ $s.Struct }} {
         tx.commit().map_err(sql)?;
         Ok(())
     }
+
+{{- if $s.HasOneLookup }}
+
+    fn one_where(&self, column: &str, value: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+        Ok(self.rows_where(column, value, None, Some(1))?.into_iter().next())
+    }
+{{- end }}
 
     fn get_row(&self, id: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
         let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
@@ -772,18 +904,313 @@ impl {{ $s.Struct }} {
 
 impl {{ $s.Port }} for {{ $s.Struct }} {
     fn put(&self, v: {{ $s.Name }}) -> Result<(), {{ $s.Port }}Error> {
-        let id = v.id.clone();
+        let id = v.{{ $s.KeyIdent }}.clone();
         self.put_row(&v).map_err(|source| {{ $s.Port }}Error::Put {
-            id,
+            id: id.clone(),
+            source: Box::new(source),
+        })?;
+{{- if $s.Publishes }}
+        self.{{ $s.Publishes.PortSnake }}
+            .publish(
+                &id,
+                {{ $s.Publishes.Name }} {
+{{- range $s.Publishes.Assigns }}
+                    {{ . }}
+{{- end }}
+                },
+            )
+            .map_err(|source| {{ $s.Port }}Error::Put {
+                id,
+                source: Box::new(source),
+            })?;
+{{- end }}
+        Ok(())
+    }
+
+    fn get(&self, {{ $s.KeyIdent }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.get_row({{ $s.KeyIdent }}).map_err(|source| {{ $s.Port }}Error::Get {
+            id: {{ $s.KeyIdent }}.to_string(),
             source: Box::new(source),
         })
     }
+{{- range $s.Lookups }}
+{{- if .Page }}
 
-    fn get(&self, id: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.get_row(id).map_err(|source| {{ $s.Port }}Error::Get {
-            id: id.to_string(),
-            source: Box::new(source),
+    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where("{{ .By }}", {{ .Ident }}, after.as_deref(), limit)
+            .map_err(|source| {{ $s.Port }}Error::Lookup {
+                by: "{{ .By }}".to_string(),
+                value: {{ .Ident }}.to_string(),
+                source: Box::new(source),
+            })
+    }
+{{- else }}
+
+    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.one_where("{{ .By }}", {{ .Ident }})
+            .map_err(|source| {{ $s.Port }}Error::Lookup {
+                by: "{{ .By }}".to_string(),
+                value: {{ .Ident }}.to_string(),
+                source: Box::new(source),
+            })
+    }
+{{- end }}
+{{- end }}
+}
+{{ end -}}
+
+{{- define "memory_store" -}}
+{{ .Header }}
+{{ $s := .Store }}
+use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard};
+{{- if $s.Publishes }}
+use std::sync::Arc;
+{{- end }}
+
+use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ "}" }};
+use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
+{{- if $s.Publishes }}
+use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
+use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
+{{- end }}
+
+pub struct {{ $s.MemoryConfigStruct }} {
+    pub capacity: i64,
+}
+
+impl Default for {{ $s.MemoryConfigStruct }} {
+    fn default() -> Self {
+        Self { capacity: {{ $s.DefaultCapacity }} }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ $s.Name }}MemoryError {
+    #[error("sizing the {{ $s.Snake }} memory store: capacity {capacity} is below 1")]
+    CapacityBelowOne { capacity: i64 },
+    #[error("locking the {{ $s.Snake }} memory store: poisoned")]
+    Poisoned,
+    #[error("the {{ $s.Snake }} memory store holds its capacity of {capacity} rows and {{ $s.Key }} {key:?} is a new one")]
+    Full { capacity: usize, key: String },
+}
+
+type Rows = BTreeMap<String, {{ $s.Name }}>;
+
+pub struct {{ $s.MemoryStruct }} {
+    capacity: usize,
+    rows: Mutex<Rows>,
+{{- if $s.Publishes }}
+    {{ $s.Publishes.PortSnake }}: Arc<dyn {{ $s.Publishes.Port }} + Send + Sync>,
+{{- end }}
+}
+
+impl {{ $s.MemoryStruct }} {
+    pub fn new(config: {{ $s.MemoryConfigStruct }}{{ if $s.Publishes }}, {{ $s.Publishes.PortSnake }}: Arc<dyn {{ $s.Publishes.Port }} + Send + Sync>{{ end }}) -> Result<Self, {{ $s.Name }}MemoryError> {
+        let capacity = usize::try_from(config.capacity)
+            .ok()
+            .filter(|capacity| *capacity >= 1)
+            .ok_or({{ $s.Name }}MemoryError::CapacityBelowOne {
+                capacity: config.capacity,
+            })?;
+
+        Ok(Self {
+            capacity,
+            rows: Mutex::new(BTreeMap::new()),
+{{- if $s.Publishes }}
+            {{ $s.Publishes.PortSnake }},
+{{- end }}
         })
+    }
+
+    fn rows(&self) -> Result<MutexGuard<'_, Rows>, {{ $s.Name }}MemoryError> {
+        self.rows.lock().map_err(|_| {{ $s.Name }}MemoryError::Poisoned)
+    }
+
+    fn put_row(&self, v: &{{ $s.Name }}) -> Result<(), {{ $s.Name }}MemoryError> {
+        let mut rows = self.rows()?;
+        let key = v.{{ $s.KeyIdent }}.clone();
+
+        if rows.len() >= self.capacity && !rows.contains_key(&key) {
+            return Err({{ $s.Name }}MemoryError::Full {
+                capacity: self.capacity,
+                key,
+            });
+        }
+
+        rows.insert(key, v.clone());
+
+        Ok(())
+    }
+
+    fn rows_where(&self, column: &str, value: &str, after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}MemoryError> {
+        let rows = self.rows()?;
+        let taken = usize::try_from(limit.unwrap_or(-1)).unwrap_or(usize::MAX);
+
+        Ok(rows
+            .iter()
+            .filter(|(key, _)| after.is_none_or(|cursor| key.as_str() > cursor))
+            .map(|(_, row)| row)
+            .filter(|row| field_of(row, column) == value)
+            .take(taken)
+            .cloned()
+            .collect())
+    }
+}
+
+fn field_of(row: &{{ $s.Name }}, column: &str) -> String {
+    match column {
+{{- range $s.Lookups }}
+        "{{ .By }}" => row.{{ .Ident }}.clone(),
+{{- end }}
+        _ => String::new(),
+    }
+}
+
+impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
+    fn put(&self, v: {{ $s.Name }}) -> Result<(), {{ $s.Port }}Error> {
+        let id = v.{{ $s.KeyIdent }}.clone();
+        self.put_row(&v).map_err(|source| {{ $s.Port }}Error::Put {
+            id: id.clone(),
+            source: Box::new(source),
+        })?;
+{{- if $s.Publishes }}
+        self.{{ $s.Publishes.PortSnake }}
+            .publish(
+                &id,
+                {{ $s.Publishes.Name }} {
+{{- range $s.Publishes.Assigns }}
+                    {{ . }}
+{{- end }}
+                },
+            )
+            .map_err(|source| {{ $s.Port }}Error::Put {
+                id,
+                source: Box::new(source),
+            })?;
+{{- end }}
+        Ok(())
+    }
+
+    fn get(&self, {{ $s.KeyIdent }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        let rows = self.rows().map_err(|source| {{ $s.Port }}Error::Get {
+            id: {{ $s.KeyIdent }}.to_string(),
+            source: Box::new(source),
+        })?;
+
+        Ok(rows.get({{ $s.KeyIdent }}).cloned())
+    }
+{{- range $s.Lookups }}
+{{- if .Page }}
+
+    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where("{{ .By }}", {{ .Ident }}, after.as_deref(), limit)
+            .map_err(|source| {{ $s.Port }}Error::Lookup {
+                by: "{{ .By }}".to_string(),
+                value: {{ .Ident }}.to_string(),
+                source: Box::new(source),
+            })
+    }
+{{- else }}
+
+    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where("{{ .By }}", {{ .Ident }}, None, Some(1))
+            .map(|found| found.into_iter().next())
+            .map_err(|source| {{ $s.Port }}Error::Lookup {
+                by: "{{ .By }}".to_string(),
+                value: {{ .Ident }}.to_string(),
+                source: Box::new(source),
+            })
+    }
+{{- end }}
+{{- end }}
+}
+{{ end -}}
+
+{{- define "memory_feed" -}}
+{{ .Header }}
+{{ $e := .Event }}
+use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Mutex, MutexGuard};
+
+use {{ .CratePath }}port::{{ $e.PortSnake }}::{{ "{" }}{{ $e.Port }}, {{ $e.Port }}Error{{ "}" }};
+use {{ .CratePath }}types::{{ $e.Snake }}::{{ $e.Name }};
+
+#[derive(Default)]
+pub struct {{ $e.MemoryConfigStruct }} {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum {{ $e.Name }}MemoryError {
+    #[error("locking the {{ $e.Snake }} memory feed: poisoned")]
+    Poisoned,
+    #[error("opening the {{ $e.Snake }} memory feed: the key is empty")]
+    EmptyKey,
+}
+
+type Listeners = HashMap<String, Vec<Sender<{{ $e.Name }}>>>;
+
+pub struct {{ $e.MemoryStruct }} {
+    listeners: Mutex<Listeners>,
+}
+
+impl {{ $e.MemoryStruct }} {
+    pub fn new(config: {{ $e.MemoryConfigStruct }}) -> Self {
+        let {{ $e.MemoryConfigStruct }} {} = config;
+
+        Self {
+            listeners: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn listeners(&self) -> Result<MutexGuard<'_, Listeners>, {{ $e.Name }}MemoryError> {
+        self.listeners
+            .lock()
+            .map_err(|_| {{ $e.Name }}MemoryError::Poisoned)
+    }
+}
+
+impl {{ $e.Port }} for {{ $e.MemoryStruct }} {
+    fn subscribe(&self, key: &str) -> Result<Receiver<{{ $e.Name }}>, {{ $e.Port }}Error> {
+        let refuse = |source: {{ $e.Name }}MemoryError| {{ $e.Port }}Error::Subscribe {
+            key: key.to_string(),
+            source: Box::new(source),
+        };
+
+        if key.is_empty() {
+            return Err(refuse({{ $e.Name }}MemoryError::EmptyKey));
+        }
+
+        let (sender, receiver) = channel();
+
+        self.listeners()
+            .map_err(refuse)?
+            .entry(key.to_string())
+            .or_default()
+            .push(sender);
+
+        Ok(receiver)
+    }
+
+    fn publish(&self, key: &str, event: {{ $e.Name }}) -> Result<(), {{ $e.Port }}Error> {
+        let mut listeners = self
+            .listeners()
+            .map_err(|source| {{ $e.Port }}Error::Publish {
+                key: key.to_string(),
+                source: Box::new(source),
+            })?;
+
+        let Some(senders) = listeners.get_mut(key) else {
+            return Ok(());
+        };
+
+        senders.retain(|sender| sender.send(event.clone()).is_ok());
+
+        if senders.is_empty() {
+            listeners.remove(key);
+        }
+
+        Ok(())
     }
 }
 {{ end -}}

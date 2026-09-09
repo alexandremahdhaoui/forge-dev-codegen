@@ -37,7 +37,7 @@ type document struct {
 type schema struct {
 	Type       typeName          `json:"type"`
 	Ref        string            `json:"$ref"`
-	Store      bool              `json:"x-store"`
+	Store      json.RawMessage   `json:"x-store"`
 	Required   []string          `json:"required"`
 	Properties map[string]schema `json:"properties"`
 	Items      *schema           `json:"items"`
@@ -117,8 +117,8 @@ type operation struct {
 	Summary     string    `json:"summary"`
 	Controller  string    `json:"x-controller"`
 	Ports       []portRef `json:"x-ports"`
-	Auth        string    `json:"x-auth"`
-	Stream      string    `json:"x-stream"`
+	Auth        string          `json:"x-auth"`
+	Stream      json.RawMessage `json:"x-stream"`
 	Parameters  []struct {
 		Name     string `json:"name"`
 		In       string `json:"in"`
@@ -150,8 +150,21 @@ type fieldType struct {
 type TypeDef struct {
 	Name   string
 	Snake  string
-	Store  bool
+	Store  *Store
 	Fields []Field
+}
+
+type Store struct {
+	Key      string
+	KeyIdent string
+	Lookups  []Lookup
+	Adapters []string
+}
+
+type Lookup struct {
+	By      string
+	Ident   string
+	Answers string
 }
 
 type Param struct {
@@ -193,10 +206,12 @@ type Operation struct {
 	Response      string
 	Status        int
 	InvalidStatus int
-	Controller    string
-	Ports         []string
-	Auth          bool
-	Stream        bool
+	Controller     string
+	Ports          []string
+	Auth           bool
+	Stream         bool
+	StreamFrom     string
+	StreamAdapters []string
 }
 
 type Controller struct {
@@ -210,11 +225,18 @@ type Controller struct {
 type Spec struct {
 	Types       []TypeDef
 	Stores      []TypeDef
-	Events      []TypeDef
+	Events      []Event
 	HandPorts   []HandPort
 	Controllers []Controller
 	Operations  []Operation
 	Auth        bool
+}
+
+type Event struct {
+	TypeDef
+
+	From     TypeDef
+	Adapters []string
 }
 
 var methods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace"}
@@ -223,13 +245,35 @@ const forgeDevSpecSchema = "Spec"
 
 const AuthBearer = "bearer"
 
-const StreamEvents = "events"
+const FeedAdapterMemory = "memory"
+
+func FeedAdapterKinds() []string {
+	return []string{FeedAdapterMemory}
+}
 
 const StorePortSuffix = "Store"
 
 const SubscribePortSuffix = "Subscribe"
 
 const HandPortKind = "hand"
+
+const (
+	LookupOne  = "one"
+	LookupPage = "page"
+)
+
+const (
+	StoreAdapterSqlite = "sqlite"
+	StoreAdapterMemory = "memory"
+)
+
+func LookupWords() []string {
+	return []string{LookupOne, LookupPage}
+}
+
+func StoreAdapterKinds() []string {
+	return []string{StoreAdapterMemory, StoreAdapterSqlite}
+}
 
 const eventStreamContent = "text/event-stream"
 
@@ -260,7 +304,7 @@ func Parse(doc []byte) (*Spec, error) {
 
 	stores := []TypeDef{}
 	for _, t := range types {
-		if t.Store {
+		if t.Store != nil {
 			stores = append(stores, t)
 		}
 	}
@@ -270,7 +314,11 @@ func Parse(doc []byte) (*Spec, error) {
 		return nil, err
 	}
 
-	events := eventTypes(operations, types)
+	events, err := eventTypes(operations, types)
+	if err != nil {
+		return nil, err
+	}
+
 	auth := false
 
 	for _, op := range operations {
@@ -288,24 +336,39 @@ func Parse(doc []byte) (*Spec, error) {
 	}, nil
 }
 
-func eventTypes(operations []Operation, types []TypeDef) []TypeDef {
-	streamed := map[string]bool{}
+func eventTypes(operations []Operation, types []TypeDef) ([]Event, error) {
+	byName := map[string]TypeDef{}
+	for _, t := range types {
+		byName[t.Name] = t
+	}
+
+	streamed := map[string]Operation{}
 
 	for _, op := range operations {
-		if op.Stream {
-			streamed[op.Response] = true
+		if !op.Stream {
+			continue
 		}
+
+		known, seen := streamed[op.Response]
+		if seen && known.StreamFrom != op.StreamFrom {
+			return nil, fmt.Errorf("reading the x-stream operations: %q and %q both carry %q and read it from %q and %q, one event has one source", known.ID, op.ID, op.Response, known.StreamFrom, op.StreamFrom)
+		}
+
+		streamed[op.Response] = op
 	}
 
-	events := []TypeDef{}
+	events := []Event{}
 
 	for _, t := range types {
-		if streamed[t.Name] {
-			events = append(events, t)
+		op, ok := streamed[t.Name]
+		if !ok {
+			continue
 		}
+
+		events = append(events, Event{TypeDef: t, From: byName[op.StreamFrom], Adapters: op.StreamAdapters})
 	}
 
-	return events
+	return events, nil
 }
 
 func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
@@ -332,24 +395,119 @@ func parseTypes(schemas map[string]schema) ([]TypeDef, error) {
 			return nil, err
 		}
 
-		if s.Store && !hasStringID(fields) {
-			return nil, fmt.Errorf("reading schema %q: an x-store schema needs a required string property named id", name)
+		store, err := parseStore(name, s.Store, fields)
+		if err != nil {
+			return nil, err
 		}
 
-		types = append(types, TypeDef{Name: name, Snake: rustname.Snake(name), Store: s.Store, Fields: fields})
+		types = append(types, TypeDef{Name: name, Snake: rustname.Snake(name), Store: store, Fields: fields})
 	}
 
 	return types, nil
 }
 
-func hasStringID(fields []Field) bool {
-	for _, f := range fields {
-		if f.Name == "id" && !f.Optional && f.Type.Kind == "string" {
-			return true
-		}
+func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error) {
+	if len(raw) == 0 {
+		return nil, nil
 	}
 
-	return false
+	var flag bool
+	if err := json.Unmarshal(raw, &flag); err == nil {
+		return nil, fmt.Errorf("reading schema %q: x-store is a boolean, it is an object naming key, lookups and adapters", name)
+	}
+
+	var declared struct {
+		Key      string `json:"key"`
+		Lookups  *[]struct {
+			By      string `json:"by"`
+			Answers string `json:"answers"`
+		} `json:"lookups"`
+		Adapters *[]string `json:"adapters"`
+	}
+
+	if err := json.Unmarshal(raw, &declared); err != nil {
+		return nil, fmt.Errorf("reading schema %q: x-store is an object naming key, lookups and adapters: %w", name, err)
+	}
+
+	if declared.Key == "" {
+		return nil, fmt.Errorf("reading schema %q: x-store names no key, key names the required string property every row is stored under", name)
+	}
+
+	if declared.Lookups == nil {
+		return nil, fmt.Errorf("reading schema %q: x-store names no lookups, write an empty list when the key is the only way in", name)
+	}
+
+	if declared.Adapters == nil {
+		return nil, fmt.Errorf("reading schema %q: x-store names no adapters, adapters lists which of %s the engine emits", name, list(StoreAdapterKinds()))
+	}
+
+	if err := checkStoreField(name, "key", declared.Key, fields); err != nil {
+		return nil, err
+	}
+
+	store := &Store{Key: declared.Key, KeyIdent: rustname.RustIdent(declared.Key)}
+
+	seen := map[string]bool{}
+
+	for _, entry := range *declared.Lookups {
+		if err := checkStoreField(name, "lookup", entry.By, fields); err != nil {
+			return nil, err
+		}
+
+		if entry.By == declared.Key {
+			return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q, which is the key and is always reachable", name, entry.By)
+		}
+
+		if seen[entry.By] {
+			return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q twice", name, entry.By)
+		}
+
+		seen[entry.By] = true
+
+		if entry.Answers != LookupOne && entry.Answers != LookupPage {
+			return nil, fmt.Errorf("reading schema %q: the lookup by %q answers %q, a lookup answers one of %s", name, entry.By, entry.Answers, list(LookupWords()))
+		}
+
+		store.Lookups = append(store.Lookups, Lookup{
+			By:      entry.By,
+			Ident:   rustname.RustIdent(entry.By),
+			Answers: entry.Answers,
+		})
+	}
+
+	if len(*declared.Adapters) == 0 {
+		return nil, fmt.Errorf("reading schema %q: x-store names an empty adapters list, a store nobody can build is a store nobody can use", name)
+	}
+
+	for _, kind := range *declared.Adapters {
+		if kind != StoreAdapterSqlite && kind != StoreAdapterMemory {
+			return nil, fmt.Errorf("reading schema %q: x-store names adapter kind %q, a store adapter is one of %s", name, kind, list(StoreAdapterKinds()))
+		}
+
+		store.Adapters = append(store.Adapters, kind)
+	}
+
+	return store, nil
+}
+
+func checkStoreField(name, what, field string, fields []Field) error {
+	for _, f := range fields {
+		if f.Name != field {
+			continue
+		}
+
+		if f.Optional || f.Type.Kind != "string" {
+			return fmt.Errorf("reading schema %q: the x-store %s names property %q, which must be a required string property", name, what, field)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("reading schema %q: the x-store %s names property %q, which the schema does not declare", name, what, field)
+}
+
+func list(values []string) string {
+	return strings.Join(values, ", ")
 }
 
 func parseFields(typeName string, s schema, schemas map[string]schema) ([]Field, error) {
@@ -435,13 +593,19 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 	}
 
 	schemas := map[string]schema{}
+	byName := map[string]TypeDef{}
+
 	for _, t := range types {
 		schemas[t.Name] = schema{}
+		byName[t.Name] = t
 	}
 
 	storeNames := map[string]bool{}
+	storeTypes := map[string]TypeDef{}
+
 	for _, s := range stores {
 		storeNames[s.Name+"Store"] = true
+		storeTypes[s.Name] = s
 	}
 
 	hands, err := collectHandPorts(paths, schemas, storeNames)
@@ -463,7 +627,7 @@ func parseOperations(paths map[string]map[string]json.RawMessage, types, stores 
 				continue
 			}
 
-			op, err := parseOperation(path, method, raw, schemas, storeNames, handNames)
+			op, err := parseOperation(path, method, raw, schemas, byName, storeTypes, storeNames, handNames)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -580,7 +744,7 @@ func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNa
 	return hand, nil
 }
 
-func parseOperation(path, method string, raw json.RawMessage, schemas map[string]schema, storeNames, handNames map[string]bool) (Operation, error) {
+func parseOperation(path, method string, raw json.RawMessage, schemas map[string]schema, byName, storeTypes map[string]TypeDef, storeNames, handNames map[string]bool) (Operation, error) {
 	where := fmt.Sprintf("%s %s", strings.ToUpper(method), path)
 
 	var op operation
@@ -609,7 +773,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, err
 	}
 
-	stream, err := parseStream(where, method, op)
+	stream, streamFrom, streamAdapters, err := parseStream(where, method, op, storeTypes)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -637,6 +801,12 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, fmt.Errorf("reading %s: an x-stream operation needs a 2xx response with a %s schema, it is the event type", where, eventStreamContent)
 	}
 
+	if stream {
+		if err := checkStreamMapping(where, response, streamFrom, byName); err != nil {
+			return Operation{}, err
+		}
+	}
+
 	ports, err := parsePorts(where, op, stream, response, storeNames, handNames)
 	if err != nil {
 		return Operation{}, err
@@ -655,10 +825,12 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		Response:      response,
 		Status:        status,
 		InvalidStatus: invalidStatus(op),
-		Controller:    op.Controller,
-		Ports:         ports,
-		Auth:          auth,
-		Stream:        stream,
+		Controller:     op.Controller,
+		Ports:          ports,
+		Auth:           auth,
+		Stream:         stream,
+		StreamFrom:     streamFrom,
+		StreamAdapters: streamAdapters,
 	}, nil
 }
 
@@ -673,19 +845,77 @@ func parseAuth(where string, op operation) (bool, error) {
 	}
 }
 
-func parseStream(where, method string, op operation) (bool, error) {
-	switch op.Stream {
-	case "":
-		return false, nil
-	case StreamEvents:
-		if method != "get" {
-			return false, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
+func parseStream(where, method string, op operation, stores map[string]TypeDef) (bool, string, []string, error) {
+	if len(op.Stream) == 0 {
+		return false, "", nil, nil
+	}
+
+	var word string
+	if err := json.Unmarshal(op.Stream, &word); err == nil {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream is %q, it is an object naming from and adapters", where, word)
+	}
+
+	var declared struct {
+		From     string    `json:"from"`
+		Adapters *[]string `json:"adapters"`
+	}
+
+	if err := json.Unmarshal(op.Stream, &declared); err != nil {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream is an object naming from and adapters: %w", where, err)
+	}
+
+	if method != "get" {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
+	}
+
+	if declared.From == "" {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream names no from, from names the x-store schema whose saves feed this stream", where)
+	}
+
+	if _, stored := stores[declared.From]; !stored {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream reads from %q, which is not an x-store schema, the stores are %s", where, declared.From, list(sortedKeys(stores)))
+	}
+
+	if declared.Adapters == nil {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream names no adapters, adapters lists which of %s the engine emits", where, list(FeedAdapterKinds()))
+	}
+
+	if len(*declared.Adapters) == 0 {
+		return false, "", nil, fmt.Errorf("reading %s: x-stream names an empty adapters list, a feed nobody can build is a feed nobody can use", where)
+	}
+
+	for _, kind := range *declared.Adapters {
+		if kind != FeedAdapterMemory {
+			return false, "", nil, fmt.Errorf("reading %s: x-stream names adapter kind %q, a feed adapter is one of %s", where, kind, list(FeedAdapterKinds()))
+		}
+	}
+
+	return true, declared.From, *declared.Adapters, nil
+}
+
+func checkStreamMapping(where, event, from string, byName map[string]TypeDef) error {
+	source, known := byName[from]
+	if !known {
+		return fmt.Errorf("reading %s: x-stream reads from %q, which is not a schema of components.schemas", where, from)
+	}
+
+	carried := map[string]Field{}
+	for _, f := range source.Fields {
+		carried[f.Name] = f
+	}
+
+	for _, f := range byName[event].Fields {
+		held, ok := carried[f.Name]
+		if !ok {
+			return fmt.Errorf("reading %s: the stream carries %q whose property %q is not a property of %q, a saved record fills the event it publishes field by field", where, event, f.Name, from)
 		}
 
-		return true, nil
-	default:
-		return false, fmt.Errorf("reading %s: x-stream is %q, the only value is %q", where, op.Stream, StreamEvents)
+		if held.Type.Kind != f.Type.Kind {
+			return fmt.Errorf("reading %s: the stream carries %q whose property %q is a %s and %q declares it a %s", where, event, f.Name, f.Type.Kind, from, held.Type.Kind)
+		}
 	}
+
+	return nil
 }
 
 func parsePorts(where string, op operation, stream bool, response string, storeNames, handNames map[string]bool) ([]string, error) {

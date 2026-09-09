@@ -69,24 +69,58 @@ type typeView struct {
 	Fields []fieldView
 }
 
-type storeView struct {
-	Name         string
-	Snake        string
-	Upper        string
-	Port         string
-	PortSnake    string
-	Struct       string
-	ConfigStruct string
-	AdapterName  string
-	Module       string
-	DefaultPath  string
+type lookupView struct {
+	By     string
+	Ident  string
+	Method string
+	Page   bool
 }
 
-type eventView struct {
+type publishView struct {
 	Name      string
 	Snake     string
 	Port      string
 	PortSnake string
+	Assigns   []string
+}
+
+type storeView struct {
+	Name               string
+	Snake              string
+	Upper              string
+	Port               string
+	PortSnake          string
+	Key                string
+	KeyIdent           string
+	Lookups            []lookupView
+	Struct             string
+	ConfigStruct       string
+	AdapterName        string
+	Module             string
+	HasMemory          bool
+	MemoryStruct       string
+	MemoryConfigStruct string
+	MemoryAdapterName  string
+	MemoryModule       string
+	HasSqlite          bool
+	HasOneLookup       bool
+	DefaultPath        string
+	DefaultCapacity    int
+	Publishes          *publishView
+}
+
+type eventView struct {
+	Name              string
+	Snake             string
+	Port              string
+	PortSnake         string
+	From              string
+	FromSnake         string
+	HasMemory         bool
+	MemoryStruct      string
+	MemoryConfigStruct string
+	MemoryAdapterName string
+	MemoryModule      string
 }
 
 type portView struct {
@@ -208,24 +242,59 @@ func buildView(spec *Spec, opts Options) view {
 
 	portsByName := map[string]portView{}
 
+	publishedBy := map[string]publishView{}
+
+	for _, e := range spec.Events {
+		publishedBy[e.From.Name] = publishView{
+			Name:      e.Name,
+			Snake:     e.Snake,
+			Port:      e.Name + SubscribePortSuffix,
+			PortSnake: e.Snake + "_subscribe",
+			Assigns:   publishAssigns(e.TypeDef),
+		}
+	}
+
 	for _, s := range spec.Stores {
-		adapterName := "sqlite"
-		if len(spec.Stores) > 1 {
-			adapterName = s.Snake + "_sqlite"
+		sv := storeView{
+			Name:               s.Name,
+			Snake:              s.Snake,
+			Upper:              rustname.Upper(s.Name),
+			Port:               s.Name + StorePortSuffix,
+			PortSnake:          s.Snake + "_store",
+			Key:                s.Store.Key,
+			KeyIdent:           s.Store.KeyIdent,
+			Struct:             s.Name + "SqliteStore",
+			ConfigStruct:       s.Name + "SqliteStoreConfig",
+			AdapterName:        adapterName(spec.Stores, s, "sqlite"),
+			Module:             s.Snake + "_sqlite",
+			MemoryStruct:       s.Name + "MemoryStore",
+			MemoryConfigStruct: s.Name + "MemoryStoreConfig",
+			MemoryAdapterName:  adapterName(spec.Stores, s, "memory"),
+			MemoryModule:       s.Snake + "_memory",
+			DefaultPath:        DefaultStorePath,
+			DefaultCapacity:    DefaultStoreCapacity,
 		}
 
-		sv := storeView{
-			Name:         s.Name,
-			Snake:        s.Snake,
-			Upper:        rustname.Upper(s.Name),
-			Port:         s.Name + StorePortSuffix,
-			PortSnake:    s.Snake + "_store",
-			Struct:       s.Name + "SqliteStore",
-			ConfigStruct: s.Name + "SqliteStoreConfig",
-			AdapterName:  adapterName,
-			Module:       s.Snake + "_sqlite",
-			DefaultPath:  DefaultStorePath,
+		for _, kind := range s.Store.Adapters {
+			sv.HasSqlite = sv.HasSqlite || kind == StoreAdapterSqlite
+			sv.HasMemory = sv.HasMemory || kind == StoreAdapterMemory
 		}
+
+		for _, l := range s.Store.Lookups {
+			sv.HasOneLookup = sv.HasOneLookup || l.Answers == LookupOne
+
+			sv.Lookups = append(sv.Lookups, lookupView{
+				By:     l.By,
+				Ident:  l.Ident,
+				Method: lookupMethod(l),
+				Page:   l.Answers == LookupPage,
+			})
+		}
+
+		if published, feeds := publishedBy[s.Name]; feeds {
+			sv.Publishes = &published
+		}
+
 		v.Stores = append(v.Stores, sv)
 		portsByName[sv.Port] = portView{
 			Port:      sv.Port,
@@ -237,11 +306,22 @@ func buildView(spec *Spec, opts Options) view {
 
 	for _, e := range spec.Events {
 		ev := eventView{
-			Name:      e.Name,
-			Snake:     e.Snake,
-			Port:      e.Name + SubscribePortSuffix,
-			PortSnake: e.Snake + "_subscribe",
+			Name:               e.Name,
+			Snake:              e.Snake,
+			Port:               e.Name + SubscribePortSuffix,
+			PortSnake:          e.Snake + "_subscribe",
+			From:               e.From.Name,
+			FromSnake:          e.From.Snake,
+			MemoryStruct:       e.Name + "MemoryFeed",
+			MemoryConfigStruct: e.Name + "MemoryFeedConfig",
+			MemoryAdapterName:  feedAdapterName(spec.Events, e, "memory"),
+			MemoryModule:       e.Snake + "_memory",
 		}
+
+		for _, kind := range e.Adapters {
+			ev.HasMemory = ev.HasMemory || kind == FeedAdapterMemory
+		}
+
 		v.Events = append(v.Events, ev)
 		portsByName[ev.Port] = portView{
 			Port:      ev.Port,
@@ -319,6 +399,58 @@ func buildView(spec *Spec, opts Options) view {
 	v.WireImports = sortedKeys(wire)
 
 	return v
+}
+
+func adapterName(stores []TypeDef, store TypeDef, kind string) string {
+	if len(stores) == 1 {
+		return kind
+	}
+
+	return store.Snake + "_" + kind
+}
+
+func feedAdapterName(events []Event, event Event, kind string) string {
+	if len(events) == 1 {
+		return kind + "_feed"
+	}
+
+	return event.Snake + "_" + kind + "_feed"
+}
+
+func lookupMethod(l Lookup) string {
+	if l.Answers == LookupPage {
+		return "page_by_" + rustname.Snake(l.By)
+	}
+
+	return "get_by_" + rustname.Snake(l.By)
+}
+
+func publishAssigns(event TypeDef) []string {
+	assigns := make([]string, 0, len(event.Fields))
+
+	for _, f := range event.Fields {
+		read := "v." + f.Ident
+		if !isCopy(f) {
+			read += ".clone()"
+		}
+
+		assigns = append(assigns, f.Ident+": "+read+",")
+	}
+
+	return assigns
+}
+
+func isCopy(f Field) bool {
+	if f.Optional {
+		return false
+	}
+
+	switch f.Type.Kind {
+	case "integer", "number", "boolean":
+		return true
+	default:
+		return false
+	}
 }
 
 func buildTypeView(t TypeDef) typeView {

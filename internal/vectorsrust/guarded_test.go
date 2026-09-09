@@ -61,7 +61,9 @@ paths:
       x-controller: greeting
       x-ports: [GreetingStore]
       x-auth: bearer
-      x-stream: events
+      x-stream:
+        from: Greeting
+        adapters: [memory]
       parameters:
         - name: id
           in: path
@@ -79,7 +81,11 @@ components:
   schemas:
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups:
+          - { by: name, answers: page }
+        adapters: [sqlite, memory]
       required: [id, name, count]
       properties:
         id:

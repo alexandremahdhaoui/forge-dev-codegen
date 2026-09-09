@@ -77,7 +77,11 @@ components:
           type: string
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups:
+          - { by: name, answers: page }
+        adapters: [sqlite, memory]
       required: [id, name, count]
       properties:
         id:
@@ -87,6 +91,59 @@ components:
         count:
           type: integer
 `
+
+func withStore(block string) string {
+	return strings.Replace(helloSpec, `      x-store:
+        key: id
+        lookups:
+          - { by: name, answers: page }
+        adapters: [sqlite, memory]
+`, block, 1)
+}
+
+func refusal(t *testing.T, spec, want string) {
+	t.Helper()
+
+	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("wanted a refusal naming %q, got %v", want, err)
+	}
+}
+
+func TestTheBooleanFormOfXStoreIsRefusedNamingTheSchema(t *testing.T) {
+	refusal(t, withStore("      x-store: true\n"), `reading schema "Greeting": x-store is a boolean`)
+}
+
+func TestAStoreThatNamesNoKeyNoLookupsOrNoAdaptersIsRefusedByName(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        lookups: []\n        adapters: [sqlite]\n"), "x-store names no key")
+	refusal(t, withStore("      x-store:\n        key: id\n        adapters: [sqlite]\n"), "x-store names no lookups")
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups: []\n"), "x-store names no adapters")
+}
+
+func TestAKeyOrALookupOnAPropertyTheSchemaDoesNotDeclareIsRefusedByName(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: missing\n        lookups: []\n        adapters: [sqlite]\n"), `the x-store key names property "missing", which the schema does not declare`)
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: missing, answers: one }\n        adapters: [sqlite]\n"), `the x-store lookup names property "missing", which the schema does not declare`)
+}
+
+func TestALookupOnAPropertyThatIsNotARequiredStringIsRefusedByName(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: count, answers: page }\n        adapters: [sqlite]\n"), `names property "count", which must be a required string property`)
+}
+
+func TestAnUnknownLookupWordIsRefusedWithTheWordsThatAreAllowed(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: name, answers: all }\n        adapters: [sqlite]\n"), `answers "all", a lookup answers one of one, page`)
+}
+
+func TestAnUnknownStoreAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: [redis]\n"), `adapter kind "redis", a store adapter is one of memory, sqlite`)
+}
+
+func TestALookupByTheKeyIsRefusedBecauseTheKeyIsAlwaysReachable(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: id, answers: one }\n        adapters: [sqlite]\n"), `a lookup by "id", which is the key`)
+}
+
+func TestAStoreWithNoAdapterAtAllIsRefusedRatherThanEmittingNothing(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: []\n"), "x-store names an empty adapters list")
+}
 
 func generate(t *testing.T, opts restrust.Options) map[string]restrust.File {
 	t.Helper()
@@ -117,6 +174,7 @@ func TestTheCellEmitsFiveLayersAModFileAndAManifest(t *testing.T) {
 
 	want := []string{
 		"adapter/mod.rs",
+		"adapter/zz_generated_greeting_memory.rs",
 		"adapter/zz_generated_greeting_sqlite.rs",
 		"controller/mod.rs",
 		"controller/zz_generated_greeting_controller.rs",
@@ -181,7 +239,7 @@ func TestTheCellManifestNamesTheCellAndItsModules(t *testing.T) {
 		t.Errorf("drivers = %+v", m.Provides.Drivers)
 	}
 
-	if len(m.Provides.Adapters) != 1 || m.Provides.Adapters[0].Module != "rest::adapter::greeting_sqlite" {
+	if len(m.Provides.Adapters) != 2 || m.Provides.Adapters[0].Module != "rest::adapter::greeting_sqlite" || m.Provides.Adapters[1].Module != "rest::adapter::greeting_memory" {
 		t.Errorf("adapters = %+v", m.Provides.Adapters)
 	}
 

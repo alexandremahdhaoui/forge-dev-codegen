@@ -80,7 +80,9 @@ paths:
       x-controller: greeting
       x-ports: [GreetingStore]
       x-auth: bearer
-      x-stream: events
+      x-stream:
+        from: Greeting
+        adapters: [memory]
       parameters:
         - name: id
           in: path
@@ -104,7 +106,11 @@ components:
           type: string
     Greeting:
       type: object
-      x-store: true
+      x-store:
+        key: id
+        lookups:
+          - { by: name, answers: page }
+        adapters: [sqlite, memory]
       required: [id, name, count]
       properties:
         id:
@@ -233,7 +239,7 @@ func TestAnXStreamOperationAnswersAnEventStreamFromASubscribePortTheControllerCo
 	}
 }
 
-func TestTheServerManifestRequiresTheVerifierAndTheSubscribePortAndTheDriverConsumesTheVerifier(t *testing.T) {
+func TestAStreamThatDeclaresAnAdapterProvidesItsFeedInsteadOfRequiringThePort(t *testing.T) {
 	files := generateSpec(t, guardedSpec, restrust.Options{Service: "songe-hello"})
 
 	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
@@ -241,8 +247,26 @@ func TestTheServerManifestRequiresTheVerifierAndTheSubscribePortAndTheDriverCons
 		t.Fatalf("parsing the manifest: %v", err)
 	}
 
-	if !reflect.DeepEqual(m.Requires.Ports, []string{"TicketVerifier", "GreetingEventSubscribe"}) {
+	if !reflect.DeepEqual(m.Requires.Ports, []string{"TicketVerifier"}) {
 		t.Errorf("requires.ports = %q", m.Requires.Ports)
+	}
+
+	feed, provided := adapterNamed(m, "memory_feed")
+	if !provided {
+		t.Fatalf("the memory feed was not provided: %+v", m.Provides.Adapters)
+	}
+
+	if feed.Implements != "GreetingEventSubscribe" {
+		t.Errorf("the feed implements %q", feed.Implements)
+	}
+
+	store, provided := adapterNamed(m, "sqlite")
+	if !provided {
+		t.Fatalf("the sqlite store was not provided: %+v", m.Provides.Adapters)
+	}
+
+	if !reflect.DeepEqual(store.Ports, []string{"GreetingEventSubscribe"}) {
+		t.Errorf("the store consumes %q, a save must reach the feed", store.Ports)
 	}
 
 	if !reflect.DeepEqual(m.Provides.Drivers[0].Ports, []string{"TicketVerifier"}) {
@@ -416,9 +440,61 @@ func TestBothSidesEmitTheDriverAndTheClientInOneCell(t *testing.T) {
 		t.Fatalf("parsing the manifest: %v", err)
 	}
 
-	if !reflect.DeepEqual(m.Requires.Ports, []string{"TicketVerifier", "GreetingEventSubscribe", "TokenSource"}) {
+	if !reflect.DeepEqual(m.Requires.Ports, []string{"TicketVerifier", "TokenSource"}) {
 		t.Errorf("requires.ports = %q", m.Requires.Ports)
 	}
+}
+
+func streamRefusal(t *testing.T, block, want string) {
+	t.Helper()
+
+	spec := strings.Replace(guardedSpec, "      x-stream:\n        from: Greeting\n        adapters: [memory]\n", block, 1)
+
+	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("wanted a refusal naming %q, got %v", want, err)
+	}
+}
+
+func TestTheWordFormOfXStreamIsRefusedInFavourOfTheObject(t *testing.T) {
+	streamRefusal(t, "      x-stream: events\n", `x-stream is "events", it is an object naming from and adapters`)
+}
+
+func TestAStreamThatNamesNoFromOrNoAdaptersIsRefusedByName(t *testing.T) {
+	streamRefusal(t, "      x-stream:\n        adapters: [memory]\n", "x-stream names no from")
+	streamRefusal(t, "      x-stream:\n        from: Greeting\n", "x-stream names no adapters")
+}
+
+func TestAStreamReadingFromASchemaThatIsNotAStoreIsRefusedByName(t *testing.T) {
+	streamRefusal(t, "      x-stream:\n        from: CreateGreetingRequest\n        adapters: [memory]\n", `x-stream reads from "CreateGreetingRequest", which is not an x-store schema`)
+}
+
+func TestAnUnknownFeedAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing.T) {
+	streamRefusal(t, "      x-stream:\n        from: Greeting\n        adapters: [kafka]\n", `adapter kind "kafka", a feed adapter is one of memory`)
+}
+
+func TestAnEventCarryingAPropertyTheStoredRecordDoesNotHoldIsRefusedByName(t *testing.T) {
+	spec := strings.Replace(
+		guardedSpec,
+		"    GreetingEvent:\n      type: object\n      required: [id, count]\n      properties:\n        id:\n          type: string\n        count:\n          type: integer\n",
+		"    GreetingEvent:\n      type: object\n      required: [id, count, missing]\n      properties:\n        id:\n          type: string\n        count:\n          type: integer\n        missing:\n          type: string\n",
+		1,
+	)
+
+	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), `property "missing" is not a property of "Greeting"`) {
+		t.Fatalf("an event field the record does not carry was not refused by name: %v", err)
+	}
+}
+
+func adapterNamed(m cellmanifest.Manifest, name string) (cellmanifest.Adapter, bool) {
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name == name {
+			return adapter, true
+		}
+	}
+
+	return cellmanifest.Adapter{}, false
 }
 
 func TestASideThatIsNotServerClientOrBothIsRefused(t *testing.T) {
@@ -429,7 +505,7 @@ func TestASideThatIsNotServerClientOrBothIsRefused(t *testing.T) {
 }
 
 func TestAnXAuthValueOtherThanBearerIsRefused(t *testing.T) {
-	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      x-stream: events", "x-auth: basic\n      x-stream: events", 1)
+	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      x-stream:", "x-auth: basic\n      x-stream:", 1)
 
 	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
 	if err == nil || !strings.Contains(err.Error(), `x-auth is "basic"`) {
@@ -438,7 +514,7 @@ func TestAnXAuthValueOtherThanBearerIsRefused(t *testing.T) {
 }
 
 func TestAnXStreamOperationThatIsNotAGetIsRefused(t *testing.T) {
-	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      parameters:", "x-auth: bearer\n      x-stream: events\n      parameters:", 1)
+	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      parameters:", "x-auth: bearer\n      x-stream:\n        from: Greeting\n        adapters: [memory]\n      parameters:", 1)
 
 	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
 	if err == nil || !strings.Contains(err.Error(), "x-stream is only allowed on a GET operation") {
@@ -456,7 +532,7 @@ func TestAnXStreamOperationWithoutAnEventStreamSchemaIsRefused(t *testing.T) {
 }
 
 func TestXPortsMayNameTheSubscribePortOfItsOwnStreamAndNoOther(t *testing.T) {
-	named := strings.Replace(guardedSpec, "x-ports: [GreetingStore]\n      x-auth: bearer\n      x-stream: events", "x-ports: [GreetingStore, GreetingEventSubscribe]\n      x-auth: bearer\n      x-stream: events", 1)
+	named := strings.Replace(guardedSpec, "x-ports: [GreetingStore]\n      x-auth: bearer\n      x-stream:", "x-ports: [GreetingStore, GreetingEventSubscribe]\n      x-auth: bearer\n      x-stream:", 1)
 
 	if _, err := restrust.Generate([]byte(named), restrust.Options{Service: "songe-hello"}); err != nil {
 		t.Fatalf("naming the subscribe port of the stream operation was refused: %v", err)
