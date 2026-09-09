@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -34,58 +35,83 @@ const SettleGrace = 500 * time.Millisecond
 type Service struct {
 	Name         string
 	Binary       string
+	Args         []string
 	AddrEnv      string
 	Env          map[string]string
+	Ports        []string
+	Ready        Ready
 	ReadyTimeout time.Duration
 }
 
 type Started struct {
-	Name    string
-	PID     int
-	Port    int
-	Ports   Ports
-	LogPath string
+	Name       string
+	PID        int
+	Discovered map[string]int
+	Allocated  map[string]int
+	LogPath    string
 }
 
-func Environment(base map[string]string, service Service) []string {
+func mergedEnv(overlays ...map[string]string) map[string]string {
 	merged := map[string]string{}
 
-	for _, kv := range os.Environ() {
-		for i := 0; i < len(kv); i++ {
-			if kv[i] == '=' {
-				merged[kv[:i]] = kv[i+1:]
-
-				break
-			}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			merged[key] = value
 		}
 	}
 
-	for k, v := range base {
-		merged[k] = v
+	for _, overlay := range overlays {
+		for key, value := range overlay {
+			merged[key] = value
+		}
 	}
 
-	for k, v := range service.Env {
-		merged[k] = v
-	}
+	return merged
+}
 
-	merged[service.AddrEnv] = "127.0.0.1:0"
-
+func sortedEnv(merged map[string]string) []string {
 	keys := make([]string, 0, len(merged))
-	for k := range merged {
-		keys = append(keys, k)
+	for key := range merged {
+		keys = append(keys, key)
 	}
 
 	sort.Strings(keys)
 
 	env := make([]string, 0, len(keys))
-	for _, k := range keys {
-		env = append(env, k+"="+merged[k])
+	for _, key := range keys {
+		env = append(env, key+"="+merged[key])
 	}
 
 	return env
 }
 
+func Environment(base map[string]string, service Service) []string {
+	merged := mergedEnv(base, service.Env)
+
+	if len(service.Ports) == 0 {
+		merged[service.AddrEnv] = LoopbackHost + ":0"
+	}
+
+	return sortedEnv(merged)
+}
+
 func Start(ctx context.Context, tmpDir string, base map[string]string, service Service) (Started, error) {
+	allocated, err := AllocatePorts(service.Ports)
+	if err != nil {
+		return Started{}, fmt.Errorf("binding the ports of service %q: %w", service.Name, err)
+	}
+
+	placeholders := Placeholders{Ports: allocated, TmpDir: tmpDir}
+
+	resolved, err := resolvePlaceholders(placeholders, service)
+	if err != nil {
+		return Started{}, fmt.Errorf("reading the declaration of service %q: %w", service.Name, err)
+	}
+
+	if err := resolved.Ready.Validate(allocated); err != nil {
+		return Started{}, fmt.Errorf("reading the readiness of service %q: %w", service.Name, err)
+	}
+
 	logPath := filepath.Join(tmpDir, service.Name+".log")
 
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -93,8 +119,8 @@ func Start(ctx context.Context, tmpDir string, base map[string]string, service S
 		return Started{}, fmt.Errorf("opening the log of service %q: %w", service.Name, err)
 	}
 
-	cmd := exec.Command(service.Binary)
-	cmd.Env = Environment(base, service)
+	cmd := exec.Command(resolved.Binary, resolved.Args...)
+	cmd.Env = Environment(base, resolved)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -106,21 +132,61 @@ func Start(ctx context.Context, tmpDir string, base map[string]string, service S
 	}
 
 	if startErr != nil {
-		return Started{}, fmt.Errorf("starting service %q from %s: %w", service.Name, service.Binary, startErr)
+		return Started{}, fmt.Errorf("starting service %q from %s: %w", service.Name, resolved.Binary, startErr)
 	}
 
 	exited := make(chan error, 1)
 
 	go func() { exited <- cmd.Wait() }()
 
-	ports, err := awaitListening(ctx, logPath, readyTimeout(service), exited)
+	discovered, err := awaitReady(ctx, resolved, allocated, logPath, exited)
 	if err != nil {
 		terminate(cmd.Process.Pid)
 
 		return Started{}, fmt.Errorf("waiting for service %q on %s: %w", service.Name, logPath, err)
 	}
 
-	return Started{Name: service.Name, PID: cmd.Process.Pid, Port: ports.Rest, Ports: ports, LogPath: logPath}, nil
+	return Started{
+		Name:       service.Name,
+		PID:        cmd.Process.Pid,
+		Discovered: discovered,
+		Allocated:  allocated,
+		LogPath:    logPath,
+	}, nil
+}
+
+func resolvePlaceholders(placeholders Placeholders, service Service) (Service, error) {
+	args, err := placeholders.SubstituteAll(service.Args)
+	if err != nil {
+		return Service{}, fmt.Errorf("reading args: %w", err)
+	}
+
+	env, err := placeholders.SubstituteMap(service.Env)
+	if err != nil {
+		return Service{}, fmt.Errorf("reading env: %w", err)
+	}
+
+	service.Args = args
+	service.Env = env
+
+	return service, nil
+}
+
+func awaitReady(ctx context.Context, service Service, allocated map[string]int, logPath string, exited <-chan error) (map[string]int, error) {
+	timeout := readyTimeout(service)
+
+	switch service.Ready.Kind {
+	case ReadyStdout:
+		return awaitListening(ctx, logPath, timeout, exited)
+	case ReadyTCP:
+		return nil, awaitTCP(ctx, probeAddress(allocated, service.Ready.Port), timeout, exited)
+	case ReadyHTTP:
+		url := "http://" + probeAddress(allocated, service.Ready.Port) + service.Ready.Path
+
+		return nil, awaitHTTP(ctx, url, service.Ready.Status, timeout, exited)
+	default:
+		return nil, fmt.Errorf("readiness kind %q: not a kind; the kinds are %s", service.Ready.Kind, ReadyKinds)
+	}
 }
 
 func readyTimeout(service Service) time.Duration {
@@ -131,7 +197,7 @@ func readyTimeout(service Service) time.Duration {
 	return service.ReadyTimeout
 }
 
-func awaitListening(ctx context.Context, logPath string, timeout time.Duration, exited <-chan error) (Ports, error) {
+func awaitListening(ctx context.Context, logPath string, timeout time.Duration, exited <-chan error) (map[string]int, error) {
 	deadline := time.After(timeout)
 
 	var settle <-chan time.Time
@@ -139,27 +205,23 @@ func awaitListening(ctx context.Context, logPath string, timeout time.Duration, 
 	for {
 		output, err := os.ReadFile(logPath)
 		if err != nil {
-			return Ports{}, fmt.Errorf("reading the log: %w", err)
+			return nil, fmt.Errorf("reading the log: %w", err)
 		}
 
 		ports, ok := FindListening(string(output))
-		if ok && ports.Complete() {
-			return ports, nil
-		}
-
 		if ok && settle == nil {
 			settle = time.After(SettleGrace)
 		}
 
 		select {
 		case <-ctx.Done():
-			return Ports{}, fmt.Errorf("cancelled: %w", ctx.Err())
+			return nil, fmt.Errorf("cancelled: %w", ctx.Err())
 		case err := <-exited:
-			return Ports{}, fmt.Errorf("the process exited before printing LISTENING: %v", err)
+			return nil, fmt.Errorf("the process exited before printing LISTENING: %v", err)
 		case <-settle:
 			return ports, nil
 		case <-deadline:
-			return Ports{}, fmt.Errorf("no LISTENING line within %s", timeout)
+			return nil, fmt.Errorf("no LISTENING line within %s", timeout)
 		case <-time.After(pollInterval):
 		}
 	}

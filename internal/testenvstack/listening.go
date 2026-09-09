@@ -19,21 +19,9 @@ import (
 	"strings"
 )
 
-type Ports struct {
-	Rest int
-	Grpc int
-	Udp  int
-}
+const listeningKeyword = "LISTENING"
 
-func (p Ports) Complete() bool {
-	return p.Rest > 0 && p.Grpc > 0 && p.Udp > 0
-}
-
-var transportByKeyword = map[string]string{
-	"LISTENING":      "rest",
-	"LISTENING_GRPC": "grpc",
-	"LISTENING_UDP":  "udp",
-}
+const udpSuffix = "UDP"
 
 func ParseListening(line string) (string, int, bool) {
 	fields := strings.Fields(line)
@@ -41,8 +29,12 @@ func ParseListening(line string) (string, int, bool) {
 		return "", 0, false
 	}
 
-	transport, ok := transportByKeyword[fields[0]]
-	if !ok {
+	suffix, found := strings.CutPrefix(fields[0], listeningKeyword)
+	if !found {
+		return "", 0, false
+	}
+
+	if suffix != "" && !strings.HasPrefix(suffix, "_") {
 		return "", 0, false
 	}
 
@@ -51,33 +43,46 @@ func ParseListening(line string) (string, int, bool) {
 		return "", 0, false
 	}
 
-	return transport, port, true
+	return strings.TrimPrefix(suffix, "_"), port, true
 }
 
-func FindListening(output string) (Ports, bool) {
-	var ports Ports
+func FindListening(output string) (map[string]int, bool) {
+	ports := map[string]int{}
 
 	for _, line := range strings.Split(output, "\n") {
-		transport, port, ok := ParseListening(line)
+		suffix, port, ok := ParseListening(line)
 		if !ok {
 			continue
 		}
 
-		switch transport {
-		case "rest":
-			if ports.Rest == 0 {
-				ports.Rest = port
-			}
-		case "grpc":
-			if ports.Grpc == 0 {
-				ports.Grpc = port
-			}
-		case "udp":
-			if ports.Udp == 0 {
-				ports.Udp = port
-			}
+		if _, already := ports[suffix]; already {
+			continue
 		}
+
+		ports[suffix] = port
 	}
 
-	return ports, ports.Rest > 0
+	_, announced := ports[""]
+
+	return ports, announced
+}
+
+func Addresses(addrEnv string, discovered map[string]int) map[string]string {
+	out := make(map[string]string, len(discovered))
+
+	for suffix, port := range discovered {
+		key := addrEnv
+		if suffix != "" {
+			key = addrEnv + "_" + suffix
+		}
+
+		address := LoopbackHost + ":" + strconv.Itoa(port)
+		if suffix != udpSuffix {
+			address = "http://" + address
+		}
+
+		out[key] = address
+	}
+
+	return out
 }

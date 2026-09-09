@@ -183,6 +183,11 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: demo-stack
+    src: ./demo/testenv-stack
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-no-comment-lint
     src: ./cmd/no-comment-lint
     engine: forge://forge-dev
@@ -289,9 +294,42 @@ test:
       command: cargo
       args: ["clippy", "--manifest-path", "demo/tui-rust/Cargo.toml", "--all-targets", "--", "-D", "warnings"]
 
+  - name: demo-testenv-stack
+    runner: forge://generic-test-runner
+    testenv: alias://demo-stack
+    spec:
+      command: ./build/bin/demo-stack
+      args: ["check", "DEMO_ADDR_MAIN", "DEMO_TOKEN_ID=demo-token", "DEMO_TOKEN_LINE=demo-token"]
+
   - name: generated
     runner: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/generated-drift
     spec: {}
+
+engines:
+  - alias: demo-stack
+    type: testenv
+    testenv:
+      - engine: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/testenv-stack
+        spec:
+          services:
+            - name: demo
+              binary: ./build/bin/demo-stack
+              args: [serve, --listen, "127.0.0.1:@port.main@"]
+              addrEnv: DEMO_ADDR
+              ports: [main]
+              ready:
+                kind: tcp
+                port: main
+              readyTimeoutSeconds: 15
+              after:
+                - command: ./build/bin/demo-stack
+                  args: [token]
+                  export: DEMO_TOKEN_ID
+                  jsonPath: token.id
+                - command: ./build/bin/demo-stack
+                  args: [token]
+                  export: DEMO_TOKEN_LINE
+                  regex: '"id":"([^"]+)"'
 
 factory:
   module: github.com/alexandremahdhaoui/forge-dev-codegen

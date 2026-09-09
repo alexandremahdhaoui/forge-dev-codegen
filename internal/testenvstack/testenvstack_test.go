@@ -57,28 +57,29 @@ func writeBinary(t *testing.T, script string) string {
 	return path
 }
 
-func TestParseListeningReadsTheTransportAndThePortAndRefusesEverythingElse(t *testing.T) {
+func TestParseListeningReadsTheSuffixAndThePortAndRefusesEverythingElse(t *testing.T) {
 	tests := []struct {
-		line      string
-		transport string
-		port      int
+		line   string
+		suffix string
+		port   int
 	}{
-		{line: "LISTENING 8080", transport: "rest", port: 8080},
-		{line: "  LISTENING 1  ", transport: "rest", port: 1},
-		{line: "LISTENING_GRPC 8081", transport: "grpc", port: 8081},
-		{line: "LISTENING_UDP 8082", transport: "udp", port: 8082},
+		{line: "LISTENING 8080", suffix: "", port: 8080},
+		{line: "  LISTENING 1  ", suffix: "", port: 1},
+		{line: "LISTENING_GRPC 8081", suffix: "GRPC", port: 8081},
+		{line: "LISTENING_UDP 8082", suffix: "UDP", port: 8082},
+		{line: "LISTENING_ADMIN 8083", suffix: "ADMIN", port: 8083},
 	}
 
 	for _, tt := range tests {
-		transport, port, ok := ParseListening(tt.line)
-		if !ok || transport != tt.transport || port != tt.port {
-			t.Errorf("%q -> %q %d %v", tt.line, transport, port, ok)
+		suffix, port, ok := ParseListening(tt.line)
+		if !ok || suffix != tt.suffix || port != tt.port {
+			t.Errorf("%q -> %q %d %v", tt.line, suffix, port, ok)
 		}
 	}
 
 	for _, line := range []string{
 		"", "LISTENING", "LISTENING x", "LISTENING 0", "LISTENING 70000", "listening 80",
-		"LISTENING 80 more", "READY 80", "LISTENING_HTTP 80", "LISTENING_GRPC x", "LISTENING_UDP 0",
+		"LISTENING 80 more", "READY 80", "LISTENINGGRPC 80", "LISTENING_GRPC x", "LISTENING_UDP 0",
 	} {
 		if _, _, ok := ParseListening(line); ok {
 			t.Errorf("%q must be refused", line)
@@ -86,18 +87,14 @@ func TestParseListeningReadsTheTransportAndThePortAndRefusesEverythingElse(t *te
 	}
 }
 
-func TestFindListeningPicksTheFirstPortOfEachTransportOutOfMixedOutput(t *testing.T) {
+func TestFindListeningPicksTheFirstPortOfEachSuffixOutOfMixedOutput(t *testing.T) {
 	ports, ok := FindListening("starting\nwarn: something\nLISTENING 5555\nLISTENING_GRPC 5556\nLISTENING_UDP 5557\nLISTENING 6666\n")
 	if !ok {
-		t.Fatal("the rest port must be found")
+		t.Fatal("the bare port must be found")
 	}
 
-	if ports.Rest != 5555 || ports.Grpc != 5556 || ports.Udp != 5557 {
+	if ports[""] != 5555 || ports["GRPC"] != 5556 || ports["UDP"] != 5557 {
 		t.Errorf("got %+v", ports)
-	}
-
-	if !ports.Complete() {
-		t.Error("every transport announced its port")
 	}
 
 	if _, ok := FindListening("starting\nstill starting\n"); ok {
@@ -105,18 +102,34 @@ func TestFindListeningPicksTheFirstPortOfEachTransportOutOfMixedOutput(t *testin
 	}
 }
 
-func TestAServiceThatAnnouncesOnlyItsRestPortIsStillReady(t *testing.T) {
+func TestAServiceThatAnnouncesOnlyItsBarePortIsStillReady(t *testing.T) {
 	ports, ok := FindListening("LISTENING 5555\n")
-	if !ok || ports.Rest != 5555 {
+	if !ok || ports[""] != 5555 {
 		t.Fatalf("got %+v %v", ports, ok)
 	}
 
-	if ports.Grpc != 0 || ports.Udp != 0 {
-		t.Errorf("a port nobody announced stays zero, got %+v", ports)
+	if len(ports) != 1 {
+		t.Errorf("a port nobody announced is absent, got %+v", ports)
+	}
+}
+
+func TestAddressesCarryTheHttpSchemeOnEverySuffixButUdpBecauseUdpHasNone(t *testing.T) {
+	env := Addresses("HELLO_URL", map[string]int{"": 4321, "GRPC": 4322, "UDP": 4323})
+
+	want := map[string]string{
+		"HELLO_URL":      "http://127.0.0.1:4321",
+		"HELLO_URL_GRPC": "http://127.0.0.1:4322",
+		"HELLO_URL_UDP":  "127.0.0.1:4323",
 	}
 
-	if ports.Complete() {
-		t.Error("a stack that announces one transport is not complete")
+	for key, value := range want {
+		if env[key] != value {
+			t.Errorf("%s is %q, want %q", key, env[key], value)
+		}
+	}
+
+	if len(env) != len(want) {
+		t.Errorf("env: %v", env)
 	}
 }
 
@@ -159,12 +172,12 @@ func TestStartReturnsThePortFromTheListeningLineAndStopEndsTheProcess(t *testing
 	binary := writeBinary(t, fakeService)
 	tmpDir := t.TempDir()
 
-	started, err := Start(context.Background(), tmpDir, map[string]string{"EXTRA": "yes"}, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", ReadyTimeout: 5 * time.Second})
+	started, err := Start(context.Background(), tmpDir, map[string]string{"EXTRA": "yes"}, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if started.Port != 4321 || started.PID <= 0 || started.LogPath != filepath.Join(tmpDir, "hello.log") {
+	if started.Discovered[""] != 4321 || started.PID <= 0 || started.LogPath != filepath.Join(tmpDir, "hello.log") {
 		t.Errorf("started: %+v", started)
 	}
 
@@ -202,26 +215,26 @@ func TestStartReturnsThePortFromTheListeningLineAndStopEndsTheProcess(t *testing
 func TestStartReturnsEveryPortAServiceAnnounces(t *testing.T) {
 	binary := writeBinary(t, nodeService)
 
-	started, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", ReadyTimeout: 5 * time.Second})
+	started, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "hello", Binary: binary, AddrEnv: "HELLO_ADDR", Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	defer Stop([]int{started.PID}, 2*time.Second)
 
-	if started.Ports.Rest != 4321 || started.Ports.Grpc != 4322 || started.Ports.Udp != 4323 {
-		t.Errorf("ports: %+v", started.Ports)
+	if started.Discovered[""] != 4321 || started.Discovered["GRPC"] != 4322 || started.Discovered["UDP"] != 4323 {
+		t.Errorf("ports: %+v", started.Discovered)
 	}
 
-	if started.Port != started.Ports.Rest {
-		t.Errorf("the rest port stays the port of the service, got %+v", started)
+	if len(started.Allocated) != 0 {
+		t.Errorf("a service that declares no ports gets none allocated, got %+v", started.Allocated)
 	}
 }
 
 func TestStartReportsAProcessThatExitsBeforeListening(t *testing.T) {
 	binary := writeBinary(t, exitingService)
 
-	_, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "dying", Binary: binary, ReadyTimeout: 5 * time.Second})
+	_, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "dying", Binary: binary, Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 5 * time.Second})
 	if err == nil || !strings.Contains(err.Error(), "exited before printing LISTENING") {
 		t.Errorf("got %v", err)
 	}
@@ -230,18 +243,18 @@ func TestStartReportsAProcessThatExitsBeforeListening(t *testing.T) {
 func TestStartReportsATimeoutAndKillsTheSilentProcess(t *testing.T) {
 	binary := writeBinary(t, silentService)
 
-	_, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "silent", Binary: binary, ReadyTimeout: 300 * time.Millisecond})
+	_, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "silent", Binary: binary, Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 300 * time.Millisecond})
 	if err == nil || !strings.Contains(err.Error(), "no LISTENING line within") {
 		t.Errorf("got %v", err)
 	}
 }
 
 func TestStartReportsAMissingBinaryAndAnUnwritableLog(t *testing.T) {
-	if _, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "missing", Binary: "/nonexistent/binary"}); err == nil {
+	if _, err := Start(context.Background(), t.TempDir(), nil, Service{Name: "missing", Binary: "/nonexistent/binary", Ready: Ready{Kind: ReadyStdout}}); err == nil {
 		t.Error("a missing binary must be reported")
 	}
 
-	if _, err := Start(context.Background(), filepath.Join(t.TempDir(), "nodir"), nil, Service{Name: "nolog", Binary: "/bin/sh"}); err == nil {
+	if _, err := Start(context.Background(), filepath.Join(t.TempDir(), "nodir"), nil, Service{Name: "nolog", Binary: "/bin/sh", Ready: Ready{Kind: ReadyStdout}}); err == nil {
 		t.Error("an unwritable log must be reported")
 	}
 }
@@ -252,7 +265,7 @@ func TestStartHonoursACancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := Start(ctx, t.TempDir(), nil, Service{Name: "silent", Binary: binary, ReadyTimeout: 5 * time.Second})
+	_, err := Start(ctx, t.TempDir(), nil, Service{Name: "silent", Binary: binary, Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 5 * time.Second})
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Errorf("got %v", err)
 	}
@@ -263,7 +276,7 @@ func TestStopKillsTheGrandchildrenOfAServiceTooBecauseTheyShareItsGroup(t *testi
 	childPidPath := filepath.Join(tmpDir, "child.pid")
 	binary := writeBinary(t, "#!/bin/sh\nsleep 60 &\necho $! > "+childPidPath+"\necho \"LISTENING 1\"\nwait\n")
 
-	started, err := Start(context.Background(), tmpDir, nil, Service{Name: "parent", Binary: binary, AddrEnv: "PARENT_ADDR", ReadyTimeout: 5 * time.Second})
+	started, err := Start(context.Background(), tmpDir, nil, Service{Name: "parent", Binary: binary, AddrEnv: "PARENT_ADDR", Ready: Ready{Kind: ReadyStdout}, ReadyTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

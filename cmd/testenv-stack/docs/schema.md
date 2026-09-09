@@ -10,5 +10,5 @@ Starts a list of service binaries on free ports, waits for their LISTENING line,
 
 - **Type:** `array of `
 - **Required:** Yes
-- **Description:** Services started in order. Each one must print LISTENING <port> on stdout once bound.
+- **Description:** Services started in order.
 

@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge/pkg/engineframework"
@@ -44,8 +45,13 @@ func Create(ctx context.Context, input engineframework.CreateInput, spec *Spec) 
 
 	started := []testenvstack.Started{}
 
+	runtimeEnv := map[string]string{}
+	for key, value := range input.Env {
+		runtimeEnv[key] = value
+	}
+
 	for _, service := range spec.Services {
-		one, err := testenvstack.Start(ctx, input.TmpDir, input.Env, toService(input.RootDir, service))
+		one, err := testenvstack.Start(ctx, input.TmpDir, runtimeEnv, toService(input.RootDir, service))
 		if err != nil {
 			stopAll(started)
 
@@ -56,12 +62,24 @@ func Create(ctx context.Context, input engineframework.CreateInput, spec *Spec) 
 
 		artifact.Files["stack."+service.Name+".log"] = service.Name + ".log"
 
-		for key, value := range Addresses(service.AddrEnv, one.Ports) {
+		for key, value := range testenvstack.Addresses(service.AddrEnv, one.Discovered) {
 			artifact.Env[key] = value
+			runtimeEnv[key] = value
+		}
+
+		for key, value := range testenvstack.PortAddresses(service.AddrEnv, one.Allocated) {
+			artifact.Env[key] = value
+			runtimeEnv[key] = value
 		}
 
 		artifact.Metadata["testenv-stack."+service.Name+".pid"] = strconv.Itoa(one.PID)
 		artifact.ManagedResources = append(artifact.ManagedResources, one.LogPath)
+
+		if err := runAfter(ctx, input, service, one, runtimeEnv, artifact); err != nil {
+			stopAll(started)
+
+			return nil, err
+		}
 	}
 
 	if err := testenvstack.WritePids(pidsPath, started); err != nil {
@@ -97,29 +115,59 @@ func Delete(_ context.Context, input engineframework.DeleteInput, _ *Spec) error
 	return nil
 }
 
-func Addresses(addrEnv string, ports testenvstack.Ports) map[string]string {
-	out := map[string]string{
-		addrEnv: "http://127.0.0.1:" + strconv.Itoa(ports.Rest),
+func runAfter(
+	ctx context.Context,
+	input engineframework.CreateInput,
+	service Service,
+	started testenvstack.Started,
+	runtimeEnv map[string]string,
+	artifact *engineframework.TestEnvArtifact,
+) error {
+	placeholders := testenvstack.Placeholders{Ports: started.Allocated, TmpDir: input.TmpDir}
+
+	for _, after := range service.After {
+		value, err := testenvstack.RunAfter(ctx, input.RootDir, runtimeEnv, placeholders, toAfter(input.RootDir, after))
+		if err != nil {
+			return fmt.Errorf("running the after commands of service %q: %w", service.Name, err)
+		}
+
+		artifact.Env[after.Export] = value
+		runtimeEnv[after.Export] = value
+		artifact.Metadata["testenv-stack."+service.Name+".export."+after.Export] = value
 	}
 
-	if ports.Grpc > 0 {
-		out[addrEnv+"_GRPC"] = "http://127.0.0.1:" + strconv.Itoa(ports.Grpc)
-	}
-
-	if ports.Udp > 0 {
-		out[addrEnv+"_UDP"] = "127.0.0.1:" + strconv.Itoa(ports.Udp)
-	}
-
-	return out
+	return nil
 }
 
 func toService(rootDir string, service Service) testenvstack.Service {
 	return testenvstack.Service{
 		Name:         service.Name,
 		Binary:       resolve(rootDir, service.Binary),
+		Args:         service.Args,
 		AddrEnv:      service.AddrEnv,
 		Env:          service.Env,
+		Ports:        service.Ports,
+		Ready:        toReady(service.Ready),
 		ReadyTimeout: time.Duration(service.ReadyTimeoutSeconds) * time.Second,
+	}
+}
+
+func toReady(ready Ready) testenvstack.Ready {
+	kind := ready.Kind
+	if kind == "" {
+		kind = testenvstack.ReadyStdout
+	}
+
+	return testenvstack.Ready{Kind: kind, Port: ready.Port, Path: ready.Path, Status: ready.Status}
+}
+
+func toAfter(rootDir string, after After) testenvstack.After {
+	return testenvstack.After{
+		Command:  resolveCommand(rootDir, after.Command),
+		Args:     after.Args,
+		Export:   after.Export,
+		Regex:    after.Regex,
+		JSONPath: after.JsonPath,
 	}
 }
 
@@ -138,4 +186,12 @@ func resolve(rootDir string, path string) string {
 	}
 
 	return filepath.Join(rootDir, path)
+}
+
+func resolveCommand(rootDir string, command string) string {
+	if !strings.ContainsRune(command, filepath.Separator) {
+		return command
+	}
+
+	return resolve(rootDir, command)
 }

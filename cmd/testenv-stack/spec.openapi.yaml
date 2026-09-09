@@ -8,12 +8,12 @@ components:
   schemas:
     Spec:
       type: object
-      description: The services to start. Each runs as a detached child process on a free port.
+      description: The services to start. Each runs as a detached child process.
       required: [services]
       properties:
         services:
           type: array
-          description: Services started in order. Each one must print LISTENING <port> on stdout once bound.
+          description: Services started in order.
           items:
             $ref: "#/components/schemas/Service"
     Service:
@@ -27,14 +27,69 @@ components:
         binary:
           type: string
           description: Path to the binary to start. Relative paths resolve against the project root.
+        args:
+          type: array
+          description: Arguments passed to the binary. Every value carries placeholders.
+          items:
+            type: string
         addrEnv:
           type: string
-          description: The environment variable the binary binds on. It is set to 127.0.0.1:0 at start so the binary picks a free port, and the artifact exports it as http://127.0.0.1:<port>.
+          description: The name every exported address is built from. A service with no ports declared is started with addrEnv set to 127.0.0.1:0 and announces its ports on stdout. A service with ports declared exports one address per port as <addrEnv>_<PORT>.
         env:
           type: object
-          description: Extra environment variables for this service. They win over the accumulated testenv env.
+          description: Extra environment variables for this service. They win over the accumulated testenv env. Every value carries placeholders.
           additionalProperties:
             type: string
+        ports:
+          type: array
+          description: Names of the ports the engine binds free before start. Each one is substituted as @port.<name>@ into args and env and exported as <addrEnv>_<NAME>. The delimiter is @ because forge expands its own double brace templates over this spec before the engine reads it.
+          items:
+            type: string
+        ready:
+          $ref: "#/components/schemas/Ready"
+        after:
+          type: array
+          description: Commands run once the service is ready, in order. Each one captures a value out of its stdout into the environment.
+          items:
+            $ref: "#/components/schemas/After"
         readyTimeoutSeconds:
           type: integer
-          description: Seconds to wait for the LISTENING line before create fails. Default 30.
+          description: Seconds to wait for readiness before create fails. Default 30.
+    Ready:
+      type: object
+      description: How the engine decides the service is ready. An absent block means the stdout keyword, which is the contract every service written before ports existed relies on.
+      properties:
+        kind:
+          type: string
+          description: One of stdout, tcp and http. An absent kind reads as stdout. stdout waits for a LISTENING line. tcp connects to a declared port. http gets a path on a declared port and compares the status.
+        port:
+          type: string
+          description: The declared port to probe. Required for tcp and http, refused for stdout.
+        path:
+          type: string
+          description: The path to get. Required for http, refused for the other kinds.
+        status:
+          type: integer
+          description: The status the get must answer. Required for http, refused for the other kinds.
+    After:
+      type: object
+      description: One command run after readiness. Its stdout carries a value the stack exports.
+      required: [command, export]
+      properties:
+        command:
+          type: string
+          description: The program to run. A value with a path separator resolves against the project root. A bare name is looked up on PATH.
+        args:
+          type: array
+          description: Arguments passed to the command. Every value carries the same placeholders as the service.
+          items:
+            type: string
+        export:
+          type: string
+          description: The environment variable the captured value is exported as.
+        regex:
+          type: string
+          description: A regular expression with one capturing group over stdout. Exactly one of regex and jsonPath is required.
+        jsonPath:
+          type: string
+          description: A dotted path into the JSON answer, such as store.id. A numeric segment indexes an array. Exactly one of regex and jsonPath is required.

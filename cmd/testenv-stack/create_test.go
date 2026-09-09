@@ -41,6 +41,12 @@ echo "LISTENING_UDP 4323"
 sleep 60
 `
 
+const portedService = `#!/bin/sh
+echo "args=$@"
+echo "LISTENING 4321"
+sleep 60
+`
+
 const exitingService = `#!/bin/sh
 exit 1
 `
@@ -186,15 +192,143 @@ func TestCreateExportsOneAddressPerPortTheServiceAnnounces(t *testing.T) {
 	}
 }
 
-func TestAServiceThatAnnouncesOnlyItsRestPortExportsOneAddress(t *testing.T) {
-	env := Addresses("HELLO_URL", testenvstack.Ports{Rest: 4321})
-
-	if env["HELLO_URL"] != "http://127.0.0.1:4321" {
-		t.Errorf("env: %v", env)
+func TestAnAbsentReadyBlockReadsAsTheStdoutKeywordSoAServiceWrittenBeforePortsIsUntouched(t *testing.T) {
+	if got := toReady(Ready{}); got.Kind != testenvstack.ReadyStdout {
+		t.Errorf("got %+v", got)
 	}
 
-	if len(env) != 1 {
-		t.Errorf("a port nobody announced exports nothing, got %v", env)
+	got := toReady(Ready{Kind: "http", Port: "http", Path: "/healthz", Status: 200})
+	if got != (testenvstack.Ready{Kind: "http", Port: "http", Path: "/healthz", Status: 200}) {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestAnAfterCommandWithAPathResolvesAgainstTheRootAndABareNameStaysOnThePath(t *testing.T) {
+	if got := resolveCommand("/root", "seed"); got != "seed" {
+		t.Errorf("got %q", got)
+	}
+
+	if got := resolveCommand("/root", "./build/bin/demo-stack"); got != "/root/build/bin/demo-stack" {
+		t.Errorf("got %q", got)
+	}
+
+	if got := resolveCommand("/root", "/usr/bin/seed"); got != "/usr/bin/seed" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestTheSpecParsesArgsPortsReadyAndAfter(t *testing.T) {
+	spec, err := FromMap(map[string]any{"services": []any{map[string]any{
+		"name": "node", "binary": "/bin/sh", "addrEnv": "NODE_ADDR",
+		"args":  []any{"-c", "run --grpc @port.grpc@"},
+		"ports": []any{"grpc", "http"},
+		"ready": map[string]any{"kind": "http", "port": "http", "path": "/healthz", "status": float64(200)},
+		"after": []any{map[string]any{
+			"command": "seed", "args": []any{"store", "create"}, "export": "STORE_ID", "jsonPath": "store.id",
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := spec.Services[0]
+	if len(svc.Args) != 2 || svc.Args[1] != "run --grpc @port.grpc@" {
+		t.Errorf("args: %v", svc.Args)
+	}
+
+	if len(svc.Ports) != 2 || svc.Ports[0] != "grpc" || svc.Ports[1] != "http" {
+		t.Errorf("ports: %v", svc.Ports)
+	}
+
+	if svc.Ready.Kind != "http" || svc.Ready.Port != "http" || svc.Ready.Path != "/healthz" || svc.Ready.Status != 200 {
+		t.Errorf("ready: %+v", svc.Ready)
+	}
+
+	if len(svc.After) != 1 || svc.After[0].Export != "STORE_ID" || svc.After[0].JsonPath != "store.id" {
+		t.Errorf("after: %+v", svc.After)
+	}
+
+	if out := ValidateMap(map[string]any{"services": []any{map[string]any{
+		"name": "one", "binary": "/bin/sh", "addrEnv": "ONE_ADDR",
+		"ports": []any{"grpc"},
+	}}}); !out.Valid {
+		t.Errorf("a service that declares ports and no ready block is valid, got %+v", out.Errors)
+	}
+
+	if out := ValidateMap(map[string]any{"services": []any{map[string]any{
+		"name": "one", "binary": "/bin/sh", "addrEnv": "ONE_ADDR",
+		"after": []any{map[string]any{"command": "seed"}},
+	}}}); out.Valid {
+		t.Error("an after command without export must be invalid")
+	}
+}
+
+func TestCreateBindsTheDeclaredPortsPutsThemInTheArgsExportsThemAndRunsTheAfterCommands(t *testing.T) {
+	root := t.TempDir()
+	writeBinary(t, root, "hello", portedService)
+	tmpDir := t.TempDir()
+
+	spec := &Spec{Services: []Service{{
+		Name: "hello", Binary: "hello", AddrEnv: "HELLO_URL",
+		Args:  []string{"--grpc", "@port.grpc@"},
+		Ports: []string{"grpc", "http"},
+		After: []After{
+			{Command: "printf", Args: []string{`{"store":{"id":"01STORE"}}`}, Export: "STORE_ID", JsonPath: "store.id"},
+			{Command: "sh", Args: []string{"-c", `printf "model=m-%s" "$STORE_ID"`}, Export: "MODEL_ID", Regex: `model=(\S+)`},
+		},
+		ReadyTimeoutSeconds: 5,
+	}}}
+
+	artifact, err := Create(context.Background(), engineframework.CreateInput{TestID: "t3", TmpDir: tmpDir, RootDir: root}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		_ = Delete(context.Background(), engineframework.DeleteInput{TestID: "t3", Metadata: artifact.Metadata}, nil)
+	}()
+
+	grpc := artifact.Env["HELLO_URL_GRPC"]
+	if !strings.HasPrefix(grpc, "127.0.0.1:") {
+		t.Errorf("HELLO_URL_GRPC is %q", grpc)
+	}
+
+	if artifact.Env["HELLO_URL_HTTP"] == "" || artifact.Env["HELLO_URL_HTTP"] == grpc {
+		t.Errorf("env: %v", artifact.Env)
+	}
+
+	if artifact.Env["STORE_ID"] != "01STORE" || artifact.Env["MODEL_ID"] != "m-01STORE" {
+		t.Errorf("env: %v", artifact.Env)
+	}
+
+	if artifact.Metadata["testenv-stack.hello.export.STORE_ID"] != "01STORE" || artifact.Metadata["testenv-stack.hello.export.MODEL_ID"] != "m-01STORE" {
+		t.Errorf("metadata: %v", artifact.Metadata)
+	}
+
+	log, _ := os.ReadFile(filepath.Join(tmpDir, "hello.log"))
+	if !strings.Contains(string(log), "args=--grpc "+strings.TrimPrefix(grpc, "127.0.0.1:")) {
+		t.Errorf("log: %s", log)
+	}
+}
+
+func TestCreateStopsTheServiceWhenAnAfterCommandFindsNothingToExport(t *testing.T) {
+	root := t.TempDir()
+	writeBinary(t, root, "hello", portedService)
+	input := engineframework.CreateInput{TestID: "t4", TmpDir: t.TempDir(), RootDir: root}
+
+	spec := &Spec{Services: []Service{{
+		Name: "hello", Binary: "hello", AddrEnv: "HELLO_URL", Ports: []string{"grpc"},
+		After:               []After{{Command: "printf", Args: []string{"nothing"}, Export: "STORE_ID", Regex: `id=(\S+)`}},
+		ReadyTimeoutSeconds: 5,
+	}}}
+
+	if _, err := Create(context.Background(), input, spec); err == nil || !strings.Contains(err.Error(), "exporting STORE_ID") {
+		t.Fatalf("got %v", err)
+	}
+
+	pids, err := testenvstack.ReadPids(filepath.Join(input.TmpDir, "stack.pids"))
+	if err == nil && len(pids) > 0 {
+		t.Errorf("no pid file must survive a failed create: %v", pids)
 	}
 }
 
