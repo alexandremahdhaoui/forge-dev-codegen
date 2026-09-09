@@ -113,24 +113,18 @@ func readLayoutFile(input GenerateInput, key string) ([]byte, error) {
 }
 
 func readRng(layout map[string]interface{}) (*vectorsrust.RngPort, error) {
-	raw, ok := layout["rng"]
-	if !ok {
+	if _, spelled := layout["rng"]; spelled {
+		return nil, fmt.Errorf("reading layout.rng: it restates a port the cell already declares, delete it and give that port a kind in its own cell")
+	}
+
+	crateDir := layoutString(layout, "crateDir")
+	cell := layoutString(layout, "cell")
+
+	if crateDir == "" || cell == "" {
 		return nil, nil
 	}
 
-	fields, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("reading layout.rng: it names the rng port with trait, module, method and returns, not %v", raw)
-	}
-
-	port := vectorsrust.RngPort{
-		Trait:   layoutString(fields, "trait"),
-		Module:  layoutString(fields, "module"),
-		Method:  layoutString(fields, "method"),
-		Returns: layoutString(fields, "returns"),
-	}
-
-	return &port, nil
+	return vectorsrust.SeededPortOfCell(crateDir, cell)
 }
 
 func layoutString(layout map[string]interface{}, key string) string {

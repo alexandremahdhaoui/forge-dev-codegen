@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
 )
 
 const smallSpec = `
@@ -167,15 +169,61 @@ func TestAGrpcProtoPathThatNamesNoFileIsRefusedByName(t *testing.T) {
 	}
 }
 
-func TestTheRngPortComesFromTheLayout(t *testing.T) {
+func TestTheRetiredRngLayoutIsRefusedByName(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "songe-hello", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,
 		Layout: map[string]interface{}{"rng": map[string]interface{}{"trait": "Rng", "module": "udp::port::rng"}},
 	})
 
-	want := "reading layout.rng: it names the rng port, so it needs trait, module, method and returns"
+	want := "reading layout.rng: it restates a port the cell already declares"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
+func TestTheSeededPortComesFromTheCounterTheCellDeclares(t *testing.T) {
+	root := t.TempDir()
+
+	cell := filepath.Join(root, "src", "udp")
+	if err := os.MkdirAll(cell, 0o755); err != nil {
+		t.Fatalf("standing up the cell: %v", err)
+	}
+
+	declaration := "layout:\n  cell: udp\n  ports:\n    - name: TickCounter\n      kind: counter\n      adapters: [memory]\n"
+	if err := os.WriteFile(filepath.Join(cell, "forge-dev.yaml"), []byte(declaration), 0o644); err != nil {
+		t.Fatalf("writing the cell declaration: %v", err)
+	}
+
+	port, err := vectorsrust.SeededPortOfCell(root, "udp")
+	if err != nil {
+		t.Fatalf("reading the cell: %v", err)
+	}
+
+	if port == nil {
+		t.Fatal("the counter the cell declares never became the seeded port")
+	}
+
+	want := vectorsrust.RngPort{Trait: "TickCounter", Module: "udp::port::tick_counter", Method: "next", Returns: "u64"}
+	if *port != want {
+		t.Errorf("seeded port = %+v, want %+v", *port, want)
+	}
+}
+
+func TestACellThatDeclaresNoCounterHasNoSeededPort(t *testing.T) {
+	root := t.TempDir()
+
+	cell := filepath.Join(root, "src", "udp")
+	if err := os.MkdirAll(cell, 0o755); err != nil {
+		t.Fatalf("standing up the cell: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cell, "forge-dev.yaml"), []byte("layout:\n  cell: udp\n"), 0o644); err != nil {
+		t.Fatalf("writing the cell declaration: %v", err)
+	}
+
+	port, err := vectorsrust.SeededPortOfCell(root, "udp")
+	if err != nil || port != nil {
+		t.Fatalf("seeded port = %+v, err = %v", port, err)
 	}
 }
 
@@ -253,13 +301,13 @@ func TestALayoutPushThatIsNotAListOfNamesIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnRngLayoutThatIsNotAMapIsRefused(t *testing.T) {
+func TestAnRngLayoutOfAnyShapeIsRefusedByName(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "songe-hello", Kind: "vectors", OpenapiSpec: smallSpec, Vectors: smallVectors,
 		Layout: map[string]interface{}{"rng": "TickCounter"},
 	})
 
-	want := "reading layout.rng: it names the rng port with trait, module, method and returns"
+	want := "reading layout.rng: it restates a port the cell already declares"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("generating reported %v, want %q", err, want)
 	}
