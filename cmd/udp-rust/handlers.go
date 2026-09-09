@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 )
@@ -77,7 +78,7 @@ func layoutPorts(layout map[string]interface{}) ([]udprust.PortSpec, error) {
 
 	entries, ok := raw.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("reading layout.ports: it is a list of port names or of name and methods entries, not %v", raw)
+		return nil, fmt.Errorf("reading layout.ports: it is a list of port names or of name, kind and adapters entries, not %v", raw)
 	}
 
 	specs := make([]udprust.PortSpec, 0, len(entries))
@@ -91,7 +92,11 @@ func layoutPorts(layout map[string]interface{}) ([]udprust.PortSpec, error) {
 
 		fields, ok := entry.(map[string]interface{})
 		if !ok {
-			return nil, fmt.Errorf("reading layout.ports entry %d: it is a port name or a name and methods entry, not %v", i, entry)
+			return nil, fmt.Errorf("reading layout.ports entry %d: it is a port name or a name, kind and adapters entry, not %v", i, entry)
+		}
+
+		if _, spelled := fields["methods"]; spelled {
+			return nil, fmt.Errorf("reading layout.ports entry %d: it declares methods, a port declares the kind it is and the engine writes the methods, the kinds are %s", i, strings.Join(udprust.PortKinds(), ", "))
 		}
 
 		name, _ := fields["name"].(string)
@@ -99,12 +104,19 @@ func layoutPorts(layout map[string]interface{}) ([]udprust.PortSpec, error) {
 			return nil, fmt.Errorf("reading layout.ports entry %d: it names no port", i)
 		}
 
-		methods, err := layoutStrings(fields, "methods")
-		if err != nil {
-			return nil, fmt.Errorf("reading layout.ports entry %d: %w", i, err)
+		spec := udprust.PortSpec{Name: name}
+		spec.Kind, _ = fields["kind"].(string)
+
+		if _, spelled := fields["adapters"]; spelled {
+			adapters, err := layoutStrings(fields, "adapters")
+			if err != nil {
+				return nil, fmt.Errorf("reading layout.ports entry %d: %w", i, err)
+			}
+
+			spec.Adapters = &adapters
 		}
 
-		specs = append(specs, udprust.PortSpec{Name: name, Methods: methods})
+		specs = append(specs, spec)
 	}
 
 	return specs, nil

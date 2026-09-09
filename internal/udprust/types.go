@@ -23,8 +23,21 @@ type Options struct {
 }
 
 type PortSpec struct {
-	Name    string
-	Methods []string
+	Name     string
+	Kind     string
+	Adapters *[]string
+}
+
+const CounterPortKind = "counter"
+
+const CounterAdapterMemory = "memory"
+
+func PortKinds() []string {
+	return []string{CounterPortKind}
+}
+
+func CounterAdapterKinds() []string {
+	return []string{CounterAdapterMemory}
 }
 
 type File struct {

@@ -90,10 +90,16 @@ type rpcView struct {
 }
 
 type portView struct {
-	Name      string
-	Snake     string
-	Methods   []string
-	Generated bool
+	Name               string
+	Snake              string
+	Kind               string
+	Methods            []string
+	Generated          bool
+	HasMemory          bool
+	MemoryStruct       string
+	MemoryConfigStruct string
+	MemoryAdapterName  string
+	MemoryModule       string
 }
 
 type serviceView struct {
@@ -250,26 +256,61 @@ func buildPortViews(opts Options) ([]portView, error) {
 
 		seen[spec.Name] = true
 
-		methods := make([]string, 0, len(spec.Methods))
-
-		for _, method := range spec.Methods {
-			trimmed := strings.TrimSuffix(strings.TrimSpace(method), ";")
-			if !strings.HasPrefix(trimmed, "fn ") || !strings.Contains(trimmed, "(&self") {
-				return nil, fmt.Errorf("naming the controller ports: method %q of %q is not a Rust signature like fn next(&self) -> u64", method, spec.Name)
-			}
-
-			methods = append(methods, trimmed+";")
+		view, err := buildPortView(spec)
+		if err != nil {
+			return nil, err
 		}
 
-		views = append(views, portView{
-			Name:      spec.Name,
-			Snake:     rustname.Snake(spec.Name),
-			Methods:   methods,
-			Generated: len(methods) > 0,
-		})
+		views = append(views, view)
 	}
 
 	return views, nil
+}
+
+func buildPortView(spec PortSpec) (portView, error) {
+	snake := rustname.Snake(spec.Name)
+
+	if spec.Kind == "" {
+		if spec.Adapters != nil {
+			return portView{}, fmt.Errorf("naming the controller ports: %q names adapters and no kind, adapters says how to build a port and kind says what the port is", spec.Name)
+		}
+
+		return portView{Name: spec.Name, Snake: snake}, nil
+	}
+
+	if spec.Kind != CounterPortKind {
+		return portView{}, fmt.Errorf("naming the controller ports: %q is of kind %q, the declared kinds are %s, an entry with no kind names a port another cell provides", spec.Name, spec.Kind, strings.Join(PortKinds(), ", "))
+	}
+
+	if spec.Adapters == nil {
+		return portView{}, fmt.Errorf("naming the controller ports: counter port %q names no adapters, adapters lists which of %s the engine emits", spec.Name, strings.Join(CounterAdapterKinds(), ", "))
+	}
+
+	if len(*spec.Adapters) == 0 {
+		return portView{}, fmt.Errorf("naming the controller ports: counter port %q names an empty adapters list, a counter nobody can build is a counter nobody can use", spec.Name)
+	}
+
+	view := portView{
+		Name:               spec.Name,
+		Snake:              snake,
+		Kind:               spec.Kind,
+		Methods:            []string{"fn next(&self) -> u64;"},
+		Generated:          true,
+		MemoryStruct:       spec.Name + "Memory",
+		MemoryConfigStruct: spec.Name + "MemoryConfig",
+		MemoryAdapterName:  "memory",
+		MemoryModule:       snake + "_memory",
+	}
+
+	for _, kind := range *spec.Adapters {
+		if kind != CounterAdapterMemory {
+			return portView{}, fmt.Errorf("naming the controller ports: counter port %q names adapter kind %q, a counter adapter is one of %s", spec.Name, kind, strings.Join(CounterAdapterKinds(), ", "))
+		}
+
+		view.HasMemory = true
+	}
+
+	return view, nil
 }
 
 func isPush(name string, opts Options) bool {

@@ -377,9 +377,15 @@ func TestTheTickDriverTakesThePeerTableRefusesToServeUnattachedAndCallsOnTickWit
 	}
 }
 
-func TestANamedControllerPortWithMethodsIsEmittedAsAStubHeldByTheControllerAndDemandedFromTheWiring(t *testing.T) {
+func counterPort() udprust.PortSpec {
+	adapters := []string{udprust.CounterAdapterMemory}
+
+	return udprust.PortSpec{Name: "TickCounter", Kind: udprust.CounterPortKind, Adapters: &adapters}
+}
+
+func TestACounterPortKindIsEmittedAsATraitHeldByTheControllerWithItsMemoryAdapter(t *testing.T) {
 	opts := sessionOptions()
-	opts.Ports = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+	opts.Ports = []udprust.PortSpec{counterPort()}
 
 	files, err := udprust.Generate([]byte(sessionProto), opts)
 	if err != nil {
@@ -421,8 +427,18 @@ func TestANamedControllerPortWithMethodsIsEmittedAsAStubHeldByTheControllerAndDe
 		t.Errorf("controller ports = %q", m.Provides.Controllers[0].Ports)
 	}
 
-	if !reflect.DeepEqual(m.Requires.Ports, []string{"TickCounter"}) {
-		t.Errorf("requires = %q", m.Requires.Ports)
+	for _, required := range m.Requires.Ports {
+		if required == "TickCounter" {
+			t.Error("the cell provides the counter adapter and still requires the port")
+		}
+	}
+
+	counter := byPath["adapter/zz_generated_tick_counter_memory.rs"]
+
+	for _, want := range []string{"AtomicU64", "fn next(&self) -> u64 {", "fetch_add(1, Ordering::Relaxed) + 1"} {
+		if !strings.Contains(counter, want) {
+			t.Errorf("the memory counter lacks %q\n%s", want, counter)
+		}
 	}
 
 	declared := false
@@ -469,7 +485,11 @@ func TestAControllerPortThatIsNotAPascalIdentOrAMethodThatIsNotASignatureIsRefus
 		want string
 	}{
 		{name: "a snake name", spec: udprust.PortSpec{Name: "tick_counter"}, want: `"tick_counter" is not a Pascal case Rust ident`},
-		{name: "a method with no self", spec: udprust.PortSpec{Name: "TickCounter", Methods: []string{"fn next() -> u64"}}, want: `is not a Rust signature like fn next(&self) -> u64`},
+		{name: "an unknown kind", spec: udprust.PortSpec{Name: "TickCounter", Kind: "dice"}, want: `is of kind "dice", the declared kinds are counter`},
+		{name: "a kind with no adapters", spec: udprust.PortSpec{Name: "TickCounter", Kind: udprust.CounterPortKind}, want: "names no adapters"},
+		{name: "a kind with an empty adapters list", spec: udprust.PortSpec{Name: "TickCounter", Kind: udprust.CounterPortKind, Adapters: &[]string{}}, want: "names an empty adapters list"},
+		{name: "an unknown adapter kind", spec: udprust.PortSpec{Name: "TickCounter", Kind: udprust.CounterPortKind, Adapters: &[]string{"clock"}}, want: `adapter kind "clock", a counter adapter is one of memory`},
+		{name: "adapters with no kind", spec: udprust.PortSpec{Name: "TickCounter", Adapters: &[]string{"memory"}}, want: "names adapters and no kind"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := udprust.Generate([]byte(sessionProto), udprust.Options{Service: "songe-hello", Ports: []udprust.PortSpec{tc.spec}})

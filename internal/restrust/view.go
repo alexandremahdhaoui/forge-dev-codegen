@@ -137,12 +137,22 @@ type handMethodView struct {
 }
 
 type handPortView struct {
-	Name      string
-	Snake     string
-	PortSnake string
-	Error     string
-	Imports   []importView
-	Methods   []handMethodView
+	Name               string
+	Snake              string
+	PortSnake          string
+	Error              string
+	Kind               string
+	Instant            string
+	InstantSnake       string
+	Span               string
+	SpanSnake          string
+	HasMemory          bool
+	MemoryStruct       string
+	MemoryConfigStruct string
+	MemoryAdapterName  string
+	MemoryModule       string
+	Imports            []importView
+	Methods            []handMethodView
 }
 
 type paramView struct {
@@ -547,10 +557,23 @@ func convert(expr string, ft fieldType, optional bool) (string, bool) {
 
 func buildHandPortView(h HandPort) handPortView {
 	hv := handPortView{
-		Name:      h.Name,
-		Snake:     h.Snake,
-		PortSnake: h.Snake,
-		Error:     h.Name + "Error",
+		Name:               h.Name,
+		Snake:              h.Snake,
+		PortSnake:          h.Snake,
+		Error:              h.Name + "Error",
+		Kind:               h.Kind,
+		Instant:            h.Instant,
+		InstantSnake:       rustname.Snake(h.Instant),
+		Span:               h.Span,
+		SpanSnake:          rustname.Snake(h.Span),
+		MemoryStruct:       h.Name + "Memory",
+		MemoryConfigStruct: h.Name + "MemoryConfig",
+		MemoryAdapterName:  "memory",
+		MemoryModule:       h.Snake + "_memory",
+	}
+
+	for _, kind := range h.Adapters {
+		hv.HasMemory = hv.HasMemory || kind == ClockAdapterMemory
 	}
 
 	imports := map[string]bool{}

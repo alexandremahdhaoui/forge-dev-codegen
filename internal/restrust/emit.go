@@ -274,6 +274,14 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		steps = append(steps, func() error {
 			return add(path.Join("port", "zz_generated_"+h.PortSnake+".rs"), "hand_port", map[string]any{"Header": v.Header, "Port": h, "CratePath": v.CratePath})
 		})
+
+		if h.HasMemory {
+			mount("adapter", modEntry{Module: "zz_generated_" + h.MemoryModule, Alias: h.MemoryModule})
+
+			steps = append(steps, func() error {
+				return add(path.Join("adapter", "zz_generated_"+h.MemoryModule+".rs"), h.Kind+"_memory", map[string]any{"Header": v.Header, "Port": h, "CratePath": v.CratePath})
+			})
+		}
 	}
 
 	for _, c := range v.Controllers {
@@ -460,7 +468,26 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Trait:  h.Name,
 			Module: v.ModulePrefix + "port::" + h.PortSnake,
 		})
-		m.Requires.Ports = append(m.Requires.Ports, h.Name)
+
+		if !h.HasMemory {
+			m.Requires.Ports = append(m.Requires.Ports, h.Name)
+
+			continue
+		}
+
+		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+			Name:       h.MemoryAdapterName,
+			Type:       h.MemoryStruct,
+			Module:     v.ModulePrefix + "adapter::" + h.MemoryModule,
+			Implements: h.Name,
+			Config: map[string]cellmanifest.ConfigField{
+				"epoch_ms": {
+					Type:        cellmanifest.FieldTypeInteger,
+					Default:     0,
+					Description: "The moment the " + h.Snake + " memory clock starts at, in milliseconds since the epoch",
+				},
+			},
+		})
 	}
 }
 
@@ -1124,6 +1151,62 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
     }
 {{- end }}
 {{- end }}
+}
+{{ end -}}
+
+{{- define "clock_memory" -}}
+{{ .Header }}
+{{ $p := .Port }}
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
+use {{ .CratePath }}types::{{ $p.InstantSnake }}::{{ $p.Instant }};
+use {{ .CratePath }}types::{{ $p.SpanSnake }}::{{ $p.Span }};
+
+const STEP_MS: i64 = 1;
+
+pub struct {{ $p.MemoryConfigStruct }} {
+    pub epoch_ms: i64,
+}
+
+impl Default for {{ $p.MemoryConfigStruct }} {
+    fn default() -> Self {
+        Self { epoch_ms: 0 }
+    }
+}
+
+pub struct {{ $p.MemoryStruct }} {
+    epoch_ms: AtomicI64,
+}
+
+impl {{ $p.MemoryStruct }} {
+    pub fn new(config: {{ $p.MemoryConfigStruct }}) -> Self {
+        Self {
+            epoch_ms: AtomicI64::new(config.epoch_ms),
+        }
+    }
+}
+
+impl {{ $p.Name }} for {{ $p.MemoryStruct }} {
+    fn now(&self) -> Result<{{ $p.Instant }}, {{ $p.Error }}> {
+        Ok({{ $p.Instant }} {
+            epoch_ms: self.epoch_ms.fetch_add(STEP_MS, Ordering::Relaxed),
+        })
+    }
+
+    fn elapsed(&self, request: {{ $p.Instant }}) -> Result<{{ $p.Span }}, {{ $p.Error }}> {
+        let now = self.epoch_ms.load(Ordering::Relaxed);
+
+        let millis = now
+            .checked_sub(request.epoch_ms)
+            .filter(|millis| *millis >= 0)
+            .ok_or_else(|| {{ $p.Error }}::Refused {
+                method: "elapsed".to_string(),
+                reason: format!("{} is not a moment this clock has reached", request.epoch_ms),
+            })?;
+
+        Ok({{ $p.Span }} { millis })
+    }
 }
 {{ end -}}
 

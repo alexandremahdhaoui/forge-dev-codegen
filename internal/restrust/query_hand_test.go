@@ -321,6 +321,120 @@ func TestTheControllerPortsOfTheManifestHoldTheHandPortBesideTheStore(t *testing
 	}
 }
 
+const clockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]"
+
+const handClockDeclaration = "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant\n            - name: elapsed\n              request: Instant\n              reply: Span"
+
+func clockSpec() string {
+	return strings.Replace(queriedSpec, handClockDeclaration, clockDeclaration, 1)
+}
+
+func TestAClockPortKindEmitsTheSameTraitTheHandFormSpelledOutByItself(t *testing.T) {
+	fromKind := generateSpec(t, clockSpec(), restrust.Options{Service: "songe-hello"})
+	fromHand := generateSpec(t, queriedSpec, restrust.Options{Service: "songe-hello"})
+
+	const port = "port/zz_generated_greeting_clock.rs"
+
+	if fromKind[port].Content != fromHand[port].Content {
+		t.Errorf("the clock kind wrote a different port:\n%s", fromKind[port].Content)
+	}
+}
+
+func TestAClockPortKindEmitsItsMemoryAdapterAndProvidesItInsteadOfRequiringThePort(t *testing.T) {
+	files := generateSpec(t, clockSpec(), restrust.Options{Service: "songe-hello"})
+
+	clock, emitted := files["adapter/zz_generated_greeting_clock_memory.rs"]
+	if !emitted {
+		t.Fatalf("the memory clock was not emitted, the cell wrote %d files", len(files))
+	}
+
+	for _, want := range []string{"fn now(&self)", "fn elapsed(&self, request: Instant)", "is not a moment this clock has reached", "AtomicI64"} {
+		if !strings.Contains(clock.Content, want) {
+			t.Errorf("the memory clock never carried %q:\n%s", want, clock.Content)
+		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, required := range m.Requires.Ports {
+		if required == "GreetingClock" {
+			t.Error("the cell provides the clock adapter and still requires the port")
+		}
+	}
+}
+
+func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace string
+		want    string
+	}{
+		{
+			name:    "no instant",
+			replace: "        - kind: clock\n          name: GreetingClock\n          span: Span\n          adapters: [memory]",
+			want:    "names no instant",
+		},
+		{
+			name:    "no span",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          adapters: [memory]",
+			want:    "names no span",
+		},
+		{
+			name:    "an instant that is no schema",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Moment\n          span: Span\n          adapters: [memory]",
+			want:    `names instant "Moment", which is not a schema of components.schemas`,
+		},
+		{
+			name:    "one schema for both",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Instant\n          adapters: [memory]",
+			want:    "as both its instant and its span",
+		},
+		{
+			name:    "no adapters",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span",
+			want:    "names no adapters",
+		},
+		{
+			name:    "an unknown adapter kind",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [ntp]",
+			want:    `adapter kind "ntp", a clock adapter is one of memory`,
+		},
+		{
+			name:    "methods a clock never declares",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]\n          methods:\n            - name: now\n              reply: Instant",
+			want:    "declares methods, a clock answers now and elapsed",
+		},
+		{
+			name:    "the name of a store port",
+			replace: "        - kind: clock\n          name: GreetingStore\n          instant: Instant\n          span: Span\n          adapters: [memory]",
+			want:    "takes the name of a store or subscribe port",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broken := strings.Replace(queriedSpec, handClockDeclaration, tc.replace, 1)
+
+			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestAHandPortMayNotNameAdaptersBecauseTheWiringAnswersIt(t *testing.T) {
+	broken := strings.Replace(queriedSpec, handClockDeclaration, handClockDeclaration+"\n          adapters: [memory]", 1)
+
+	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+	if err == nil || !strings.Contains(err.Error(), "names adapters, a hand port declares what the port is") {
+		t.Fatalf("a hand port naming adapters was not refused by name: %v", err)
+	}
+}
+
 func TestAHandPortDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	declaration := "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant\n            - name: elapsed\n              request: Instant\n              reply: Span"
 
@@ -332,12 +446,12 @@ func TestAHandPortDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 		{
 			name:    "an unknown kind",
 			replace: "        - kind: store\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant",
-			want:    `the only declared kind is "hand"`,
+			want:    `the declared kinds are clock, hand`,
 		},
 		{
 			name:    "no kind at all",
 			replace: "        - name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant",
-			want:    `the only declared kind is "hand"`,
+			want:    `the declared kinds are clock, hand`,
 		},
 		{
 			name:    "a name that is not Pascal case",
@@ -396,7 +510,7 @@ func TestAnXPortsEntryThatIsNeitherANameNorADeclarationIsRefused(t *testing.T) {
 	broken := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [7]", 1)
 
 	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), "an entry is either a port name or an object naming kind, name and methods") {
+	if err == nil || !strings.Contains(err.Error(), "an entry is either a port name or an object naming kind, name and what that kind needs") {
 		t.Fatalf("a number in x-ports was not refused: %v", err)
 	}
 }

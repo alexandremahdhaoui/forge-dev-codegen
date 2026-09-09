@@ -202,6 +202,14 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			})
 
 			mount("port", modEntry{Module: "zz_generated_" + port.Snake, Alias: port.Snake})
+
+			if port.HasMemory {
+				steps = append(steps, func() error {
+					return add(path.Join("adapter", "zz_generated_"+port.MemoryModule+".rs"), port.Kind+"_memory", map[string]any{"Header": header, "Port": port, "CratePath": v.CratePath})
+				})
+
+				mount("adapter", modEntry{Module: "zz_generated_" + port.MemoryModule, Alias: port.MemoryModule})
+			}
 		}
 
 		for _, step := range steps {
@@ -300,7 +308,19 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 			Module: v.ModulePrefix + "port::" + port.Snake,
 		})
 
-		m.Requires.Ports = append(m.Requires.Ports, port.Name)
+		if !port.HasMemory {
+			m.Requires.Ports = append(m.Requires.Ports, port.Name)
+
+			continue
+		}
+
+		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+			Name:       port.MemoryAdapterName,
+			Type:       port.MemoryStruct,
+			Module:     v.ModulePrefix + "adapter::" + port.MemoryModule,
+			Implements: port.Name,
+			Config:     map[string]cellmanifest.ConfigField{},
+		})
 	}
 
 	m.Provides.Controllers = append(m.Provides.Controllers, cellmanifest.Controller{
@@ -506,6 +526,37 @@ pub trait {{ .Port.Name }}: Send + Sync {
 {{- range .Port.Methods }}
     {{ . }}
 {{- end }}
+}
+{{ end -}}
+
+{{- define "counter_memory" -}}
+{{ .Header }}
+{{ $p := .Port }}
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use {{ .CratePath }}port::{{ $p.Snake }}::{{ $p.Name }};
+
+#[derive(Default)]
+pub struct {{ $p.MemoryConfigStruct }} {}
+
+pub struct {{ $p.MemoryStruct }} {
+    count: AtomicU64,
+}
+
+impl {{ $p.MemoryStruct }} {
+    pub fn new(config: {{ $p.MemoryConfigStruct }}) -> Self {
+        let {{ $p.MemoryConfigStruct }} {} = config;
+
+        Self {
+            count: AtomicU64::new(0),
+        }
+    }
+}
+
+impl {{ $p.Name }} for {{ $p.MemoryStruct }} {
+    fn next(&self) -> u64 {
+        self.count.fetch_add(1, Ordering::Relaxed) + 1
+    }
 }
 {{ end -}}
 

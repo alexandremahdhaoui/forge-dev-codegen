@@ -135,7 +135,9 @@ const sessionCases = `{
   ]
 }`
 
-var sessionPorts = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+var counterAdapters = []string{udprust.CounterAdapterMemory}
+
+var sessionPorts = []udprust.PortSpec{{Name: "TickCounter", Kind: udprust.CounterPortKind, Adapters: &counterAdapters}}
 
 func sessionOptions() vectorsrust.Options {
 	return vectorsrust.Options{

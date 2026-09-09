@@ -78,6 +78,9 @@ type portRef struct {
 	Kind     string
 	Name     string
 	Methods  []portMethod
+	Instant  string
+	Span     string
+	Adapters *[]string
 }
 
 type portMethod struct {
@@ -95,19 +98,25 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 	}
 
 	var declared struct {
-		Kind    string       `json:"kind"`
-		Name    string       `json:"name"`
-		Methods []portMethod `json:"methods"`
+		Kind     string       `json:"kind"`
+		Name     string       `json:"name"`
+		Methods  []portMethod `json:"methods"`
+		Instant  string       `json:"instant"`
+		Span     string       `json:"span"`
+		Adapters *[]string    `json:"adapters"`
 	}
 
 	if err := json.Unmarshal(raw, &declared); err != nil {
-		return fmt.Errorf("reading an x-ports entry: an entry is either a port name or an object naming kind, name and methods: %w", err)
+		return fmt.Errorf("reading an x-ports entry: an entry is either a port name or an object naming kind, name and what that kind needs: %w", err)
 	}
 
 	p.Declared = true
 	p.Kind = declared.Kind
 	p.Name = declared.Name
 	p.Methods = declared.Methods
+	p.Instant = declared.Instant
+	p.Span = declared.Span
+	p.Adapters = declared.Adapters
 
 	return nil
 }
@@ -188,9 +197,13 @@ type HandMethod struct {
 }
 
 type HandPort struct {
-	Name    string
-	Snake   string
-	Methods []HandMethod
+	Name     string
+	Snake    string
+	Kind     string
+	Instant  string
+	Span     string
+	Adapters []string
+	Methods  []HandMethod
 }
 
 type Operation struct {
@@ -256,6 +269,18 @@ const StorePortSuffix = "Store"
 const SubscribePortSuffix = "Subscribe"
 
 const HandPortKind = "hand"
+
+const ClockPortKind = "clock"
+
+const ClockAdapterMemory = "memory"
+
+func PortKinds() []string {
+	return []string{ClockPortKind, HandPortKind}
+}
+
+func ClockAdapterKinds() []string {
+	return []string{ClockAdapterMemory}
+}
 
 const (
 	LookupOne  = "one"
@@ -693,8 +718,16 @@ func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[s
 }
 
 func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
-	if ref.Kind != HandPortKind {
-		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the only declared kind is %q, every other entry is the name of a store or subscribe port", where, ref.Kind, HandPortKind)
+	if ref.Kind != HandPortKind && ref.Kind != ClockPortKind {
+		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the declared kinds are %s, every other entry is the name of a store or subscribe port", where, ref.Kind, list(PortKinds()))
+	}
+
+	if ref.Kind == ClockPortKind {
+		return parseClockPort(where, ref, schemas, storeNames)
+	}
+
+	if ref.Adapters != nil {
+		return HandPort{}, fmt.Errorf("reading %s: hand port %q names adapters, a hand port declares what the port is and the wiring names what answers it", where, ref.Name)
 	}
 
 	if !pascalIdentPattern.MatchString(ref.Name) {
@@ -709,7 +742,7 @@ func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNa
 		return HandPort{}, fmt.Errorf("reading %s: hand port %q declares no method, a port the controller consumes has at least one", where, ref.Name)
 	}
 
-	hand := HandPort{Name: ref.Name, Snake: rustname.Snake(ref.Name)}
+	hand := HandPort{Name: ref.Name, Snake: rustname.Snake(ref.Name), Kind: HandPortKind}
 	seen := map[string]bool{}
 
 	for _, m := range ref.Methods {
@@ -742,6 +775,69 @@ func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNa
 	}
 
 	return hand, nil
+}
+
+func parseClockPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
+	if err := checkPortName(where, ClockPortKind, ref.Name, storeNames); err != nil {
+		return HandPort{}, err
+	}
+
+	if len(ref.Methods) > 0 {
+		return HandPort{}, fmt.Errorf("reading %s: clock port %q declares methods, a clock answers now and elapsed and the engine writes both", where, ref.Name)
+	}
+
+	for label, name := range map[string]string{"instant": ref.Instant, "span": ref.Span} {
+		if name == "" {
+			return HandPort{}, fmt.Errorf("reading %s: clock port %q names no %s, a clock declaration names the two schemas it speaks", where, ref.Name, label)
+		}
+
+		if _, ok := schemas[name]; !ok {
+			return HandPort{}, fmt.Errorf("reading %s: clock port %q names %s %q, which is not a schema of components.schemas", where, ref.Name, label, name)
+		}
+	}
+
+	if ref.Instant == ref.Span {
+		return HandPort{}, fmt.Errorf("reading %s: clock port %q names %q as both its instant and its span, a moment and a duration are two schemas", where, ref.Name, ref.Instant)
+	}
+
+	if ref.Adapters == nil {
+		return HandPort{}, fmt.Errorf("reading %s: clock port %q names no adapters, adapters lists which of %s the engine emits", where, ref.Name, list(ClockAdapterKinds()))
+	}
+
+	if len(*ref.Adapters) == 0 {
+		return HandPort{}, fmt.Errorf("reading %s: clock port %q names an empty adapters list, a clock nobody can build is a clock nobody can use", where, ref.Name)
+	}
+
+	for _, kind := range *ref.Adapters {
+		if kind != ClockAdapterMemory {
+			return HandPort{}, fmt.Errorf("reading %s: clock port %q names adapter kind %q, a clock adapter is one of %s", where, ref.Name, kind, list(ClockAdapterKinds()))
+		}
+	}
+
+	return HandPort{
+		Name:     ref.Name,
+		Snake:    rustname.Snake(ref.Name),
+		Kind:     ClockPortKind,
+		Instant:  ref.Instant,
+		Span:     ref.Span,
+		Adapters: *ref.Adapters,
+		Methods: []HandMethod{
+			{Name: "now", Ident: "now", Reply: ref.Instant},
+			{Name: "elapsed", Ident: "elapsed", Request: ref.Instant, Reply: ref.Span},
+		},
+	}, nil
+}
+
+func checkPortName(where, kind, name string, storeNames map[string]bool) error {
+	if !pascalIdentPattern.MatchString(name) {
+		return fmt.Errorf("reading %s: %s port %q is not a Pascal case Rust ident, a port name starts with an upper case letter and holds letters and digits", where, kind, name)
+	}
+
+	if storeNames[name] || strings.HasSuffix(name, SubscribePortSuffix) {
+		return fmt.Errorf("reading %s: %s port %q takes the name of a store or subscribe port the engine already emits, name it something else", where, kind, name)
+	}
+
+	return nil
 }
 
 func parseOperation(path, method string, raw json.RawMessage, schemas map[string]schema, byName, storeTypes map[string]TypeDef, storeNames, handNames map[string]bool) (Operation, error) {

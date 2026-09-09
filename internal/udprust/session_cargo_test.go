@@ -518,7 +518,7 @@ func standUpTheSessionCell(t *testing.T) (string, string) {
 	}
 
 	opts := sessionOptions()
-	opts.Ports = []udprust.PortSpec{{Name: "TickCounter", Methods: []string{"fn next(&self) -> u64"}}}
+	opts.Ports = []udprust.PortSpec{counterPort()}
 
 	files, err := udprust.Generate([]byte(sessionProto), opts)
 	if err != nil {
