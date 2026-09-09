@@ -237,6 +237,14 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			mount("port", modEntry{Module: "zz_generated_" + v.BroadcastModule, Alias: v.BroadcastModule})
 			mount("port", modEntry{Module: "zz_generated_" + v.PeerTableModule, Alias: v.PeerTableModule})
 			mount("types", modEntry{Module: "zz_generated_" + v.PushModule, Alias: v.PushModule})
+
+			if v.GateSecret {
+				mount("adapter", modEntry{Module: "zz_generated_" + v.GateSecretModule, Alias: v.GateSecretModule})
+
+				if err := add(path.Join("adapter", "zz_generated_"+v.GateSecretModule+".rs"), "gate_secret", v); err != nil {
+					return nil, err
+				}
+			}
 		}
 
 		addServiceToManifest(&manifest, v)
@@ -422,6 +430,23 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 			Ports:      []string{v.PeerTableTrait},
 		},
 	)
+
+	if !v.GateSecret {
+		return
+	}
+
+	m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
+		Name:       v.GateSecretName,
+		Type:       v.GateSecretStruct,
+		Module:     v.ModulePrefix + "adapter::" + v.GateSecretModule,
+		Implements: v.GateTrait,
+		Config: map[string]cellmanifest.ConfigField{
+			"secret": {
+				Type:        cellmanifest.FieldTypeString,
+				Description: "The one " + v.GateSecretField + " the " + v.ServiceSnake + " session gate admits",
+			},
+		},
+	})
 }
 
 func render(name string, data any) (string, error) {
@@ -526,6 +551,47 @@ pub trait {{ .Port.Name }}: Send + Sync {
 {{- range .Port.Methods }}
     {{ . }}
 {{- end }}
+}
+{{ end -}}
+
+{{- define "gate_secret" -}}
+{{ .Header }}
+
+use {{ .CratePath }}port::{{ .GateModule }}::{{ "{" }}{{ .GateError }}, {{ .GateTrait }}{{ "}" }};
+use {{ .CratePath }}types::admission::Admission;
+use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ .HelloRpc.Request }};
+
+pub struct {{ .GateSecretConfig }} {
+    pub secret: String,
+}
+
+pub struct {{ .GateSecretStruct }} {
+    secret: String,
+}
+
+impl {{ .GateSecretStruct }} {
+    pub fn new(config: {{ .GateSecretConfig }}) -> Self {
+        Self {
+            secret: config.secret,
+        }
+    }
+}
+
+impl {{ .GateTrait }} for {{ .GateSecretStruct }} {
+    fn admit(
+        &self,
+        _session_id: &[u8; 16],
+        request: &{{ .HelloRpc.Request }},
+        _peer: std::net::SocketAddr,
+    ) -> Result<Admission, {{ .GateError }}> {
+        if request.{{ .GateSecretField }} == self.secret {
+            return Ok(Admission::Admitted);
+        }
+
+        Ok(Admission::Refused {
+            reason: "the offered {{ .GateSecretField }} does not open this session".to_string(),
+        })
+    }
 }
 {{ end -}}
 

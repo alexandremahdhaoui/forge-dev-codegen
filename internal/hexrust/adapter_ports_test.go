@@ -456,3 +456,36 @@ drivers:
 		t.Fatalf("the cycle was not refused by name: %v", err)
 	}
 }
+
+func secretRefusal(t *testing.T, ports map[string][]string, want string) {
+	t.Helper()
+
+	root := t.TempDir()
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, true)
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest"},
+		Ports:   ports,
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+`),
+	})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("wanted a refusal naming %q, got %v", want, err)
+	}
+}
+
+func TestACrateRootPortTheRootNeverEmitsIsRefusedByName(t *testing.T) {
+	secretRefusal(t, map[string][]string{"GreetingStore": {"secret"}}, `crate root port "GreetingStore": the crate root emits an adapter for TicketVerifier only`)
+}
+
+func TestAnUnknownCrateRootAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing.T) {
+	secretRefusal(t, map[string][]string{"TicketVerifier": {"vault"}}, `adapter kind "vault", a crate root adapter is one of secret`)
+}
+
+func TestACrateRootPortWithAnEmptyAdaptersListIsRefusedByName(t *testing.T) {
+	secretRefusal(t, map[string][]string{"TicketVerifier": {}}, "the adapters list is empty")
+}

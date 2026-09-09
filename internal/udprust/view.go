@@ -143,6 +143,12 @@ type serviceView struct {
 	GateTrait        string
 	GateError        string
 	GateModule       string
+	GateSecret       bool
+	GateSecretField  string
+	GateSecretName   string
+	GateSecretStruct string
+	GateSecretConfig string
+	GateSecretModule string
 	GateSnake        string
 	BroadcastTrait   string
 	BroadcastError   string
@@ -265,6 +271,74 @@ func buildPortViews(opts Options) ([]portView, error) {
 	}
 
 	return views, nil
+}
+
+func applyGate(sv *serviceView, opts Options) error {
+	if opts.Gate.Adapters == nil {
+		if opts.Gate.Field != "" {
+			return fmt.Errorf("declaring the session gate: it names field %q and no adapters, a field says what a secret adapter compares and adapters says to build one", opts.Gate.Field)
+		}
+
+		return nil
+	}
+
+	if len(*opts.Gate.Adapters) == 0 {
+		return fmt.Errorf("declaring the session gate: the adapters list is empty, a gate nobody can build is a gate nobody can use")
+	}
+
+	for _, kind := range *opts.Gate.Adapters {
+		if kind != GateAdapterSecret {
+			return fmt.Errorf("declaring the session gate: adapter kind %q, a gate adapter is one of %s", kind, strings.Join(GateAdapterKinds(), ", "))
+		}
+	}
+
+	if opts.Gate.Field == "" {
+		return fmt.Errorf("declaring the session gate: the secret adapter names no field, field names the property of %s it compares to the configured secret", sv.HelloRpc.Request)
+	}
+
+	ident, err := gateField(sv, opts.Gate.Field)
+	if err != nil {
+		return err
+	}
+
+	sv.GateSecret = true
+	sv.GateSecretField = ident
+	sv.GateSecretName = GateAdapterSecret
+	sv.GateSecretStruct = sv.ServicePascal + "SessionGateSecret"
+	sv.GateSecretConfig = sv.ServicePascal + "SessionGateSecretConfig"
+	sv.GateSecretModule = sv.ServiceSnake + "_session_gate_secret"
+
+	return nil
+}
+
+func gateField(sv *serviceView, field string) (string, error) {
+	ident := rustname.RustIdent(field)
+
+	for _, message := range sv.Messages {
+		if message.Name != sv.HelloRpc.Request {
+			continue
+		}
+
+		declared := []string{}
+
+		for _, f := range message.Fields {
+			declared = append(declared, f.Ident)
+
+			if f.Ident != ident {
+				continue
+			}
+
+			if f.RustType != "String" {
+				return "", fmt.Errorf("declaring the session gate: the secret adapter compares field %q of %s, which is a %s and a secret is a string", field, message.Name, f.RustType)
+			}
+
+			return ident, nil
+		}
+
+		return "", fmt.Errorf("declaring the session gate: the secret adapter compares field %q, which %s does not declare, it declares %s", field, message.Name, strings.Join(declared, ", "))
+	}
+
+	return "", fmt.Errorf("declaring the session gate: the hello request %s is not a message of this proto", sv.HelloRpc.Request)
 }
 
 func buildPortView(spec PortSpec) (portView, error) {
@@ -454,6 +528,10 @@ func buildServiceView(spec *grpcrust.Spec, svc grpcrust.Service, opts Options, o
 		if rv.Hello {
 			sv.Session = true
 			sv.HelloRpc = rv
+
+			if err := applyGate(&sv, opts); err != nil {
+				return serviceView{}, err
+			}
 		}
 
 		if rv.Push {

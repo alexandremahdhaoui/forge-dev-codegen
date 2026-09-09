@@ -57,6 +57,7 @@ type Options struct {
 	SrcDir  string
 	Cells   []string
 	Wiring  []byte
+	Ports   map[string][]string
 }
 
 type File struct {
@@ -95,6 +96,103 @@ func crateRootPorts(merged *cellmanifest.Merged) []crateports.Port {
 	}
 
 	return roots
+}
+
+func crateRootSecrets(merged *cellmanifest.Merged, roots []crateports.Port, declared map[string][]string) ([]crateports.Secret, error) {
+	secrets := []crateports.Secret{}
+
+	for _, trait := range sortedKeys(declared) {
+		shape, known := crateports.SecretShapeOf(trait)
+		if !known {
+			return nil, fmt.Errorf(
+				"declaring the adapters of crate root port %q: the crate root emits an adapter for %s only",
+				trait, list(secretTraits()),
+			)
+		}
+
+		if !named(roots, trait) {
+			return nil, fmt.Errorf(
+				"declaring the adapters of crate root port %q: no cell requires that port, so the crate root never emits it",
+				trait,
+			)
+		}
+
+		kinds := declared[trait]
+		if len(kinds) == 0 {
+			return nil, fmt.Errorf(
+				"declaring the adapters of crate root port %q: the adapters list is empty, a port nobody can build is a port nobody can use",
+				trait,
+			)
+		}
+
+		for _, kind := range kinds {
+			if kind != crateports.SecretAdapterKind {
+				return nil, fmt.Errorf(
+					"declaring the adapters of crate root port %q: adapter kind %q, a crate root adapter is one of %s",
+					trait, kind, crateports.SecretAdapterKind,
+				)
+			}
+		}
+
+		if len(shape.Fields) > 1 {
+			return nil, fmt.Errorf(
+				"building the secret adapter of %q: its success type %q carries %d fields and a secret adapter fills one from one configured string",
+				trait, shape.Success, len(shape.Fields),
+			)
+		}
+
+		merged.Adapters = append(merged.Adapters, cellmanifest.AdapterEntry{
+			Cell: "crate root",
+			Adapter: cellmanifest.Adapter{
+				Name:       crateports.SecretAdapterKind,
+				Type:       shape.Struct,
+				Module:     "adapter::" + shape.Module,
+				Implements: trait,
+				Config:     secretConfig(shape),
+			},
+		})
+
+		secrets = append(secrets, shape)
+	}
+
+	return secrets, nil
+}
+
+func secretConfig(shape crateports.Secret) map[string]cellmanifest.ConfigField {
+	config := map[string]cellmanifest.ConfigField{
+		"secret": {
+			Type:        cellmanifest.FieldTypeString,
+			Description: "The one string the " + shape.Snake + " secret adapter accepts",
+		},
+	}
+
+	for _, field := range shape.Fields {
+		config[field] = cellmanifest.ConfigField{
+			Type:        cellmanifest.FieldTypeString,
+			Description: "The " + field + " of the " + shape.Success + " the " + shape.Snake + " secret adapter answers on a match",
+		}
+	}
+
+	return config
+}
+
+func secretTraits() []string {
+	traits := []string{}
+	for _, shape := range crateports.SecretShapes() {
+		traits = append(traits, shape.Trait)
+	}
+
+	return traits
+}
+
+func named(roots []crateports.Port, trait string) bool {
+	for _, root := range roots {
+		if root.Trait == trait {
+			return true
+		}
+	}
+
+	return false
 }
 
 func checkCells(cells []string) error {
@@ -142,6 +240,52 @@ func CellsFromLayout(layout map[string]interface{}) ([]string, error) {
 	}
 
 	return names, nil
+}
+
+func PortsFromLayout(layout map[string]interface{}) (map[string][]string, error) {
+	raw, ok := layout["ports"]
+	if !ok {
+		return nil, nil
+	}
+
+	entries, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading ports: it maps a crate root port trait to the adapters the crate root emits for it, not %v", raw)
+	}
+
+	ports := map[string][]string{}
+
+	for trait, entry := range entries {
+		fields, ok := entry.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("reading ports entry %q: it is an object naming adapters, not %v", trait, entry)
+		}
+
+		raw, named := fields["adapters"]
+		if !named {
+			return nil, fmt.Errorf("reading ports entry %q: it names no adapters, adapters is the only key a crate root port carries", trait)
+		}
+
+		list, ok := raw.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("reading the adapters of port %q: it is a list of adapter kinds, not %v", trait, raw)
+		}
+
+		kinds := make([]string, 0, len(list))
+
+		for _, item := range list {
+			kind, ok := item.(string)
+			if !ok || kind == "" {
+				return nil, fmt.Errorf("reading the adapters of port %q: an entry is an adapter kind, not %v", trait, item)
+			}
+
+			kinds = append(kinds, kind)
+		}
+
+		ports[trait] = kinds
+	}
+
+	return ports, nil
 }
 
 func ReadManifests(srcDir string, cells []string) ([]cellmanifest.Manifest, error) {
@@ -207,6 +351,11 @@ func Generate(opts Options) ([]File, error) {
 
 	roots := crateRootPorts(&merged)
 
+	secrets, err := crateRootSecrets(&merged, roots, opts.Ports)
+	if err != nil {
+		return nil, err
+	}
+
 	p, err := buildPlan(merged, wiring, opts)
 	if err != nil {
 		return nil, err
@@ -249,6 +398,17 @@ func Generate(opts Options) ([]File, error) {
 		rootEntries[root.Layer] = append(rootEntries[root.Layer], modEntry{
 			Module: strings.TrimSuffix(root.File, ".rs"),
 			Alias:  root.Alias,
+		})
+	}
+
+	for _, shape := range secrets {
+		files = append(files, File{
+			Path:    path.Join("src", "adapter", shape.File),
+			Content: crateports.SecretSource(shape, header),
+		})
+		rootEntries["adapter"] = append(rootEntries["adapter"], modEntry{
+			Module: strings.TrimSuffix(shape.File, ".rs"),
+			Alias:  shape.Module,
 		})
 	}
 

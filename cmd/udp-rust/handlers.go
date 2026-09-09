@@ -43,12 +43,18 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
+			gate, err := layoutGate(input.Layout)
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := udprust.Generate([]byte(input.ProtoSpec), udprust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
 				Hello:   layoutString(input.Layout, "hello"),
 				Push:    push,
 				Ports:   ports,
+				Gate:    gate,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
@@ -68,6 +74,32 @@ func layoutString(layout map[string]interface{}, key string) string {
 	v, _ := layout[key].(string)
 
 	return v
+}
+
+func layoutGate(layout map[string]interface{}) (udprust.GateSpec, error) {
+	raw, ok := layout["gate"]
+	if !ok {
+		return udprust.GateSpec{}, nil
+	}
+
+	fields, ok := raw.(map[string]interface{})
+	if !ok {
+		return udprust.GateSpec{}, fmt.Errorf("reading layout.gate: it is an object naming field and adapters, not %v", raw)
+	}
+
+	spec := udprust.GateSpec{}
+	spec.Field, _ = fields["field"].(string)
+
+	if _, spelled := fields["adapters"]; spelled {
+		adapters, err := layoutStrings(fields, "adapters")
+		if err != nil {
+			return udprust.GateSpec{}, fmt.Errorf("reading layout.gate: %w", err)
+		}
+
+		spec.Adapters = &adapters
+	}
+
+	return spec, nil
 }
 
 func layoutPorts(layout map[string]interface{}) ([]udprust.PortSpec, error) {

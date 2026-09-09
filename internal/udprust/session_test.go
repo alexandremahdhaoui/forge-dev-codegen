@@ -554,3 +554,79 @@ func TestAHelloOrAPushThatNamesNoRpcIsRefusedByName(t *testing.T) {
 		})
 	}
 }
+
+func secretGate() udprust.GateSpec {
+	adapters := []string{udprust.GateAdapterSecret}
+
+	return udprust.GateSpec{Field: "secret", Adapters: &adapters}
+}
+
+func TestASecretGateAdapterComparesTheDeclaredFieldAndIsProvidedByTheCell(t *testing.T) {
+	opts := sessionOptions()
+	opts.Gate = secretGate()
+
+	files, err := udprust.Generate([]byte(sessionProto), opts)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	gate := byPath["adapter/zz_generated_hello_datagram_session_gate_secret.rs"]
+
+	for _, want := range []string{
+		"impl HelloDatagramSessionGate for HelloDatagramSessionGateSecret {",
+		"if request.secret == self.secret {",
+		"return Ok(Admission::Admitted);",
+		"Ok(Admission::Refused {",
+	} {
+		if !strings.Contains(gate, want) {
+			t.Errorf("the secret gate lacks %q\n%s", want, gate)
+		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	provided := false
+	for _, adapter := range m.Provides.Adapters {
+		provided = provided || (adapter.Name == "secret" && adapter.Implements == "HelloDatagramSessionGate")
+	}
+
+	if !provided {
+		t.Errorf("the manifest never provided the secret gate: %+v", m.Provides.Adapters)
+	}
+}
+
+func TestAGateDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
+	empty := []string{}
+	unknown := []string{"oauth"}
+	secret := []string{udprust.GateAdapterSecret}
+
+	for _, tc := range []struct {
+		name string
+		gate udprust.GateSpec
+		want string
+	}{
+		{name: "a field with no adapters", gate: udprust.GateSpec{Field: "secret"}, want: "names field \"secret\" and no adapters"},
+		{name: "an empty adapters list", gate: udprust.GateSpec{Adapters: &empty}, want: "the adapters list is empty"},
+		{name: "an unknown adapter kind", gate: udprust.GateSpec{Field: "secret", Adapters: &unknown}, want: `adapter kind "oauth", a gate adapter is one of secret`},
+		{name: "no field", gate: udprust.GateSpec{Adapters: &secret}, want: "names no field"},
+		{name: "a field the hello never declares", gate: udprust.GateSpec{Field: "password", Adapters: &secret}, want: `compares field "password", which Hello does not declare, it declares secret`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := sessionOptions()
+			opts.Gate = tc.gate
+
+			_, err := udprust.Generate([]byte(sessionProto), opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("wanted a refusal naming %q, got %v", tc.want, err)
+			}
+		})
+	}
+}

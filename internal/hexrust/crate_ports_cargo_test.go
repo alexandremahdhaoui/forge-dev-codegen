@@ -53,7 +53,8 @@ pub struct SongeHelloConfig {
     pub greeting_store: String,
     pub greeting_store_sqlite_path: String,
     pub ticket_verifier: String,
-    pub ticket_verifier_memory_secret: String,
+    pub ticket_verifier_secret_secret: String,
+    pub ticket_verifier_secret_id: String,
     pub greeting_event_subscribe: String,
     pub driver_rest: bool,
     pub rest_addr: String,
@@ -70,8 +71,9 @@ impl SongeHelloConfig {
         Ok(Self {
             greeting_store: "sqlite".to_string(),
             greeting_store_sqlite_path: ":memory:".to_string(),
-            ticket_verifier: "memory".to_string(),
-            ticket_verifier_memory_secret: "open".to_string(),
+            ticket_verifier: "secret".to_string(),
+            ticket_verifier_secret_secret: "open".to_string(),
+            ticket_verifier_secret_id: "friend".to_string(),
             greeting_event_subscribe: "memory".to_string(),
             driver_rest: true,
             rest_addr: "127.0.0.1:0".to_string(),
@@ -119,37 +121,6 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
-const guardedTicketMemory = `use crate::adapter::TicketMemoryVerifierConfig;
-use crate::port::ticket_verifier::{TicketVerifier, TicketVerifierError};
-use crate::types::subject::Subject;
-
-pub struct TicketMemoryVerifier {
-    secret: String,
-}
-
-impl TicketMemoryVerifier {
-    pub fn new(config: TicketMemoryVerifierConfig) -> Self {
-        Self {
-            secret: config.secret,
-        }
-    }
-}
-
-impl TicketVerifier for TicketMemoryVerifier {
-    fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError> {
-        if token != self.secret {
-            return Err(TicketVerifierError::Refused {
-                reason: "the ticket does not match".to_string(),
-            });
-        }
-
-        Ok(Subject {
-            id: "friend".to_string(),
-        })
-    }
-}
-`
-
 func TestTwoRestCellsShareTheCrateRootPortsAndTheCrateCompiles(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
@@ -166,20 +137,8 @@ func TestTwoRestCellsShareTheCrateRootPortsAndTheCrateCompiles(t *testing.T) {
 		Service: "songe-hello",
 		SrcDir:  root,
 		Cells:   []string{"account", "rest"},
+		Ports:   map[string][]string{"TicketVerifier": {"secret"}},
 		Wiring: []byte(`binary: songe-hello-node
-ports:
-  GreetingStore:
-    default: sqlite
-    adapters:
-      sqlite: {}
-  TicketVerifier:
-    default: memory
-    adapters:
-      memory:
-        type: TicketMemoryVerifier
-        module: adapter::ticket_memory
-        config:
-          secret: { type: string, default: open }
 drivers:
   rest: { enabled: true }
 `),
@@ -196,7 +155,6 @@ drivers:
 
 	write("Cargo.toml", strings.ReplaceAll(guardedCrateManifest, "SONGE_COMMON_DIR", songeCommonDir(t)))
 	write("src/config/zz_generated_config.rs", guardedConfigLoader)
-	write("src/adapter/ticket_memory.rs", guardedTicketMemory)
 	write("src/rest/controller/greeting_controller.rs", guardedControllerImpl)
 
 	out, err := runCargo(t, cargo, root, "check", "--workspace", "--all-targets")

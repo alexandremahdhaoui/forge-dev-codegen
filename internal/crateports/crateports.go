@@ -29,6 +29,50 @@ func Known() []Port {
 	}
 }
 
+const SecretAdapterKind = "secret"
+
+type Secret struct {
+	Trait         string
+	Snake         string
+	Method        string
+	Error         string
+	Success       string
+	SuccessModule string
+	Fields        []string
+	Struct        string
+	Config        string
+	Module        string
+	File          string
+}
+
+func SecretShapes() []Secret {
+	return []Secret{
+		{
+			Trait:         TicketVerifierPort,
+			Snake:         "ticket_verifier",
+			Method:        "verify",
+			Error:         TicketVerifierPort + "Error",
+			Success:       SubjectType,
+			SuccessModule: SubjectModule,
+			Fields:        []string{"id"},
+			Struct:        TicketVerifierPort + "Secret",
+			Config:        TicketVerifierPort + "SecretConfig",
+			Module:        "ticket_verifier_secret",
+			File:          "zz_generated_ticket_verifier_secret.rs",
+		},
+	}
+}
+
+func SecretShapeOf(trait string) (Secret, bool) {
+	for _, shape := range SecretShapes() {
+		if shape.Trait == trait {
+			return shape, true
+		}
+	}
+
+	return Secret{}, false
+}
+
 func Lookup(trait string) (Port, bool) {
 	for _, port := range Known() {
 		if port.Trait == trait {
@@ -88,6 +132,49 @@ pub enum TokenSourceError {
 #[cfg_attr(test, mockall::automock)]
 pub trait TokenSource: Send + Sync {
     fn token(&self) -> Result<String, TokenSourceError>;
+}
+`
+}
+
+func SecretSource(shape Secret, header string) string {
+	field := shape.Fields[0]
+
+	return header + `
+
+use crate::` + shape.SuccessModule + `::` + shape.Success + `;
+use crate::port::` + shape.Snake + `::{` + shape.Trait + `, ` + shape.Error + `};
+
+pub struct ` + shape.Config + ` {
+    pub secret: String,
+    pub ` + field + `: String,
+}
+
+pub struct ` + shape.Struct + ` {
+    secret: String,
+    ` + field + `: String,
+}
+
+impl ` + shape.Struct + ` {
+    pub fn new(config: ` + shape.Config + `) -> Self {
+        Self {
+            secret: config.secret,
+            ` + field + `: config.` + field + `,
+        }
+    }
+}
+
+impl ` + shape.Trait + ` for ` + shape.Struct + ` {
+    fn ` + shape.Method + `(&self, offered: &str) -> Result<` + shape.Success + `, ` + shape.Error + `> {
+        if offered != self.secret {
+            return Err(` + shape.Error + `::Refused {
+                reason: "the offered string does not match the configured secret".to_string(),
+            });
+        }
+
+        Ok(` + shape.Success + ` {
+            ` + field + `: self.` + field + `.clone(),
+        })
+    }
 }
 `
 }

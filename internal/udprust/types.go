@@ -20,6 +20,18 @@ type Options struct {
 	Hello   string
 	Push    []string
 	Ports   []PortSpec
+	Gate    GateSpec
+}
+
+type GateSpec struct {
+	Field    string
+	Adapters *[]string
+}
+
+const GateAdapterSecret = "secret"
+
+func GateAdapterKinds() []string {
+	return []string{GateAdapterSecret}
 }
 
 type PortSpec struct {
