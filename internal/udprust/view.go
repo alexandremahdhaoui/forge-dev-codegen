@@ -303,7 +303,7 @@ func applyGate(sv *serviceView, opts Options) error {
 
 	sv.GateSecret = true
 	sv.GateSecretField = ident
-	sv.GateSecretName = GateAdapterSecret
+	sv.GateSecretName = sv.ServiceSnake + "_session_gate_" + GateAdapterSecret
 	sv.GateSecretStruct = sv.ServicePascal + "SessionGateSecret"
 	sv.GateSecretConfig = sv.ServicePascal + "SessionGateSecretConfig"
 	sv.GateSecretModule = sv.ServiceSnake + "_session_gate_secret"
@@ -372,7 +372,7 @@ func buildPortView(spec PortSpec) (portView, error) {
 		Generated:          true,
 		MemoryStruct:       spec.Name + "Memory",
 		MemoryConfigStruct: spec.Name + "MemoryConfig",
-		MemoryAdapterName:  "memory",
+		MemoryAdapterName:  snake + "_memory",
 		MemoryModule:       snake + "_memory",
 	}
 

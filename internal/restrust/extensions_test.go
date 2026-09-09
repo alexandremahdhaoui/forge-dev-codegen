@@ -251,7 +251,7 @@ func TestAStreamThatDeclaresAnAdapterProvidesItsFeedInsteadOfRequiringThePort(t 
 		t.Errorf("requires.ports = %q", m.Requires.Ports)
 	}
 
-	feed, provided := adapterNamed(m, "memory_feed")
+	feed, provided := adapterNamed(m, "greeting_event_memory_feed")
 	if !provided {
 		t.Fatalf("the memory feed was not provided: %+v", m.Provides.Adapters)
 	}

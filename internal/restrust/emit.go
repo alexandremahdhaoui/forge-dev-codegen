@@ -1165,14 +1165,9 @@ use {{ .CratePath }}types::{{ $p.SpanSnake }}::{{ $p.Span }};
 
 const STEP_MS: i64 = 1;
 
+#[derive(Default)]
 pub struct {{ $p.MemoryConfigStruct }} {
     pub epoch_ms: i64,
-}
-
-impl Default for {{ $p.MemoryConfigStruct }} {
-    fn default() -> Self {
-        Self { epoch_ms: 0 }
-    }
 }
 
 pub struct {{ $p.MemoryStruct }} {

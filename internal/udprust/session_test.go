@@ -595,7 +595,7 @@ func TestASecretGateAdapterComparesTheDeclaredFieldAndIsProvidedByTheCell(t *tes
 
 	provided := false
 	for _, adapter := range m.Provides.Adapters {
-		provided = provided || (adapter.Name == "secret" && adapter.Implements == "HelloDatagramSessionGate")
+		provided = provided || (adapter.Name == "hello_datagram_session_gate_secret" && adapter.Implements == "HelloDatagramSessionGate")
 	}
 
 	if !provided {

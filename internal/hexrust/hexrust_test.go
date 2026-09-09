@@ -700,7 +700,7 @@ func TestAnAdapterTheManifestLeavesInfallibleGetsNoQuestionMark(t *testing.T) {
 
 	main := mainOf(t, files)
 
-	armStart := `"memory_feed" => Arc::new(`
+	armStart := `"greeting_event_memory_feed" => Arc::new(`
 	armEnd := "\n        ),"
 
 	start := strings.Index(main, armStart)

@@ -324,7 +324,7 @@ func buildView(spec *Spec, opts Options) view {
 			FromSnake:          e.From.Snake,
 			MemoryStruct:       e.Name + "MemoryFeed",
 			MemoryConfigStruct: e.Name + "MemoryFeedConfig",
-			MemoryAdapterName:  feedAdapterName(spec.Events, e, "memory"),
+			MemoryAdapterName:  feedAdapterName(e, "memory"),
 			MemoryModule:       e.Snake + "_memory",
 		}
 
@@ -419,11 +419,7 @@ func adapterName(stores []TypeDef, store TypeDef, kind string) string {
 	return store.Snake + "_" + kind
 }
 
-func feedAdapterName(events []Event, event Event, kind string) string {
-	if len(events) == 1 {
-		return kind + "_feed"
-	}
-
+func feedAdapterName(event Event, kind string) string {
 	return event.Snake + "_" + kind + "_feed"
 }
 
@@ -568,7 +564,7 @@ func buildHandPortView(h HandPort) handPortView {
 		SpanSnake:          rustname.Snake(h.Span),
 		MemoryStruct:       h.Name + "Memory",
 		MemoryConfigStruct: h.Name + "MemoryConfig",
-		MemoryAdapterName:  "memory",
+		MemoryAdapterName:  h.Snake + "_memory",
 		MemoryModule:       h.Snake + "_memory",
 	}
 
