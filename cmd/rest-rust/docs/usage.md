@@ -48,7 +48,7 @@ writes above it.
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
 | `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
-| `port/zz_generated_<hand>.rs` | server | one hand port per `kind: hand` entry of `x-ports`, its error enum and its trait under mockall |
+| `port/zz_generated_<port>.rs` | server | one port per declaration entry of `x-ports`, its error enum and its trait under mockall |
 | `driver/zz_generated_wire.rs` | server | one wire struct per schema, `RejectionWire`, and the mapping both ways |
 | `driver/zz_generated_http_driver.rs` | server | `HttpDriver`, `HttpDriverConfig`, the router, and one handler per operation |
 | `adapter/zz_generated_wire.rs` | client | the same wire structs, so the adapter never reaches into the driver |
@@ -112,45 +112,40 @@ parameters:
       type: string
 ```
 
-## Hand ports
+## Declared ports
 
 `x-ports` takes a port name or a declaration. A name is the store port
 of an `x-store` schema, the subscribe port of the operation's own
-stream, or a hand port some operation declares. A declaration is an
-object of kind `hand`, and it is the way to give a controller a port
-this engine does not generate an adapter for.
+stream, or a port some operation declares. A declaration is an object
+naming a `kind`. The declared kinds are `clock`.
 
 ```yaml
 x-ports:
   - GreetingStore
-  - kind: hand
+  - kind: clock
     name: GreetingClock
-    methods:
-      - name: now
-        reply: Instant
-      - name: elapsed
-        request: Instant
-        reply: Span
+    instant: Instant
+    span: Span
+    adapters: [memory]
 ```
 
 The name is Pascal case and may not take the name of a store or
-subscribe port. Each method names a `request` and a `reply` from
-`components.schemas`. Both are optional. No request means no argument.
-No reply means the method answers `()`.
+subscribe port. A kind says what the port is, so the engine writes both
+its trait and every adapter its `adapters` list names. There is no kind
+that carries raw Rust signatures and leaves the adapter to the user. A
+port the engine cannot write is a port that belongs in its own spec.
 
 The engine writes `port/zz_generated_<snake>.rs` holding
 `<Name>Error` with a `Refused` and a `Call` arm and the trait under
 `mockall::automock`, so the user never writes a port trait. The
 controller struct gains one boxed field, `new` takes it in port name
 order, and the controller error enum gains one arm wrapping
-`<Name>Error`. The manifest declares the port and lists it under
-`requires`, so `wiring.yaml` names its adapter. A missing adapter is a
-wiring error naming the port, and a missing method on the adapter is a
-compile error naming it.
+`<Name>Error`. The manifest declares the port and the adapters its kind
+emits, so `wiring.yaml` picks one.
 
-Declare a hand port once. Every other operation names it by its name. A
-second declaration with different methods is refused, and a name no
-operation declares is refused.
+Declare a port once. Every other operation names it by its name. A
+second declaration that disagrees is refused, and a name no operation
+declares is refused.
 
 ## Streams
 
@@ -246,6 +241,20 @@ field is `path`. It opens the file, creates the table and the audit
 table, and answers the port trait. A single store schema names its
 adapter `sqlite` in the manifest. Two or more name theirs
 `<store>_sqlite`, so a merge across cells never collides.
+
+`<Store>MemoryStore::new` takes a `capacity` and refuses a new row past
+it with `Full`, naming the capacity and the key. The sqlite store has no
+ceiling and never refuses that way.
+
+The two adapters are meant to differ here. A capacity is a property of
+one adapter, never of the port. The port permits the refusal and says
+nothing about when it comes. Memory answers it because memory fills.
+Sqlite never answers it because sqlite never fills. Neither adapter
+ignores a promise the port makes, because the port promises no ceiling.
+
+A lookup names a column through the generated `<Store>Column` enum, so
+neither adapter can be asked for a column it cannot read and neither
+answers a default when asked.
 
 ## What the crate needs
 

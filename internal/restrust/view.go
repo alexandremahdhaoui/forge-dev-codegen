@@ -32,7 +32,6 @@ type view struct {
 	ModulePrefix     string
 	DriverName       string
 	DefaultAddress   string
-	DefaultStorePath string
 	DefaultBaseURL   string
 	Server           bool
 	Client           bool
@@ -70,10 +69,11 @@ type typeView struct {
 }
 
 type lookupView struct {
-	By     string
-	Ident  string
-	Method string
-	Page   bool
+	By      string
+	Ident   string
+	Method  string
+	Variant string
+	Page    bool
 }
 
 type publishView struct {
@@ -104,8 +104,6 @@ type storeView struct {
 	MemoryModule       string
 	HasSqlite          bool
 	HasOneLookup       bool
-	DefaultPath        string
-	DefaultCapacity    int
 	Publishes          *publishView
 }
 
@@ -239,7 +237,6 @@ func buildView(spec *Spec, opts Options) view {
 		ModulePrefix:     modulePrefix,
 		DriverName:       opts.Cell,
 		DefaultAddress:   DefaultAddress,
-		DefaultStorePath: DefaultStorePath,
 		DefaultBaseURL:   DefaultBaseURL,
 		Server:           opts.Side != SideClient,
 		Client:           opts.Side != SideServer,
@@ -281,8 +278,6 @@ func buildView(spec *Spec, opts Options) view {
 			MemoryConfigStruct: s.Name + "MemoryStoreConfig",
 			MemoryAdapterName:  adapterName(spec.Stores, s, "memory"),
 			MemoryModule:       s.Snake + "_memory",
-			DefaultPath:        DefaultStorePath,
-			DefaultCapacity:    DefaultStoreCapacity,
 		}
 
 		for _, kind := range s.Store.Adapters {
@@ -294,10 +289,11 @@ func buildView(spec *Spec, opts Options) view {
 			sv.HasOneLookup = sv.HasOneLookup || l.Answers == LookupOne
 
 			sv.Lookups = append(sv.Lookups, lookupView{
-				By:     l.By,
-				Ident:  l.Ident,
-				Method: lookupMethod(l),
-				Page:   l.Answers == LookupPage,
+				By:      l.By,
+				Ident:   l.Ident,
+				Method:  lookupMethod(l),
+				Variant: rustname.Pascal(l.By),
+				Page:    l.Answers == LookupPage,
 			})
 		}
 

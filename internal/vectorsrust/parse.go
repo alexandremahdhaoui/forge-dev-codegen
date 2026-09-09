@@ -64,24 +64,24 @@ type declared struct {
 	datagram  func(string) bool
 	grpc      func(string) bool
 	surfaces  []string
-	rng       *rngPort
+	rng       *CounterPort
 }
 
-func checkSeed(c VectorCase, rng *rngPort) error {
+func checkSeed(c VectorCase, counter *CounterPort) error {
 	if c.Seed == nil {
 		return nil
 	}
 
 	if *c.Seed < 0 {
-		return fmt.Errorf("reading vector %q: seed %d is below zero, a seed is the number the mocked rng port answers", c.Case, *c.Seed)
+		return fmt.Errorf("reading vector %q: seed %d is below zero, a seed is the number the mocked counter port answers", c.Case, *c.Seed)
 	}
 
-	if rng == nil {
-		return fmt.Errorf("reading vector %q: it carries a seed and the cell names no rng port under layout.rng, name the trait, its module and its one method there", c.Case)
+	if counter == nil {
+		return fmt.Errorf("reading vector %q: it carries a seed and no cell declares a counter port, give one port of the cell kind counter", c.Case)
 	}
 
 	if !c.IsPush() {
-		return fmt.Errorf("reading vector %q: seed belongs to a case whose controller pushes, the mocked controller draws from the rng port while it answers", c.Case)
+		return fmt.Errorf("reading vector %q: seed belongs to a case whose controller pushes, the mocked controller draws from the counter port while it answers", c.Case)
 	}
 
 	return nil

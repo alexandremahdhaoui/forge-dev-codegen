@@ -217,7 +217,6 @@ func TestTheDriverGatesTheHelloAdmitsThePeerAfterTheControllerAnsweredFollowsAKn
 		"match self.controller.hello(request, &context) {\n                        Ok(reply) => {\n                            if !self.admit(&session_id, peer, &mut told_about_a_full_table) {",
 		"codec::HelloDatagramRequest::Echo(request) => {\n                    if !self.follow(&session_id, peer, &mut told_about_an_unknown_session) {",
 		"Ok(Admission::Refused { reason }) => {",
-		"the peer table is full",
 		"session {session_id:?} was never admitted",
 		"names a server to client rpc",
 	} {
@@ -228,6 +227,36 @@ func TestTheDriverGatesTheHelloAdmitsThePeerAfterTheControllerAnsweredFollowsAKn
 
 	if strings.Contains(driver, "HelloDatagramRequest::Counter") || strings.Contains(driver, "Broadcast") {
 		t.Errorf("the driver routes a push rpc inbound or reaches the broadcast\n%s", driver)
+	}
+}
+
+func TestAFullPeerTableRefusesByNamingMaxSessionsAndNeverAnswersABareFalse(t *testing.T) {
+	files := generateSession(t)
+
+	port := files["port/zz_generated_hello_datagram_peer_table.rs"].Content
+	adapter := files["adapter/zz_generated_hello_datagram_udp_peer_table.rs"].Content
+	driver := files["driver/zz_generated_hello_datagram_udp_driver.rs"].Content
+
+	for _, want := range []string{
+		"the hello_datagram peer table holds its max_sessions of {max_sessions} and this session is a new one",
+		"Full {\n        max_sessions: usize,\n        session_id: [u8; 16],\n        peer: std::net::SocketAddr,\n    },",
+		"    ) -> Result<(), HelloDatagramPeerTableError>;",
+	} {
+		if !strings.Contains(port, want) {
+			t.Errorf("the peer table port lacks %q\n%s", want, port)
+		}
+	}
+
+	if !strings.Contains(adapter, "return Err(HelloDatagramPeerTableError::Full {") {
+		t.Errorf("the peer table adapter answers a bare false when full\n%s", adapter)
+	}
+
+	if !strings.Contains(driver, "match self.peer_table.admit_peer(session_id, peer) {\n            Ok(()) => true,") {
+		t.Errorf("the driver still reads an admission as a bool\n%s", driver)
+	}
+
+	if !strings.Contains(driver, "if full.first_time(peer) {\n                    eprintln!(\"dropping a hello from {peer}: {}\", error_chain(&error));") {
+		t.Errorf("the driver never renders the refusal the peer table names\n%s", driver)
 	}
 }
 

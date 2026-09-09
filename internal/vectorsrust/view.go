@@ -183,7 +183,7 @@ func queryArgType(q restrust.QueryParam) string {
 	return "Option<i64>"
 }
 
-func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, calls *callService, rng *rngPort, opts Options) (view, error) {
+func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramService, calls *callService, counter *CounterPort, opts Options) (view, error) {
 	v := view{
 		Header:    header,
 		Crate:     rustname.Snake(opts.Service),
@@ -193,14 +193,14 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 		DrawIdent: drawIdent,
 	}
 
-	if rng != nil {
+	if counter != nil {
 		v.HasRng = true
 		v.Rng = rngPortView{
-			Trait:   rng.Trait,
-			Module:  rng.Module,
-			Method:  rng.Method,
-			Returns: rng.Returns,
-			Builder: "seeded_" + rustname.Snake(rng.Trait),
+			Trait:   counter.Trait,
+			Module:  counter.Module,
+			Method:  counter.Method,
+			Returns: counter.Returns,
+			Builder: "seeded_" + rustname.Snake(counter.Trait),
 		}
 	}
 

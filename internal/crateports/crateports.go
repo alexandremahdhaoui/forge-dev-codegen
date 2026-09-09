@@ -20,12 +20,13 @@ type Port struct {
 	Alias  string
 	Layer  string
 	File   string
+	Source func(header string) string
 }
 
 func Known() []Port {
 	return []Port{
-		{Trait: TicketVerifierPort, Module: TicketVerifierModule, Alias: "ticket_verifier", Layer: "port", File: TicketVerifierFile},
-		{Trait: TokenSourcePort, Module: TokenSourceModule, Alias: "token_source", Layer: "port", File: TokenSourceFile},
+		{Trait: TicketVerifierPort, Module: TicketVerifierModule, Alias: "ticket_verifier", Layer: "port", File: TicketVerifierFile, Source: TicketVerifierSource},
+		{Trait: TokenSourcePort, Module: TokenSourceModule, Alias: "token_source", Layer: "port", File: TokenSourceFile, Source: TokenSourceSource},
 	}
 }
 
@@ -38,7 +39,7 @@ type Secret struct {
 	Error         string
 	Success       string
 	SuccessModule string
-	Fields        []string
+	Field         string
 	Struct        string
 	Config        string
 	Module        string
@@ -54,7 +55,7 @@ func SecretShapes() []Secret {
 			Error:         TicketVerifierPort + "Error",
 			Success:       SubjectType,
 			SuccessModule: SubjectModule,
-			Fields:        []string{"id"},
+			Field:         "id",
 			Struct:        TicketVerifierPort + "Secret",
 			Config:        TicketVerifierPort + "SecretConfig",
 			Module:        "ticket_verifier_secret",
@@ -84,7 +85,7 @@ func Lookup(trait string) (Port, bool) {
 }
 
 func Subject() Port {
-	return Port{Trait: SubjectType, Module: SubjectModule, Alias: "subject", Layer: "types", File: SubjectFile}
+	return Port{Trait: SubjectType, Module: SubjectModule, Alias: "subject", Layer: "types", File: SubjectFile, Source: SubjectSource}
 }
 
 func SubjectSource(header string) string {
@@ -137,7 +138,7 @@ pub trait TokenSource: Send + Sync {
 }
 
 func SecretSource(shape Secret, header string) string {
-	field := shape.Fields[0]
+	field := shape.Field
 
 	return header + `
 
@@ -179,15 +180,3 @@ impl ` + shape.Trait + ` for ` + shape.Struct + ` {
 `
 }
 
-func Source(trait, header string) (string, bool) {
-	switch trait {
-	case TicketVerifierPort:
-		return TicketVerifierSource(header), true
-	case TokenSourcePort:
-		return TokenSourceSource(header), true
-	case SubjectType:
-		return SubjectSource(header), true
-	default:
-		return "", false
-	}
-}

@@ -36,7 +36,7 @@ type cellConfig struct {
 	} `json:"layout"`
 }
 
-func SeededPortOfCell(crateDir, cell string) (*RngPort, error) {
+func SeededPortOfCell(crateDir, cell string) (*CounterPort, error) {
 	path := filepath.Join(crateDir, "src", cell, CellConfigFile)
 
 	body, err := os.ReadFile(path)
@@ -53,14 +53,14 @@ func SeededPortOfCell(crateDir, cell string) (*RngPort, error) {
 		return nil, fmt.Errorf("reading the declaration of cell %q at %q: %w", cell, path, err)
 	}
 
-	seeded := []*RngPort{}
+	seeded := []*CounterPort{}
 
 	for _, port := range config.Layout.Ports {
 		if port.Kind != udprust.CounterPortKind {
 			continue
 		}
 
-		seeded = append(seeded, &RngPort{
+		seeded = append(seeded, &CounterPort{
 			Trait:   port.Name,
 			Module:  cell + "::port::" + rustname.Snake(port.Name),
 			Method:  "next",

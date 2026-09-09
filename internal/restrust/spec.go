@@ -268,14 +268,12 @@ const StorePortSuffix = "Store"
 
 const SubscribePortSuffix = "Subscribe"
 
-const HandPortKind = "hand"
-
 const ClockPortKind = "clock"
 
 const ClockAdapterMemory = "memory"
 
 func PortKinds() []string {
-	return []string{ClockPortKind, HandPortKind}
+	return []string{ClockPortKind}
 }
 
 func ClockAdapterKinds() []string {
@@ -701,7 +699,7 @@ func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[s
 
 				known, seen := byName[hand.Name]
 				if seen && !reflect.DeepEqual(known, hand) {
-					return nil, fmt.Errorf("reading %s: x-ports declares hand port %q a second time with different methods, declare it once and name it by its name everywhere else", where, hand.Name)
+					return nil, fmt.Errorf("reading %s: x-ports declares port %q a second time with a different declaration, declare it once and name it by its name everywhere else", where, hand.Name)
 				}
 
 				byName[hand.Name] = hand
@@ -718,63 +716,11 @@ func collectHandPorts(paths map[string]map[string]json.RawMessage, schemas map[s
 }
 
 func parseHandPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
-	if ref.Kind != HandPortKind && ref.Kind != ClockPortKind {
+	if ref.Kind != ClockPortKind {
 		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the declared kinds are %s, every other entry is the name of a store or subscribe port", where, ref.Kind, list(PortKinds()))
 	}
 
-	if ref.Kind == ClockPortKind {
-		return parseClockPort(where, ref, schemas, storeNames)
-	}
-
-	if ref.Adapters != nil {
-		return HandPort{}, fmt.Errorf("reading %s: hand port %q names adapters, a hand port declares what the port is and the wiring names what answers it", where, ref.Name)
-	}
-
-	if !pascalIdentPattern.MatchString(ref.Name) {
-		return HandPort{}, fmt.Errorf("reading %s: hand port %q is not a Pascal case Rust ident, a port name starts with an upper case letter and holds letters and digits", where, ref.Name)
-	}
-
-	if storeNames[ref.Name] || strings.HasSuffix(ref.Name, SubscribePortSuffix) {
-		return HandPort{}, fmt.Errorf("reading %s: hand port %q takes the name of a store or subscribe port the engine already emits, name it something else", where, ref.Name)
-	}
-
-	if len(ref.Methods) == 0 {
-		return HandPort{}, fmt.Errorf("reading %s: hand port %q declares no method, a port the controller consumes has at least one", where, ref.Name)
-	}
-
-	hand := HandPort{Name: ref.Name, Snake: rustname.Snake(ref.Name), Kind: HandPortKind}
-	seen := map[string]bool{}
-
-	for _, m := range ref.Methods {
-		if err := checkName("hand port method", m.Name); err != nil {
-			return HandPort{}, fmt.Errorf("reading %s: hand port %q: %w", where, ref.Name, err)
-		}
-
-		if seen[m.Name] {
-			return HandPort{}, fmt.Errorf("reading %s: hand port %q declares method %q twice", where, ref.Name, m.Name)
-		}
-
-		seen[m.Name] = true
-
-		for label, name := range map[string]string{"request": m.Request, "reply": m.Reply} {
-			if name == "" {
-				continue
-			}
-
-			if _, ok := schemas[name]; !ok {
-				return HandPort{}, fmt.Errorf("reading %s: hand port %q method %q names %s %q, which is not a schema of components.schemas", where, ref.Name, m.Name, label, name)
-			}
-		}
-
-		hand.Methods = append(hand.Methods, HandMethod{
-			Name:    m.Name,
-			Ident:   rustname.Snake(m.Name),
-			Request: m.Request,
-			Reply:   m.Reply,
-		})
-	}
-
-	return hand, nil
+	return parseClockPort(where, ref, schemas, storeNames)
 }
 
 func parseClockPort(where string, ref portRef, schemas map[string]schema, storeNames map[string]bool) (HandPort, error) {
@@ -925,7 +871,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		Ports:          ports,
 		Auth:           auth,
 		Stream:         stream,
-		StreamFrom:     streamFrom,
+		StreamFrom:     streamFrom.Name,
 		StreamAdapters: streamAdapters,
 	}, nil
 }
@@ -941,14 +887,14 @@ func parseAuth(where string, op operation) (bool, error) {
 	}
 }
 
-func parseStream(where, method string, op operation, stores map[string]TypeDef) (bool, string, []string, error) {
+func parseStream(where, method string, op operation, stores map[string]TypeDef) (bool, TypeDef, []string, error) {
 	if len(op.Stream) == 0 {
-		return false, "", nil, nil
+		return false, TypeDef{}, nil, nil
 	}
 
 	var word string
 	if err := json.Unmarshal(op.Stream, &word); err == nil {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream is %q, it is an object naming from and adapters", where, word)
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is %q, it is an object naming from and adapters", where, word)
 	}
 
 	var declared struct {
@@ -957,44 +903,41 @@ func parseStream(where, method string, op operation, stores map[string]TypeDef) 
 	}
 
 	if err := json.Unmarshal(op.Stream, &declared); err != nil {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream is an object naming from and adapters: %w", where, err)
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is an object naming from and adapters: %w", where, err)
 	}
 
 	if method != "get" {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
 	}
 
 	if declared.From == "" {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream names no from, from names the x-store schema whose saves feed this stream", where)
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names no from, from names the x-store schema whose saves feed this stream", where)
 	}
 
-	if _, stored := stores[declared.From]; !stored {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream reads from %q, which is not an x-store schema, the stores are %s", where, declared.From, list(sortedKeys(stores)))
+	source, stored := stores[declared.From]
+	if !stored {
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream reads from %q, which is not an x-store schema, the stores are %s", where, declared.From, list(sortedKeys(stores)))
 	}
 
 	if declared.Adapters == nil {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream names no adapters, adapters lists which of %s the engine emits", where, list(FeedAdapterKinds()))
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names no adapters, adapters lists which of %s the engine emits", where, list(FeedAdapterKinds()))
 	}
 
 	if len(*declared.Adapters) == 0 {
-		return false, "", nil, fmt.Errorf("reading %s: x-stream names an empty adapters list, a feed nobody can build is a feed nobody can use", where)
+		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names an empty adapters list, a feed nobody can build is a feed nobody can use", where)
 	}
 
 	for _, kind := range *declared.Adapters {
 		if kind != FeedAdapterMemory {
-			return false, "", nil, fmt.Errorf("reading %s: x-stream names adapter kind %q, a feed adapter is one of %s", where, kind, list(FeedAdapterKinds()))
+			return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names adapter kind %q, a feed adapter is one of %s", where, kind, list(FeedAdapterKinds()))
 		}
 	}
 
-	return true, declared.From, *declared.Adapters, nil
+	return true, source, *declared.Adapters, nil
 }
 
-func checkStreamMapping(where, event, from string, byName map[string]TypeDef) error {
-	source, known := byName[from]
-	if !known {
-		return fmt.Errorf("reading %s: x-stream reads from %q, which is not a schema of components.schemas", where, from)
-	}
-
+func checkStreamMapping(where, event string, source TypeDef, byName map[string]TypeDef) error {
+	from := source.Name
 	carried := map[string]Field{}
 	for _, f := range source.Fields {
 		carried[f.Name] = f
@@ -1034,7 +977,7 @@ func parsePorts(where string, op operation, stream bool, response string, storeN
 			return nil, fmt.Errorf("reading %s: x-ports names %q, a subscribe port is %s of an x-stream operation's response", where, port, "<Event>"+SubscribePortSuffix)
 		}
 
-		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema and no operation declares it as a hand port", where, port)
+		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema and no operation declares it with a kind", where, port)
 	}
 
 	if subscribe != "" {

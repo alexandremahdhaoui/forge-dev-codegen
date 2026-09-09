@@ -145,7 +145,7 @@ func sessionOptions() vectorsrust.Options {
 		Proto:   []byte(sessionProto),
 		Hello:   "Hello",
 		Push:    []string{"Counter"},
-		Rng: &vectorsrust.RngPort{
+		Rng: &vectorsrust.CounterPort{
 			Trait:   "TickCounter",
 			Module:  "udp::port::tick_counter",
 			Method:  "next",

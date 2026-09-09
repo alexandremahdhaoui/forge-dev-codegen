@@ -24,14 +24,11 @@ paths:
       x-controller: greeting
       x-ports:
         - GreetingStore
-        - kind: hand
+        - kind: clock
           name: GreetingClock
-          methods:
-            - name: now
-              reply: Instant
-            - name: elapsed
-              request: Instant
-              reply: Span
+          instant: Instant
+          span: Span
+          adapters: [memory]
       parameters:
         - name: name
           in: query
@@ -238,7 +235,7 @@ func TestANameDeclaredBothInPathAndInQueryIsRefused(t *testing.T) {
 	}
 }
 
-func TestAHandPortEmitsItsTraitItsErrorEnumAndItsMockWithoutAnyUserWrittenPortFile(t *testing.T) {
+func TestADeclaredPortEmitsItsTraitItsErrorEnumAndItsMockWithoutAnyUserWrittenPortFile(t *testing.T) {
 	byPath := queriedFiles(t)
 
 	wantIn(t, byPath, "port/zz_generated_greeting_clock.rs",
@@ -255,7 +252,7 @@ func TestAHandPortEmitsItsTraitItsErrorEnumAndItsMockWithoutAnyUserWrittenPortFi
 	wantIn(t, byPath, "port/mod.rs", "pub mod zz_generated_greeting_clock;", "pub use zz_generated_greeting_clock as greeting_clock;")
 }
 
-func TestTheControllerHoldsTheHandPortAsABoxedFieldAndCarriesItsErrorArm(t *testing.T) {
+func TestTheControllerHoldsTheDeclaredPortAsABoxedFieldAndCarriesItsErrorArm(t *testing.T) {
 	byPath := queriedFiles(t)
 
 	wantIn(t, byPath, "controller/zz_generated_greeting_controller.rs",
@@ -266,7 +263,7 @@ func TestTheControllerHoldsTheHandPortAsABoxedFieldAndCarriesItsErrorArm(t *test
 	)
 }
 
-func TestTheManifestDeclaresTheHandPortAndRequiresAnAdapterForIt(t *testing.T) {
+func TestTheManifestDeclaresTheDeclaredPortAndTheAdapterItsKindEmits(t *testing.T) {
 	byPath := queriedFiles(t)
 
 	raw, ok := byPath[cellmanifest.FileName]
@@ -285,26 +282,20 @@ func TestTheManifestDeclaresTheHandPortAndRequiresAnAdapterForIt(t *testing.T) {
 	}
 
 	if !declared {
-		t.Fatalf("the manifest never declares the hand port: %+v", m.Provides.Ports)
+		t.Fatalf("the manifest never declares the port: %+v", m.Provides.Ports)
 	}
 
-	required := false
-	for _, p := range m.Requires.Ports {
-		required = required || p == "GreetingClock"
-	}
-
-	if !required {
-		t.Fatalf("the manifest never requires an adapter for the hand port: %v", m.Requires.Ports)
-	}
-
+	answered := false
 	for _, a := range m.Provides.Adapters {
-		if a.Implements == "GreetingClock" {
-			t.Fatal("a hand port has no generated adapter, the wiring names one")
-		}
+		answered = answered || a.Implements == "GreetingClock"
+	}
+
+	if !answered {
+		t.Fatalf("the manifest never provides the adapter the clock kind emits: %+v", m.Provides.Adapters)
 	}
 }
 
-func TestTheControllerPortsOfTheManifestHoldTheHandPortBesideTheStore(t *testing.T) {
+func TestTheControllerPortsOfTheManifestHoldTheDeclaredPortBesideTheStore(t *testing.T) {
 	byPath := queriedFiles(t)
 
 	m, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
@@ -317,31 +308,14 @@ func TestTheControllerPortsOfTheManifestHoldTheHandPortBesideTheStore(t *testing
 	}
 
 	if !reflect.DeepEqual(m.Provides.Controllers[0].Ports, []string{"GreetingClock", "GreetingStore"}) {
-		t.Fatalf("want the hand port beside the store, got %v", m.Provides.Controllers[0].Ports)
+		t.Fatalf("want the declared port beside the store, got %v", m.Provides.Controllers[0].Ports)
 	}
 }
 
 const clockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]"
 
-const handClockDeclaration = "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant\n            - name: elapsed\n              request: Instant\n              reply: Span"
-
-func clockSpec() string {
-	return strings.Replace(queriedSpec, handClockDeclaration, clockDeclaration, 1)
-}
-
-func TestAClockPortKindEmitsTheSameTraitTheHandFormSpelledOutByItself(t *testing.T) {
-	fromKind := generateSpec(t, clockSpec(), restrust.Options{Service: "songe-hello"})
-	fromHand := generateSpec(t, queriedSpec, restrust.Options{Service: "songe-hello"})
-
-	const port = "port/zz_generated_greeting_clock.rs"
-
-	if fromKind[port].Content != fromHand[port].Content {
-		t.Errorf("the clock kind wrote a different port:\n%s", fromKind[port].Content)
-	}
-}
-
 func TestAClockPortKindEmitsItsMemoryAdapterAndProvidesItInsteadOfRequiringThePort(t *testing.T) {
-	files := generateSpec(t, clockSpec(), restrust.Options{Service: "songe-hello"})
+	files := queriedFiles(t)
 
 	clock, emitted := files["adapter/zz_generated_greeting_clock_memory.rs"]
 	if !emitted {
@@ -349,12 +323,12 @@ func TestAClockPortKindEmitsItsMemoryAdapterAndProvidesItInsteadOfRequiringThePo
 	}
 
 	for _, want := range []string{"fn now(&self)", "fn elapsed(&self, request: Instant)", "is not a moment this clock has reached", "AtomicI64"} {
-		if !strings.Contains(clock.Content, want) {
-			t.Errorf("the memory clock never carried %q:\n%s", want, clock.Content)
+		if !strings.Contains(clock, want) {
+			t.Errorf("the memory clock never carried %q:\n%s", want, clock)
 		}
 	}
 
-	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName].Content))
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
 	if err != nil {
 		t.Fatalf("parsing the manifest: %v", err)
 	}
@@ -416,7 +390,7 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broken := strings.Replace(queriedSpec, handClockDeclaration, tc.replace, 1)
+			broken := strings.Replace(queriedSpec, clockDeclaration, tc.replace, 1)
 
 			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -426,82 +400,42 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	}
 }
 
-func TestAHandPortMayNotNameAdaptersBecauseTheWiringAnswersIt(t *testing.T) {
-	broken := strings.Replace(queriedSpec, handClockDeclaration, handClockDeclaration+"\n          adapters: [memory]", 1)
-
-	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), "names adapters, a hand port declares what the port is") {
-		t.Fatalf("a hand port naming adapters was not refused by name: %v", err)
-	}
-}
-
-func TestAHandPortDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
-	declaration := "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant\n            - name: elapsed\n              request: Instant\n              reply: Span"
-
+func TestAnXPortsDeclarationOfAnyKindButTheDeclaredOnesIsRefusedByName(t *testing.T) {
 	cases := []struct {
 		name    string
 		replace string
-		want    string
 	}{
 		{
 			name:    "an unknown kind",
-			replace: "        - kind: store\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant",
-			want:    `the declared kinds are clock, hand`,
+			replace: "        - kind: store\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]",
+		},
+		{
+			name:    "the hand kind no declaration carries any more",
+			replace: "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant",
 		},
 		{
 			name:    "no kind at all",
-			replace: "        - name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant",
-			want:    `the declared kinds are clock, hand`,
-		},
-		{
-			name:    "a name that is not Pascal case",
-			replace: "        - kind: hand\n          name: greeting_clock\n          methods:\n            - name: now\n              reply: Instant",
-			want:    "is not a Pascal case Rust ident",
-		},
-		{
-			name:    "no method",
-			replace: "        - kind: hand\n          name: GreetingClock\n          methods: []",
-			want:    "declares no method",
-		},
-		{
-			name:    "a reply that is no schema",
-			replace: "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Moment",
-			want:    `names reply "Moment", which is not a schema of components.schemas`,
-		},
-		{
-			name:    "a request that is no schema",
-			replace: "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              request: Moment\n              reply: Instant",
-			want:    `names request "Moment", which is not a schema of components.schemas`,
-		},
-		{
-			name:    "one method twice",
-			replace: "        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Instant\n            - name: now\n              reply: Span",
-			want:    `declares method "now" twice`,
-		},
-		{
-			name:    "the name of a store port",
-			replace: "        - kind: hand\n          name: GreetingStore\n          methods:\n            - name: now\n              reply: Instant",
-			want:    "takes the name of a store or subscribe port",
+			replace: "        - name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broken := strings.Replace(queriedSpec, declaration, tc.replace, 1)
+			broken := strings.Replace(queriedSpec, clockDeclaration, tc.replace, 1)
 
 			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			if err == nil || !strings.Contains(err.Error(), "the declared kinds are clock") {
+				t.Fatalf("want the declared kinds named, got %v", err)
 			}
 		})
 	}
 }
 
-func TestTheSameHandPortDeclaredTwiceWithDifferentMethodsIsRefused(t *testing.T) {
-	twice := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports:\n        - GreetingStore\n        - kind: hand\n          name: GreetingClock\n          methods:\n            - name: now\n              reply: Span", 1)
+func TestTheSamePortDeclaredTwiceWithADifferentDeclarationIsRefused(t *testing.T) {
+	twice := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports:\n        - GreetingStore\n        - kind: clock\n          name: GreetingClock\n          instant: Span\n          span: Instant\n          adapters: [memory]", 1)
 
 	_, err := restrust.Generate([]byte(twice), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), "a second time with different methods") {
+	if err == nil || !strings.Contains(err.Error(), "a second time with a different declaration") {
 		t.Fatalf("two disagreeing declarations were not refused: %v", err)
 	}
 }
@@ -524,12 +458,30 @@ func TestAQueryParameterNameRustCannotSpellIsRefused(t *testing.T) {
 	}
 }
 
-func TestAHandPortMethodNameRustCannotSpellIsRefused(t *testing.T) {
-	broken := strings.Replace(queriedSpec, "            - name: now\n              reply: Instant", "            - name: 1now\n              reply: Instant", 1)
+func TestALookupColumnIsAnEnumSoNeitherStoreAnswersADefaultForAColumnItCannotRead(t *testing.T) {
+	byPath := queriedFiles(t)
 
-	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), `reading hand port method "1now"`) {
-		t.Fatalf("an unspellable hand port method name was not refused: %v", err)
+	wantIn(t, byPath, "port/zz_generated_greeting_store.rs",
+		"pub enum GreetingColumn {",
+		"    Name,",
+		`            Self::Name => "name",`,
+	)
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_memory.rs",
+		"fn field_of(row: &Greeting, column: GreetingColumn) -> String {",
+		"        GreetingColumn::Name => row.name.clone(),",
+		"self.rows_where(GreetingColumn::Name, name, after.as_deref(), limit)",
+	)
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		"column.property()",
+		"self.rows_where(GreetingColumn::Name, name, after.as_deref(), limit)",
+	)
+
+	for _, path := range []string{"adapter/zz_generated_greeting_memory.rs", "adapter/zz_generated_greeting_sqlite.rs"} {
+		if strings.Contains(byPath[path], "_ => String::new()") {
+			t.Errorf("%s still answers a default for a column it cannot read", path)
+		}
 	}
 }
 
@@ -537,7 +489,7 @@ func TestAPortNameThatNoOperationDeclaresIsRefused(t *testing.T) {
 	unknown := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [GreetingStore, GreetingCalendar]", 1)
 
 	_, err := restrust.Generate([]byte(unknown), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), "no operation declares it as a hand port") {
+	if err == nil || !strings.Contains(err.Error(), "no operation declares it with a kind") {
 		t.Fatalf("an undeclared port name was not refused: %v", err)
 	}
 }
@@ -636,7 +588,7 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
-func TestTheQueriedCellWithAHandPortCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
+func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")

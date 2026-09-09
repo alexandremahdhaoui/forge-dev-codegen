@@ -218,7 +218,7 @@ func TestAGrpcCellNameRustCannotSpellIsRefused(t *testing.T) {
 	}
 }
 
-func TestASeedIsRefusedWhenTheCellNamesNoRngPortOrTheCaseNeverPushes(t *testing.T) {
+func TestASeedIsRefusedWhenNoCellDeclaresACounterPortOrTheCaseNeverPushes(t *testing.T) {
 	tests := []struct {
 		name string
 		opts vectorsrust.Options
@@ -226,10 +226,10 @@ func TestASeedIsRefusedWhenTheCellNamesNoRngPortOrTheCaseNeverPushes(t *testing.
 		want string
 	}{
 		{
-			name: "no rng port",
+			name: "no counter port",
 			opts: callOptions(),
 			body: `{"case": "c", "operation": "grpc_Ping", "controllerReply": {}, "seed": 7}`,
-			want: `it carries a seed and the cell names no rng port under layout.rng`,
+			want: `it carries a seed and no cell declares a counter port`,
 		},
 		{
 			name: "a seed below zero",
@@ -267,19 +267,7 @@ func TestASeedIsRefusedWhenTheCellNamesNoRngPortOrTheCaseNeverPushes(t *testing.
 	}
 }
 
-func TestAnRngPortMissingAFieldIsRefused(t *testing.T) {
-	opts := sessionOptions()
-	opts.Rng.Returns = ""
-
-	_, err := vectorsrust.Generate([]byte(helloSpec), []byte(sessionCases), opts)
-
-	want := "reading layout.rng: it names the rng port, so it needs trait, module, method and returns"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("generating reported %v, want %q", err, want)
-	}
-}
-
-func TestASeededRngPortGetsAMockAndABuilderArmedWithTheSeed(t *testing.T) {
+func TestASeededCounterPortGetsAMockAndABuilderArmedWithTheSeed(t *testing.T) {
 	content := generateSession(t, sessionCases)
 
 	for _, want := range []string{

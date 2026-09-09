@@ -203,7 +203,7 @@ func TestTheSeededPortComesFromTheCounterTheCellDeclares(t *testing.T) {
 		t.Fatal("the counter the cell declares never became the seeded port")
 	}
 
-	want := vectorsrust.RngPort{Trait: "TickCounter", Module: "udp::port::tick_counter", Method: "next", Returns: "u64"}
+	want := vectorsrust.CounterPort{Trait: "TickCounter", Module: "udp::port::tick_counter", Method: "next", Returns: "u64"}
 	if *port != want {
 		t.Errorf("seeded port = %+v, want %+v", *port, want)
 	}

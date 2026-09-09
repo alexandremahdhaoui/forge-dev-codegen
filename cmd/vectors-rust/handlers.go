@@ -112,7 +112,7 @@ func readLayoutFile(input GenerateInput, key string) ([]byte, error) {
 	return doc, nil
 }
 
-func readRng(layout map[string]interface{}) (*vectorsrust.RngPort, error) {
+func readRng(layout map[string]interface{}) (*vectorsrust.CounterPort, error) {
 	if _, spelled := layout["rng"]; spelled {
 		return nil, fmt.Errorf("reading layout.rng: it restates a port the cell already declares, delete it and give that port a kind in its own cell")
 	}

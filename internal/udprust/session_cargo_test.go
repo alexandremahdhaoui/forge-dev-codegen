@@ -437,7 +437,9 @@ async fn a_failing_on_tick_is_logged_and_the_tick_driver_keeps_serving() {
 
     let session = codec::session_id_from(SESSION);
     let peer: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
-    assert!(peer_table.admit_peer(&session, peer).expect("an admission"));
+    peer_table
+        .admit_peer(&session, peer)
+        .expect("an admission");
 
     let mut tick = HelloDatagramTickDriver::new(
         HelloDatagramTickDriverConfig { interval_ms: 10 },
@@ -478,7 +480,9 @@ fn a_push_sent_before_the_driver_is_bound_names_the_unbound_driver() {
     let session = codec::session_id_from(SESSION);
     let peer: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
 
-    assert!(peer_table.admit_peer(&session, peer).expect("an admission"));
+    peer_table
+        .admit_peer(&session, peer)
+        .expect("an admission");
 
     let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table);
 
@@ -506,6 +510,38 @@ fn a_peer_table_sized_below_one_is_refused() {
         error.to_string(),
         "sizing the hello_datagram peer table: max_sessions 0 is below 1"
     );
+}
+
+#[test]
+fn a_full_peer_table_refuses_a_new_session_by_naming_max_sessions_and_the_session_id() {
+    let peer_table = peer_table(1);
+    let peer: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
+
+    peer_table
+        .admit_peer(&codec::session_id_from(SESSION), peer)
+        .expect("an admission");
+
+    let error = peer_table
+        .admit_peer(&codec::session_id_from(OTHER), peer)
+        .expect_err("a refusal");
+
+    assert_eq!(
+        error.to_string(),
+        "admitting session [102, 101, 100, 99, 98, 97, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48] from 127.0.0.1:9: the hello_datagram peer table holds its max_sessions of 1 and this session is a new one"
+    );
+}
+
+#[test]
+fn a_full_peer_table_still_admits_a_session_it_already_holds() {
+    let peer_table = peer_table(1);
+    let session = codec::session_id_from(SESSION);
+    let first: std::net::SocketAddr = "127.0.0.1:9".parse().expect("an address");
+    let moved: std::net::SocketAddr = "127.0.0.1:10".parse().expect("an address");
+
+    peer_table.admit_peer(&session, first).expect("an admission");
+    peer_table.admit_peer(&session, moved).expect("an admission");
+
+    assert_eq!(peer_table.peer_of(&session).expect("a peer"), Some(moved));
 }
 `
 

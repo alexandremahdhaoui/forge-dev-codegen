@@ -38,28 +38,14 @@ type Options struct {
 	GrpcProto []byte
 	Hello     string
 	Push      []string
-	Rng       *RngPort
+	Rng       *CounterPort
 }
 
-type RngPort struct {
+type CounterPort struct {
 	Trait   string
 	Module  string
 	Method  string
 	Returns string
-}
-
-type rngPort = RngPort
-
-func checkRng(rng *RngPort) error {
-	if rng == nil {
-		return nil
-	}
-
-	if rng.Trait == "" || rng.Module == "" || rng.Method == "" || rng.Returns == "" {
-		return fmt.Errorf("reading layout.rng: it names the rng port, so it needs trait, module, method and returns, got %+v", *rng)
-	}
-
-	return nil
 }
 
 type File struct {
@@ -124,10 +110,6 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 
 	if !rustname.IsModuleName(opts.RestCell) {
 		return nil, fmt.Errorf("emitting the vectors: rest cell %q is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter", opts.RestCell)
-	}
-
-	if err := checkRng(opts.Rng); err != nil {
-		return nil, err
 	}
 
 	spec, err := readRestSpec(openapiDoc)

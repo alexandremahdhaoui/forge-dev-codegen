@@ -678,6 +678,12 @@ pub enum {{ .PeerTableError }} {
         #[source]
         source: std::io::Error,
     },
+    #[error("admitting session {session_id:?} from {peer}: the {{ .ServiceSnake }} peer table holds its max_sessions of {max_sessions} and this session is a new one")]
+    Full {
+        max_sessions: usize,
+        session_id: [u8; 16],
+        peer: std::net::SocketAddr,
+    },
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -690,7 +696,7 @@ pub trait {{ .PeerTableTrait }}: Send + Sync {
         &self,
         session_id: &[u8; 16],
         peer: std::net::SocketAddr,
-    ) -> Result<bool, {{ .PeerTableError }}>;
+    ) -> Result<(), {{ .PeerTableError }}>;
 
     fn follow_peer(
         &self,
@@ -1333,16 +1339,11 @@ impl {{ .DriverStruct }} {
 
     fn admit(&self, session_id: &[u8; codec::SESSION_ID_LEN], peer: SocketAddr, full: &mut Told) -> bool {
         match self.peer_table.admit_peer(session_id, peer) {
-            Ok(true) => true,
-            Ok(false) => {
-                if full.first_time(peer) {
-                    eprintln!("refusing session {session_id:?} from {peer}: the peer table is full");
-                }
-
-                false
-            }
+            Ok(()) => true,
             Err(error) => {
-                eprintln!("dropping a hello from {peer}: {}", error_chain(&error));
+                if full.first_time(peer) {
+                    eprintln!("dropping a hello from {peer}: {}", error_chain(&error));
+                }
 
                 false
             }
@@ -1748,16 +1749,20 @@ impl {{ .PeerTableTrait }} for {{ .PeerTableStruct }} {
         self.sender.get().is_some()
     }
 
-    fn admit_peer(&self, session_id: &[u8; 16], peer: SocketAddr) -> Result<bool, {{ .PeerTableError }}> {
+    fn admit_peer(&self, session_id: &[u8; 16], peer: SocketAddr) -> Result<(), {{ .PeerTableError }}> {
         let mut peers = self.lock("admitting a peer")?;
 
         if peers.len() >= self.max_sessions && !peers.contains_key(session_id) {
-            return Ok(false);
+            return Err({{ .PeerTableError }}::Full {
+                max_sessions: self.max_sessions,
+                session_id: *session_id,
+                peer,
+            });
         }
 
         peers.insert(*session_id, peer);
 
-        Ok(true)
+        Ok(())
     }
 
     fn follow_peer(&self, session_id: &[u8; 16], peer: SocketAddr) -> Result<bool, {{ .PeerTableError }}> {

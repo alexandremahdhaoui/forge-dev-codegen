@@ -134,13 +134,6 @@ func crateRootSecrets(merged *cellmanifest.Merged, roots []crateports.Port, decl
 			}
 		}
 
-		if len(shape.Fields) > 1 {
-			return nil, fmt.Errorf(
-				"building the secret adapter of %q: its success type %q carries %d fields and a secret adapter fills one from one configured string",
-				trait, shape.Success, len(shape.Fields),
-			)
-		}
-
 		merged.Adapters = append(merged.Adapters, cellmanifest.AdapterEntry{
 			Cell: "crate root",
 			Adapter: cellmanifest.Adapter{
@@ -166,11 +159,9 @@ func secretConfig(shape crateports.Secret) map[string]cellmanifest.ConfigField {
 		},
 	}
 
-	for _, field := range shape.Fields {
-		config[field] = cellmanifest.ConfigField{
-			Type:        cellmanifest.FieldTypeString,
-			Description: "The " + field + " of the " + shape.Success + " the " + shape.Snake + " secret adapter answers on a match",
-		}
+	config[shape.Field] = cellmanifest.ConfigField{
+		Type:        cellmanifest.FieldTypeString,
+		Description: "The " + shape.Field + " of the " + shape.Success + " the " + shape.Snake + " secret adapter answers on a match",
 	}
 
 	return config
@@ -389,12 +380,7 @@ func Generate(opts Options) ([]File, error) {
 	rootEntries := map[string][]modEntry{}
 
 	for _, root := range roots {
-		source, known := crateports.Source(root.Trait, header)
-		if !known {
-			return nil, fmt.Errorf("emitting the crate root port %q: the crate root knows no such port", root.Trait)
-		}
-
-		files = append(files, File{Path: path.Join("src", root.Layer, root.File), Content: source})
+		files = append(files, File{Path: path.Join("src", root.Layer, root.File), Content: root.Source(header)})
 		rootEntries[root.Layer] = append(rootEntries[root.Layer], modEntry{
 			Module: strings.TrimSuffix(root.File, ".rs"),
 			Alias:  root.Alias,
