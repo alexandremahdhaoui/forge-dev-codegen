@@ -365,6 +365,77 @@ func TestTheCrateRootMountsEveryRootLayerTheConfigModuleAndEveryCell(t *testing.
 	}
 }
 
+func TestTheCrateRootReexportsEveryPortACellProvidesSoAnyCellReachesItAtOnePath(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	mod := files["src/port/mod.rs"]
+
+	if !strings.Contains(mod, "pub use crate::rest::port::greeting_store as greeting_store;") {
+		t.Errorf("src/port/mod.rs never re-exported the store the rest cell provides\n%s", mod)
+	}
+
+	if strings.Contains(mod, "pub mod greeting_store;") {
+		t.Errorf("the crate root declared a module for a port a cell owns\n%s", mod)
+	}
+}
+
+func TestACellProvidingAPortTheCrateRootWouldWriteTakesItOverAndTheLayoutIsRefusedByName(t *testing.T) {
+	root := standUpGuardedRestCell(t)
+
+	writeCell(t, root, "extra", cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "extra",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Ports: []cellmanifest.Port{{Trait: "TicketVerifier", Module: "extra::port::ticket_verifier"}},
+		},
+	})
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"extra", "rest", "tui"},
+		Ports:   guardedCrateRootPorts,
+		Wiring:  []byte(guardedWiring),
+	})
+	if err == nil || !strings.Contains(err.Error(), "no cell requires that port, so the crate root never emits it") {
+		t.Fatalf("want the crate root to say it writes nothing for a port a cell owns, got %v", err)
+	}
+}
+
+func TestTheCrateRootStillAliasesThePortsItWritesItselfBesideWhatItReexports(t *testing.T) {
+	root := standUpGuardedRestCell(t)
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest", "tui"},
+		Ports:   guardedCrateRootPorts,
+		Wiring:  []byte(guardedWiring),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	mod := ""
+
+	for _, f := range files {
+		if f.Path == "src/port/mod.rs" {
+			mod = f.Content
+		}
+	}
+
+	for _, want := range []string{
+		"pub use zz_generated_ticket_verifier as ticket_verifier;",
+		"pub use crate::rest::port::greeting_store as greeting_store;",
+	} {
+		if !strings.Contains(mod, want) {
+			t.Errorf("src/port/mod.rs lacks %q\n%s", want, mod)
+		}
+	}
+}
+
 func TestTheCrateRootAdapterLayerCarriesNoShellForACellProvidedAdapter(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 	files := generateHello(t, root, helloWiring)

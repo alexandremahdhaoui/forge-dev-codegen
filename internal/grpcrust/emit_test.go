@@ -20,8 +20,131 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 )
+
+func TestAGrpcControllerHoldsEveryPortItsCellNamesAsABoxedFieldAndTheManifestRequiresIt(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
+		Service: "songe-hello",
+		Cell:    "grpc",
+		Ports:   []layoutports.Spec{{Name: "TicketStore"}, {Name: "GreetingClock"}},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	controller := byPath["controller/zz_generated_hello_controller.rs"]
+
+	for _, want := range []string{
+		"use std::sync::Arc;",
+		"use crate::port::ticket_store::TicketStore;",
+		"use crate::port::greeting_clock::GreetingClock;",
+		"pub(crate) ticket_store: Arc<dyn TicketStore + Send + Sync>,",
+		"pub(crate) greeting_clock: Arc<dyn GreetingClock + Send + Sync>,",
+	} {
+		if !strings.Contains(controller, want) {
+			t.Errorf("the controller never carried %q:\n%s", want, controller)
+		}
+	}
+
+	if strings.Contains(controller, "impl Default for HelloControllerImpl") {
+		t.Errorf("a controller holding ports still derives Default:\n%s", controller)
+	}
+
+	m, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	if !reflect.DeepEqual(m.Provides.Controllers[0].Ports, []string{"TicketStore", "GreetingClock"}) {
+		t.Fatalf("want the two named ports on the controller, got %v", m.Provides.Controllers[0].Ports)
+	}
+
+	for _, trait := range []string{"TicketStore", "GreetingClock"} {
+		found := false
+
+		for _, required := range m.Requires.Ports {
+			found = found || required == trait
+		}
+
+		if !found {
+			t.Errorf("the manifest never requires %q, so no cell has to provide it: %v", trait, m.Requires.Ports)
+		}
+	}
+}
+
+func TestAGrpcCellNamingNoPortStillWritesAUnitControllerThatDerivesDefault(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if f.Path != "controller/zz_generated_hello_controller.rs" {
+			continue
+		}
+
+		for _, want := range []string{"pub struct HelloControllerImpl;", "impl Default for HelloControllerImpl"} {
+			if !strings.Contains(f.Content, want) {
+				t.Errorf("the port free controller never carried %q:\n%s", want, f.Content)
+			}
+		}
+
+		return
+	}
+
+	t.Fatal("the cell never wrote a controller")
+}
+
+func TestAGrpcPortEntryThatDeclaresAKindOrAdaptersIsRefusedByName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec layoutports.Spec
+		want string
+	}{
+		{
+			name: "a kind the engine writes no port for",
+			spec: layoutports.Spec{Name: "GreetingClock", Kind: "clock"},
+			want: "grpc-rust-tonic writes no port of its own",
+		},
+		{
+			name: "adapters the engine never emits",
+			spec: layoutports.Spec{Name: "GreetingClock", Adapters: &[]string{"memory"}},
+			want: "grpc-rust-tonic writes no port of its own",
+		},
+		{
+			name: "a snake name",
+			spec: layoutports.Spec{Name: "greeting_clock"},
+			want: `"greeting_clock" is not a Pascal case Rust ident`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
+				Service: "songe-hello",
+				Ports:   []layoutports.Spec{tc.spec},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestAGrpcCellNamingOnePortTwiceIsRefusedByName(t *testing.T) {
+	_, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
+		Service: "songe-hello",
+		Ports:   []layoutports.Spec{{Name: "TicketStore"}, {Name: "TicketStore"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `"TicketStore" is named twice`) {
+		t.Fatalf("want the repeated port named, got %v", err)
+	}
+}
 
 func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})

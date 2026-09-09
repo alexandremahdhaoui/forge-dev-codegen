@@ -22,6 +22,8 @@ import (
 
 var snakeIdent = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+var pascalIdent = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+
 var keywords = map[string]bool{
 	"as": true, "break": true, "const": true, "continue": true, "crate": true, "else": true, "enum": true,
 	"extern": true, "false": true, "fn": true, "for": true, "if": true, "impl": true, "in": true, "let": true,
@@ -82,6 +84,10 @@ func Upper(s string) string {
 
 func IsSnakeIdent(name string) bool {
 	return snakeIdent.MatchString(name)
+}
+
+func IsPascalIdent(name string) bool {
+	return pascalIdent.MatchString(name)
 }
 
 func IsModuleName(name string) bool {

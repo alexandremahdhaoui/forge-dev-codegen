@@ -14,6 +14,8 @@
 
 package grpcrust
 
+import "github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
+
 type FieldKind string
 
 const (
@@ -54,6 +56,11 @@ type Spec struct {
 type Options struct {
 	Service string
 	Cell    string
+	Ports   []layoutports.Spec
+}
+
+func PortKinds() []string {
+	return nil
 }
 
 type File struct {

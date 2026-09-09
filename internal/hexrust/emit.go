@@ -176,6 +176,37 @@ func secretTraits() []string {
 	return traits
 }
 
+type reexportEntry struct {
+	Module string
+	Alias  string
+}
+
+func crateRootReexports(merged cellmanifest.Merged) []reexportEntry {
+	reexports := []reexportEntry{}
+
+	for _, trait := range sortedKeys(merged.Ports) {
+		entry := merged.Ports[trait]
+		if entry.Cell == "" {
+			continue
+		}
+
+		reexports = append(reexports, reexportEntry{
+			Module: entry.Port.Module,
+			Alias:  rustname.Snake(trait),
+		})
+	}
+
+	return reexports
+}
+
+func reexportsOf(layer string, reexports []reexportEntry) []reexportEntry {
+	if layer != "port" {
+		return nil
+	}
+
+	return reexports
+}
+
 func named(roots []crateports.Port, trait string) bool {
 	for _, root := range roots {
 		if root.Trait == trait {
@@ -398,13 +429,16 @@ func Generate(opts Options) ([]File, error) {
 		})
 	}
 
+	reexports := crateRootReexports(merged)
+
 	for _, layer := range Layers {
 		layer := layer
 
 		mod := map[string]any{
-			"Header":  header,
-			"Allow":   allowingLayers[layer],
-			"Entries": rootEntries[layer],
+			"Header":    header,
+			"Allow":     allowingLayers[layer],
+			"Entries":   rootEntries[layer],
+			"Reexports": reexportsOf(layer, reexports),
 		}
 
 		steps = append(steps, func() error {
@@ -546,6 +580,10 @@ pub mod {{ .Module }};
 {{- range .Entries }}
 
 pub use {{ .Module }} as {{ .Alias }};
+{{- end }}
+{{- range .Reexports }}
+
+pub use crate::{{ .Module }} as {{ .Alias }};
 {{- end }}
 {{ end -}}
 

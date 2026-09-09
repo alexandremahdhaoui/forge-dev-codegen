@@ -111,6 +111,18 @@ generated REST client receives its `TokenSource`. A port only such an
 adapter consumes still needs a candidate in the wiring. Two adapters
 whose ports form a cycle are refused by name.
 
+## One path to every port
+
+The root `src/port/mod.rs` re-exports every port any cell provides,
+under the snake case of the trait name. `GreetingStore`, provided by the
+rest cell at `rest::port::greeting_store`, is also
+`crate::port::greeting_store`.
+
+So a cell reaching a port another cell provides imports it from
+`crate::port::<snake>` and never names the cell that owns it. That is
+what lets the grpc cell's controller hold the store the rest document
+declares. A cell keeps using its own path for a port it writes itself.
+
 ## The crate root ports
 
 `TicketVerifier` and `TokenSource` are ports every rest cell needs and

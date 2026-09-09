@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cell names the module directory and defaults to grpc.
+          description: The kind's layout. cell names the module directory and defaults to grpc. ports names the ports this cell's controller consumes, each one a port another cell provides.
         runtime:
           type: object
           additionalProperties: true

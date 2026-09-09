@@ -55,14 +55,22 @@ admitted.
 
 `layout.ports` lists the ports the controller holds beyond the ones the
 transport gives it, the way a store port serves a rest controller. An
-entry names a Pascal case trait and may list its method signatures in
-Rust syntax. With methods the engine emits
-`port/zz_generated_<snake>.rs` holding the trait under mockall automock.
-Without methods the user writes `port/<snake>.rs` and the port layer
-mounts it. Either way the controller struct gains one boxed field after
-the broadcast port, `new` takes it, the manifest declares the port and
-lists it under `requires`, and wiring.yaml names its adapter. State a
-controller keeps across calls lives behind such a port, never in a
+entry is a Pascal case trait name, or an object naming that trait and
+the `kind` it is.
+
+An entry with a `kind` is a port this cell writes, so the engine emits
+`port/zz_generated_<snake>.rs` holding the trait under mockall automock
+and every adapter the `adapters` list names. The manifest provides it,
+and the controller imports it from this cell.
+
+An entry with no kind names a port **another cell provides**. This cell
+writes none of it. The manifest lists it under `requires.ports` only,
+and the controller imports it from `crate::port::<snake>`, the one path
+the crate root re-exports every port to.
+
+Either way the controller struct gains one boxed field after the
+broadcast port, `new` takes it, and wiring.yaml names its adapter. State
+a controller keeps across calls lives behind such a port, never in a
 static.
 
 Every emitted path is relative to the cell directory. The engine never

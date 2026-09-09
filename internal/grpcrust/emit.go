@@ -203,11 +203,18 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 }
 
 func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
+	ports := []string{}
+
+	for _, port := range v.Ports {
+		ports = append(ports, port.Name)
+		m.Requires.Ports = append(m.Requires.Ports, port.Name)
+	}
+
 	m.Provides.Controllers = append(m.Provides.Controllers, cellmanifest.Controller{
 		Trait:  v.ControllerTrait,
 		Impl:   v.ControllerTrait + "Impl",
 		Module: v.ModulePrefix + "controller",
-		Ports:  []string{},
+		Ports:  ports,
 	})
 
 	m.Provides.Drivers = append(m.Provides.Drivers, cellmanifest.Driver{
@@ -321,7 +328,12 @@ pub trait {{ .ClientTrait }}: Send + Sync {
 
 {{- define "controller" -}}
 {{ .Header }}
-
+{{ if .Ports }}
+use std::sync::Arc;
+{{ end }}
+{{- range .Ports }}
+use crate::port::{{ .Snake }}::{{ .Name }};
+{{- end }}
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
 
 #[derive(Debug, thiserror::Error)]
@@ -345,6 +357,27 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
 {{- end }}
 }
 
+{{ if .Ports }}
+pub struct {{ .ControllerTrait }}Impl {
+{{- range .Ports }}
+    pub(crate) {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,
+{{- end }}
+}
+
+impl {{ .ControllerTrait }}Impl {
+    pub fn new(
+{{- range .Ports }}
+        {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,
+{{- end }}
+    ) -> Self {
+        Self {
+{{- range .Ports }}
+            {{ .Field }},
+{{- end }}
+        }
+    }
+}
+{{- else }}
 pub struct {{ .ControllerTrait }}Impl;
 
 impl {{ .ControllerTrait }}Impl {
@@ -358,6 +391,7 @@ impl Default for {{ .ControllerTrait }}Impl {
         Self::new()
     }
 }
+{{- end }}
 {{ end -}}
 
 {{- define "adapter" -}}

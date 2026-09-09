@@ -14,6 +14,8 @@
 
 package udprust
 
+import "github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
+
 type Options struct {
 	Service string
 	Cell    string
@@ -34,11 +36,7 @@ func GateAdapterKinds() []string {
 	return []string{GateAdapterSecret}
 }
 
-type PortSpec struct {
-	Name     string
-	Kind     string
-	Adapters *[]string
-}
+type PortSpec = layoutports.Spec
 
 const CounterPortKind = "counter"
 

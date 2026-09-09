@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
@@ -44,8 +45,50 @@ type rpcView struct {
 	PbResponse string
 }
 
+type portView struct {
+	Name  string
+	Snake string
+	Field string
+}
+
+func buildPortViews(specs []layoutports.Spec) ([]portView, error) {
+	views := make([]portView, 0, len(specs))
+	seen := map[string]bool{}
+
+	for _, spec := range specs {
+		if spec.Kind != "" || spec.Adapters != nil {
+			return nil, fmt.Errorf(
+				"naming the controller ports: %q declares a kind or adapters, grpc-rust-tonic writes no port of its own, so every entry names a port another cell provides",
+				spec.Name,
+			)
+		}
+
+		if !rustname.IsPascalIdent(spec.Name) {
+			return nil, fmt.Errorf(
+				"naming the controller ports: %q is not a Pascal case Rust ident, a port name starts with an upper case letter and holds letters and digits",
+				spec.Name,
+			)
+		}
+
+		if seen[spec.Name] {
+			return nil, fmt.Errorf("naming the controller ports: %q is named twice, name a port once", spec.Name)
+		}
+
+		seen[spec.Name] = true
+
+		views = append(views, portView{
+			Name:  spec.Name,
+			Snake: rustname.Snake(spec.Name),
+			Field: rustname.Snake(spec.Name),
+		})
+	}
+
+	return views, nil
+}
+
 type serviceView struct {
 	Header           string
+	Ports            []portView
 	Package          string
 	Cell             string
 	CratePath        string
@@ -205,6 +248,11 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		return serviceView{}, fmt.Errorf("building service %q: %w", svc.Name, err)
 	}
 
+	ports, err := buildPortViews(opts.Ports)
+	if err != nil {
+		return serviceView{}, err
+	}
+
 	driverName := opts.Cell
 	clientName := opts.Cell + "_client"
 
@@ -215,6 +263,7 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 
 	sv := serviceView{
 		Header:           header,
+		Ports:            ports,
 		Package:          spec.Package,
 		Cell:             opts.Cell,
 		CratePath:        "crate::" + opts.Cell + "::",

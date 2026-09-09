@@ -480,7 +480,7 @@ func TestACounterPortKindIsEmittedAsATraitHeldByTheControllerWithItsMemoryAdapte
 	}
 }
 
-func TestANamedControllerPortWithoutMethodsMountsTheUsersOwnPortFile(t *testing.T) {
+func TestAControllerPortWithNoKindNamesAPortAnotherCellProvidesAndTheCellWritesNoneOfIt(t *testing.T) {
 	opts := udprust.Options{Service: "songe-hello", Ports: []udprust.PortSpec{{Name: "Clock"}}}
 
 	files, err := udprust.Generate([]byte(sessionProto), opts)
@@ -494,17 +494,41 @@ func TestANamedControllerPortWithoutMethodsMountsTheUsersOwnPortFile(t *testing.
 	}
 
 	if _, emitted := byPath["port/zz_generated_clock.rs"]; emitted {
-		t.Errorf("a port with no methods got a stub")
+		t.Errorf("the cell wrote the trait of a port another cell provides")
 	}
 
-	if !strings.Contains(byPath["port/mod.rs"], "\npub mod clock;") {
-		t.Errorf("the port layer never mounted the user's file\n%s", byPath["port/mod.rs"])
+	if strings.Contains(byPath["port/mod.rs"], "clock") {
+		t.Errorf("the port layer still expects a file for a port another cell provides\n%s", byPath["port/mod.rs"])
 	}
 
 	controller := byPath["controller/zz_generated_hello_datagram_controller.rs"]
+
+	if !strings.Contains(controller, "use crate::port::clock::Clock;") {
+		t.Errorf("the controller never reached the port through the crate root\n%s", controller)
+	}
+
 	if !strings.Contains(controller, "pub(crate) clock: Arc<dyn Clock + Send + Sync>,") || strings.Contains(controller, "impl Default") {
 		t.Errorf("the controller lacks the port or still derives Default\n%s", controller)
 	}
+
+	manifest, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, provided := range manifest.Provides.Ports {
+		if provided.Trait == "Clock" {
+			t.Error("the cell provides a port trait it does not write")
+		}
+	}
+
+	for _, required := range manifest.Requires.Ports {
+		if required == "Clock" {
+			return
+		}
+	}
+
+	t.Fatalf("the manifest never requires the port another cell provides: %+v", manifest.Requires.Ports)
 }
 
 func TestAControllerPortThatIsNotAPascalIdentOrAMethodThatIsNotASignatureIsRefused(t *testing.T) {

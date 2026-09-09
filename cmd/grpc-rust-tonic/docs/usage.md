@@ -36,6 +36,33 @@ directory and defaults to `grpc`.
 Every emitted path is relative to the cell directory. The engine never
 writes above it.
 
+## Declared ports
+
+`layout.ports` names the ports this cell's controller consumes. A proto
+carries no place to hang a declaration, so it lives here, and the
+entries read the same way `x-ports` reads in an OpenAPI document.
+
+```yaml
+layout:
+  cell: grpc
+  ports:
+    - TokenStore
+    - GreetingClock
+```
+
+Every entry is the name of a port **another cell provides**.
+grpc-rust-tonic writes no port of its own, so an entry declaring a
+`kind` or `adapters` is refused by name.
+
+The controller struct gains one boxed field per port, `new` takes them
+in declaration order, and the file imports each trait from
+`crate::port::<snake>`, the one path the crate root re-exports every
+port to. The manifest names the ports on the controller and lists them
+under `requires.ports`, so the skeleton refuses when no cell provides
+one and `wiring.yaml` picks the adapter.
+
+A cell naming no port still gets a unit struct that derives `Default`.
+
 ## What the proto decides
 
 For every `service` in the file:

@@ -317,7 +317,6 @@ func checkName(what, name string) error {
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
 
-var pascalIdentPattern = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 func Parse(doc []byte) (*Spec, error) {
 	var parsed document
@@ -822,7 +821,7 @@ func describeClockField(field Field) string {
 }
 
 func checkPortName(where, kind, name string, storeNames map[string]bool) error {
-	if !pascalIdentPattern.MatchString(name) {
+	if !rustname.IsPascalIdent(name) {
 		return fmt.Errorf("reading %s: %s port %q is not a Pascal case Rust ident, a port name starts with an upper case letter and holds letters and digits", where, kind, name)
 	}
 

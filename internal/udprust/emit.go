@@ -192,8 +192,6 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			port := port
 
 			if !port.Generated {
-				userMods["port"] = append(userMods["port"], port.Snake)
-
 				continue
 			}
 
@@ -310,6 +308,12 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 
 	for _, port := range v.Ports {
 		controllerPorts = append(controllerPorts, port.Name)
+
+		if !port.Generated {
+			m.Requires.Ports = append(m.Requires.Ports, port.Name)
+
+			continue
+		}
 
 		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
 			Trait:  port.Name,
@@ -787,7 +791,7 @@ use std::sync::Arc;
 use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
 {{- end }}
 {{- range .Ports }}
-use {{ $.CratePath }}port::{{ .Snake }}::{{ .Name }};
+use {{ if .Generated }}{{ $.CratePath }}{{ else }}crate::{{ end }}port::{{ .Snake }}::{{ .Name }};
 {{- end }}
 use {{ .CratePath }}types::context::Context;
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};

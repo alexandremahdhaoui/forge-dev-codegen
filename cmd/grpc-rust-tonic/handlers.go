@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
 )
 
 func NewHandlers() Handlers {
@@ -32,9 +33,15 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: grpc-rust-tonic generates rust only", input.Language)
 			}
 
+			ports, err := layoutports.Read(input.Layout, grpcrust.PortKinds())
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := grpcrust.Generate([]byte(input.ProtoSpec), grpcrust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
+				Ports:   ports,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
