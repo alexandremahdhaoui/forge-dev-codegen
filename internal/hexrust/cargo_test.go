@@ -482,7 +482,7 @@ func TestAnUnknownPortValueFailsAtRunTimeNamingEveryCandidate(t *testing.T) {
 		t.Fatalf("the node started on an adapter it never had\n%s", out)
 	}
 
-	for _, want := range []string{"GreetingStore", "memory", "sqlite", "postgres"} {
+	for _, want := range []string{"GreetingStore", "sqlite", "postgres"} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("the refusal never named %q\n%s", want, out)
 		}

@@ -20,7 +20,6 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
@@ -31,15 +30,7 @@ type Wiring struct {
 }
 
 type WiringPort struct {
-	Default  string                     `json:"default"`
-	Adapters map[string]WiringCandidate `json:"adapters"`
-}
-
-type WiringCandidate struct {
-	Type     string                              `json:"type,omitempty"`
-	Module   string                              `json:"module,omitempty"`
-	Fallible bool                                `json:"fallible,omitempty"`
-	Config   map[string]cellmanifest.ConfigField `json:"config,omitempty"`
+	Default string `json:"default"`
 }
 
 type WiringDriver struct {
@@ -70,48 +61,12 @@ func (w Wiring) validate() error {
 	}
 
 	for _, trait := range sortedPortNames(w.Ports) {
-		port := w.Ports[trait]
-
-		if len(port.Adapters) == 0 {
-			return fmt.Errorf("port %q names no candidate, a port needs at least one adapter", trait)
-		}
-
-		if port.Default == "" {
-			return fmt.Errorf("port %q names no default, one candidate is the one main builds with no configuration", trait)
-		}
-
-		if _, taken := port.Adapters[port.Default]; !taken {
-			return fmt.Errorf(
-				"port %q has default %q, which names no candidate, the candidates are %s",
-				trait, port.Default, list(candidateNames(port)),
-			)
-		}
-
-		for _, name := range candidateNames(port) {
-			candidate := port.Adapters[name]
-
-			if candidate.Type == "" && candidate.Module != "" {
-				return fmt.Errorf("port %q candidate %q names a module and no type", trait, name)
-			}
-
-			if candidate.Type != "" && candidate.Module == "" {
-				return fmt.Errorf("port %q candidate %q names a type and no module", trait, name)
-			}
+		if w.Ports[trait].Default == "" {
+			return fmt.Errorf("port %q names no default, a wiring entry exists to pick which adapter main builds", trait)
 		}
 	}
 
 	return nil
-}
-
-func candidateNames(port WiringPort) []string {
-	names := make([]string, 0, len(port.Adapters))
-	for name := range port.Adapters {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
 }
 
 func sortedPortNames(ports map[string]WiringPort) []string {

@@ -24,8 +24,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
-const handAdapterLayer = "adapter::"
-
 type plan struct {
 	Header       string
 	Crate        string
@@ -36,8 +34,6 @@ type plan struct {
 	Ports        []portPlan
 	Controllers  []controllerPlan
 	Drivers      []driverPlan
-	HandModules  []string
-	HandConfigs  []handConfigPlan
 	Imports      []string
 	Keys         []specKey
 	BuildScripts []string
@@ -83,18 +79,6 @@ type driverPlan struct {
 	Fields      []fieldPlan
 	Controllers []string
 	PortVars    []string
-}
-
-type handConfigPlan struct {
-	Module  string
-	Adapter string
-	Type    string
-	Fields  []specField
-}
-
-type specField struct {
-	Ident    string
-	RustType string
 }
 
 type specKey struct {
@@ -401,7 +385,7 @@ func planPort(
 	byName map[string]cellmanifest.AdapterEntry,
 	imports map[string]bool,
 ) (portPlan, error) {
-	block, err := portBlock(trait, consumer, wiring, merged)
+	names, chosen, err := portBlock(trait, consumer, wiring, merged)
 	if err != nil {
 		return portPlan{}, err
 	}
@@ -418,13 +402,13 @@ func planPort(
 		Trait:     trait,
 		Var:       rustname.Snake(trait),
 		ConfigVar: configKey(trait),
-		Names:     list(candidateNames(block)),
+		Names:     list(names),
 	}
 
 	imports[p.Crate+"::"+portEntry.Port.Module+"::"+trait] = true
 
-	for _, name := range candidateNames(block) {
-		cp, err := planCandidate(p, trait, name, block.Adapters[name], byName, imports)
+	for _, name := range names {
+		cp, err := planCandidate(p, trait, name, byName, imports)
 		if err != nil {
 			return portPlan{}, err
 		}
@@ -435,7 +419,7 @@ func planPort(
 	p.Keys = append(p.Keys, specKey{
 		Key:         configKey(trait),
 		Type:        "string",
-		Default:     block.Default,
+		Default:     chosen,
 		Description: "Which " + trait + " adapter to build, one of " + pp.Names,
 	})
 
@@ -492,11 +476,7 @@ func unbuilt(planned map[string]portPlan, built map[string]bool) []string {
 	return out
 }
 
-func portBlock(trait, consumer string, wiring Wiring, merged cellmanifest.Merged) (WiringPort, error) {
-	if block, wired := wiring.Ports[trait]; wired {
-		return block, nil
-	}
-
+func portBlock(trait, consumer string, wiring Wiring, merged cellmanifest.Merged) ([]string, string, error) {
 	provided := []string{}
 
 	for _, entry := range merged.Adapters {
@@ -508,123 +488,81 @@ func portBlock(trait, consumer string, wiring Wiring, merged cellmanifest.Merged
 	sort.Strings(provided)
 
 	if len(provided) == 0 {
-		return WiringPort{}, fmt.Errorf(
-			"wiring the ports: %s consumes port %q and the wiring names no candidate for it",
+		return nil, "", fmt.Errorf(
+			"wiring the ports: %s consumes port %q and no cell provides an adapter for it",
 			consumer, trait,
 		)
 	}
 
-	if len(provided) > 1 {
-		return WiringPort{}, fmt.Errorf(
-			"wiring the ports: %s consumes port %q, the cells provide %s for it and the wiring names no choice",
-			consumer, trait, list(provided),
-		)
+	block, wired := wiring.Ports[trait]
+	if !wired {
+		if len(provided) > 1 {
+			return nil, "", fmt.Errorf(
+				"wiring the ports: %s consumes port %q, the cells provide %s for it and the wiring names no choice",
+				consumer, trait, list(provided),
+			)
+		}
+
+		return provided, provided[0], nil
 	}
 
-	return WiringPort{
-		Default:  provided[0],
-		Adapters: map[string]WiringCandidate{provided[0]: {}},
-	}, nil
+	for _, name := range provided {
+		if name == block.Default {
+			return provided, block.Default, nil
+		}
+	}
+
+	return nil, "", fmt.Errorf(
+		"wiring port %q: the default is %q, which no cell provides, the cells provide %s",
+		trait, block.Default, list(provided),
+	)
 }
 
 func planCandidate(
 	p *plan,
 	trait, name string,
-	candidate WiringCandidate,
 	byName map[string]cellmanifest.AdapterEntry,
 	imports map[string]bool,
 ) (candidatePlan, error) {
 	portKey := configKey(trait)
 
-	if candidate.Type == "" {
-		entry, provided := byName[name]
-		if !provided {
-			return candidatePlan{}, fmt.Errorf(
-				"wiring port %q: candidate %q declares no type and no cell manifest provides an adapter named %q",
-				trait, name, name,
-			)
-		}
-
-		if entry.Adapter.Implements != trait {
-			return candidatePlan{}, fmt.Errorf(
-				"wiring port %q: candidate %q implements %q instead",
-				trait, name, entry.Adapter.Implements,
-			)
-		}
-
-		cp := candidatePlan{
-			Name:       name,
-			Type:       entry.Adapter.Type,
-			ConfigType: entry.Adapter.Type + "Config",
-			Fallible:   entry.Adapter.Fallible,
-			Ports:      append([]string{}, entry.Adapter.Ports...),
-		}
-
-		for _, port := range entry.Adapter.Ports {
-			cp.PortVars = append(cp.PortVars, rustname.Snake(port))
-		}
-
-		imports[p.Crate+"::"+entry.Adapter.Module+"::{"+cp.Type+", "+cp.ConfigType+"}"] = true
-
-		for _, field := range sortedFieldNames(entry.Adapter.Config) {
-			declared := entry.Adapter.Config[field]
-			key := configKey(portKey, name, field)
-
-			cp.Fields = append(cp.Fields, fieldPlan{
-				Name: field,
-				Expr: readExpr(key, declared.Type),
-			})
-
-			p.Keys = append(p.Keys, specKey{
-				Key:         key,
-				Type:        specType(declared.Type),
-				Default:     declared.Default,
-				Description: declared.Description,
-			})
-		}
-
-		return cp, nil
-	}
-
-	if !strings.HasPrefix(candidate.Module, handAdapterLayer) {
+	entry, provided := byName[name]
+	if !provided {
 		return candidatePlan{}, fmt.Errorf(
-			"wiring port %q: candidate %q has module %q, a hand written adapter lives under the adapter layer",
-			trait, name, candidate.Module,
+			"wiring port %q: no cell manifest provides an adapter named %q",
+			trait, name,
 		)
 	}
 
-	module := strings.TrimPrefix(candidate.Module, handAdapterLayer)
-	if !rustname.IsModuleName(module) {
+	if entry.Adapter.Implements != trait {
 		return candidatePlan{}, fmt.Errorf(
-			"wiring port %q: candidate %q has module %q, which is not a name Rust can spell as a module",
-			trait, name, candidate.Module,
+			"wiring port %q: candidate %q implements %q instead",
+			trait, name, entry.Adapter.Implements,
 		)
 	}
 
 	cp := candidatePlan{
 		Name:       name,
-		Type:       candidate.Type,
-		ConfigType: candidate.Type + "Config",
-		Fallible:   candidate.Fallible,
+		Type:       entry.Adapter.Type,
+		ConfigType: entry.Adapter.Type + "Config",
+		Fallible:   entry.Adapter.Fallible,
+		Ports:      append([]string{}, entry.Adapter.Ports...),
 	}
 
-	hand := handConfigPlan{Module: module, Adapter: cp.Type, Type: cp.ConfigType}
+	for _, port := range entry.Adapter.Ports {
+		cp.PortVars = append(cp.PortVars, rustname.Snake(port))
+	}
 
-	for _, field := range sortedFieldNames(candidate.Config) {
-		declared := candidate.Config[field]
+	imports[p.Crate+"::"+entry.Adapter.Module+"::{"+cp.Type+", "+cp.ConfigType+"}"] = true
 
-		if err := checkFieldType(trait, name, field, declared.Type); err != nil {
-			return candidatePlan{}, err
-		}
-
+	for _, field := range sortedFieldNames(entry.Adapter.Config) {
+		declared := entry.Adapter.Config[field]
 		key := configKey(portKey, name, field)
 
 		cp.Fields = append(cp.Fields, fieldPlan{
 			Name: field,
 			Expr: readExpr(key, declared.Type),
 		})
-
-		hand.Fields = append(hand.Fields, specField{Ident: field, RustType: rustType(declared.Type)})
 
 		p.Keys = append(p.Keys, specKey{
 			Key:         key,
@@ -634,25 +572,7 @@ func planCandidate(
 		})
 	}
 
-	imports[p.Crate+"::adapter::{"+cp.Type+", "+cp.ConfigType+"}"] = true
-
-	p.HandModules = append(p.HandModules, module)
-	p.HandConfigs = append(p.HandConfigs, hand)
-
 	return cp, nil
-}
-
-func checkFieldType(trait, name, field, fieldType string) error {
-	for _, known := range cellmanifest.FieldTypes() {
-		if fieldType == known {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"wiring port %q: candidate %q field %q has type %q which is not one of %s",
-		trait, name, field, fieldType, list(cellmanifest.FieldTypes()),
-	)
 }
 
 func keysOfDrivers(drivers map[string]cellmanifest.DriverEntry) map[string]bool {

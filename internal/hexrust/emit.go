@@ -418,31 +418,11 @@ func Generate(opts Options) ([]File, error) {
 		mod := map[string]any{
 			"Header":  header,
 			"Allow":   allowingLayers[layer],
-			"Configs": []handConfigPlan{},
 			"Entries": rootEntries[layer],
-		}
-
-		if layer == "adapter" {
-			configs := append([]handConfigPlan{}, p.HandConfigs...)
-			sort.Slice(configs, func(i, j int) bool { return configs[i].Module < configs[j].Module })
-
-			mod["Configs"] = configs
 		}
 
 		steps = append(steps, func() error {
 			return add(path.Join("src", layer, "mod.rs"), "layer_mod", mod)
-		})
-	}
-
-	for _, hand := range p.HandConfigs {
-		hand := hand
-
-		steps = append(steps, func() error {
-			return add(
-				path.Join("src", "adapter", "zz_generated_"+hand.Module+"_config.rs"),
-				"hand_config",
-				map[string]any{"Header": header, "Config": hand},
-			)
 		})
 	}
 
@@ -577,21 +557,9 @@ pub mod {{ . }};
 {{ range .Entries }}
 pub mod {{ .Module }};
 {{- end }}
-{{- range .Configs }}
-pub mod zz_generated_{{ .Module }}_config;
-{{- end }}
 {{- range .Entries }}
 
 pub use {{ .Module }} as {{ .Alias }};
-{{- end }}
-{{- range .Configs }}
-
-mod {{ .Module }};
-{{- end }}
-{{- range .Configs }}
-
-pub use {{ .Module }}::{{ .Adapter }};
-pub use zz_generated_{{ .Module }}_config::{{ .Type }};
 {{- end }}
 {{ end -}}
 
@@ -608,16 +576,6 @@ pub use zz_generated_config::*;
 {{ range .BuildScripts }}
 include!("{{ . }}");
 {{- end }}
-{{ end -}}
-
-{{- define "hand_config" -}}
-{{ .Header }}
-
-pub struct {{ .Config.Type }} {
-{{- range .Config.Fields }}
-    pub {{ .Ident }}: {{ .RustType }},
-{{- end }}
-}
 {{ end -}}
 
 {{- define "main" -}}

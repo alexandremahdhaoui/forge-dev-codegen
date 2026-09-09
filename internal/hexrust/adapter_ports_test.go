@@ -112,37 +112,22 @@ components:
 `
 
 const guardedWiring = `binary: songe-hello-node
-ports:
-  GreetingStore:
-    default: sqlite
-    adapters:
-      sqlite: {}
-  TicketVerifier:
-    default: memory
-    adapters:
-      memory:
-        type: TicketMemoryVerifier
-        module: adapter::ticket_memory
-        config:
-          secret: { type: string, default: open }
-  GreetingEventSubscribe:
-    default: memory
-    adapters:
-      memory:
-        type: GreetingEventMemoryFeed
-        module: adapter::greeting_event_memory
-  TokenSource:
-    default: file
-    adapters:
-      file:
-        type: TicketFile
-        module: adapter::ticket_file
-        config:
-          path: { type: string, default: ticket.txt }
 drivers:
   rest: { enabled: true }
   tui: { enabled: true }
 `
+
+var guardedCrateRootPorts = map[string][]string{"TicketVerifier": {"secret"}}
+
+var tokenSourceAdapter = cellmanifest.Adapter{
+	Name:       "file",
+	Type:       "TicketFile",
+	Module:     "tui::adapter::ticket_file",
+	Implements: "TokenSource",
+	Config: map[string]cellmanifest.ConfigField{
+		"path": {Type: cellmanifest.FieldTypeString, Default: "ticket.txt", Description: "Where the ticket is read from"},
+	},
+}
 
 func writeCell(t *testing.T, root, cell string, manifest cellmanifest.Manifest) {
 	t.Helper()
@@ -177,11 +162,20 @@ func writeRestCell(t *testing.T, root, cell, spec, side string, sources bool) {
 }
 
 func standUpGuardedRestCell(t *testing.T) string {
+	return standUpGuardedCells(t, true)
+}
+
+func standUpGuardedCells(t *testing.T, withTokenSource bool) string {
 	t.Helper()
 
 	root := t.TempDir()
 
 	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideBoth, false)
+
+	adapters := []cellmanifest.Adapter{}
+	if withTokenSource {
+		adapters = append(adapters, tokenSourceAdapter)
+	}
 
 	writeCell(t, root, "tui", cellmanifest.Manifest{
 		Version:   cellmanifest.Version,
@@ -200,6 +194,7 @@ func standUpGuardedRestCell(t *testing.T) string {
 				Module: "tui::controller",
 				Ports:  []string{"GreetingClient"},
 			}},
+			Adapters: adapters,
 		},
 	})
 
@@ -227,6 +222,7 @@ func TestAnAdapterConsumingAPortGetsItAfterItsConfigAndThatPortIsBuiltFirst(t *t
 		Service: "songe-hello",
 		SrcDir:  root,
 		Cells:   []string{"rest", "tui"},
+		Ports:   guardedCrateRootPorts,
 		Wiring:  []byte(guardedWiring),
 	})
 	if err != nil {
@@ -270,24 +266,8 @@ func TestTheCrateRootEmitsSubjectTicketVerifierAndTokenSourceOnceForTwoRestCells
 		Service: "songe-hello",
 		SrcDir:  root,
 		Cells:   []string{"account", "rest"},
+		Ports:   guardedCrateRootPorts,
 		Wiring: []byte(`binary: songe-hello-node
-ports:
-  GreetingStore:
-    default: sqlite
-    adapters:
-      sqlite: {}
-  TicketVerifier:
-    default: memory
-    adapters:
-      memory:
-        type: TicketMemoryVerifier
-        module: adapter::ticket_memory
-  GreetingEventSubscribe:
-    default: memory
-    adapters:
-      memory:
-        type: GreetingEventMemoryFeed
-        module: adapter::greeting_event_memory
 drivers:
   rest: { enabled: true }
 `),
@@ -370,6 +350,7 @@ func TestTheConfigSpecHoldsTheChoiceOfAPortOnlyAnAdapterConsumes(t *testing.T) {
 		Service: "songe-hello",
 		SrcDir:  root,
 		Cells:   []string{"rest", "tui"},
+		Ports:   guardedCrateRootPorts,
 		Wiring:  []byte(guardedWiring),
 	})
 	if err != nil {
@@ -393,26 +374,17 @@ func TestTheConfigSpecHoldsTheChoiceOfAPortOnlyAnAdapterConsumes(t *testing.T) {
 }
 
 func TestAPortOnlyAnAdapterConsumesWithNoCandidateIsRefusedNamingTheAdapter(t *testing.T) {
-	root := standUpGuardedRestCell(t)
-
-	wiring := strings.Replace(guardedWiring, `  TokenSource:
-    default: file
-    adapters:
-      file:
-        type: TicketFile
-        module: adapter::ticket_file
-        config:
-          path: { type: string, default: ticket.txt }
-`, "", 1)
+	root := standUpGuardedCells(t, false)
 
 	_, err := hexrust.Generate(hexrust.Options{
 		Service: "songe-hello",
 		SrcDir:  root,
 		Cells:   []string{"rest", "tui"},
-		Wiring:  []byte(wiring),
+		Ports:   guardedCrateRootPorts,
+		Wiring:  []byte(guardedWiring),
 	})
-	if err == nil || !strings.Contains(err.Error(), `adapter "rest_greeting_client" consumes port "TokenSource" and the wiring names no candidate for it`) {
-		t.Fatalf("the missing token source candidate was not refused by name: %v", err)
+	if err == nil || !strings.Contains(err.Error(), `adapter "rest_greeting_client" consumes port "TokenSource" and no cell provides an adapter for it`) {
+		t.Fatalf("the missing token source adapter was not refused by name: %v", err)
 	}
 }
 

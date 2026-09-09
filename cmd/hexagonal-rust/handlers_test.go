@@ -62,8 +62,6 @@ const smallWiring = `binary: svc-node
 ports:
   GreetingStore:
     default: sqlite
-    adapters:
-      sqlite: {}
 drivers:
   rest: { enabled: true }
 `
