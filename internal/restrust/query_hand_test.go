@@ -610,6 +610,24 @@ func TestAVerifierPortReachesTheManifestAsAPortAnAdapterAndAControllerField(t *t
 	t.Fatalf("the manifest never provides the verifier adapter: %+v", m.Provides.Adapters)
 }
 
+func TestAControllerHoldingAPortNoBodyReadsYetStillCompiles(t *testing.T) {
+	out, err := clippyOverTheVerifierCell(t, controllerImplLeavingTheVerifierUnread)
+	if err != nil {
+		t.Fatalf("a port the body has not reached yet failed the build, so a crate could never go green until every feature exists: %v\n%s", err, out)
+	}
+}
+
+func TestAControllerMissingAMethodStillFailsTheBuildSoTheAllowSilencesNothingThatMatters(t *testing.T) {
+	out, err := clippyOverTheVerifierCell(t, controllerImplMissingAMethod)
+	if err == nil {
+		t.Fatalf("a controller missing a method built cleanly, so the allow silenced something that matters:\n%s", out)
+	}
+
+	if !strings.Contains(out, "E0046") {
+		t.Fatalf("the build failed for some reason other than the missing method:\n%s", out)
+	}
+}
+
 func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -938,7 +956,76 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
-func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
+const controllerImplLeavingTheVerifierUnread = `use crate::rest::controller::{
+    GreetingController, GreetingControllerError, GreetingControllerImpl,
+};
+use crate::rest::types::greeting::Greeting;
+use crate::rest::types::greeting_page::GreetingPage;
+
+impl GreetingController for GreetingControllerImpl {
+    fn list_greetings(
+        &self,
+        name: &str,
+        _after: Option<String>,
+        _limit: Option<i64>,
+    ) -> Result<GreetingPage, GreetingControllerError> {
+        let at = self
+            .greeting_clock
+            .now()
+            .map_err(|source| GreetingControllerError::GreetingClock {
+                id: name.to_string(),
+                source,
+            })?;
+
+        Ok(GreetingPage {
+            greetings: Vec::new(),
+            at,
+        })
+    }
+
+    fn get_greeting(&self, id: &str, _at: i64) -> Result<Greeting, GreetingControllerError> {
+        self.greeting_store
+            .get(id)
+            .map_err(|source| GreetingControllerError::GreetingStore {
+                id: id.to_string(),
+                source,
+            })?
+            .ok_or(GreetingControllerError::NotFound { id: id.to_string() })
+    }
+}
+`
+
+const controllerImplMissingAMethod = `use crate::rest::controller::{
+    GreetingController, GreetingControllerError, GreetingControllerImpl,
+};
+use crate::rest::types::greeting_page::GreetingPage;
+
+impl GreetingController for GreetingControllerImpl {
+    fn list_greetings(
+        &self,
+        name: &str,
+        _after: Option<String>,
+        _limit: Option<i64>,
+    ) -> Result<GreetingPage, GreetingControllerError> {
+        let at = self
+            .greeting_clock
+            .now()
+            .map_err(|source| GreetingControllerError::GreetingClock {
+                id: name.to_string(),
+                source,
+            })?;
+
+        Ok(GreetingPage {
+            greetings: Vec::new(),
+            at,
+        })
+    }
+}
+`
+
+func clippyOverTheVerifierCell(t *testing.T, controllerImpl string) (string, error) {
+	t.Helper()
+
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -976,22 +1063,26 @@ func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerIm
 		write(filepath.Join("src", "rest", f.Path), f.Content)
 	}
 
-	write("src/rest/controller/greeting_controller.rs", queriedGreetingControllerImpl)
+	write("src/rest/controller/greeting_controller.rs", controllerImpl)
 
 	cmd := exec.Command(cargo, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
 	cmd.Dir = root
 
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return
-	}
 
 	lower := strings.ToLower(string(out))
-	if strings.Contains(lower, "could not resolve host") ||
+	if err != nil && (strings.Contains(lower, "could not resolve host") ||
 		strings.Contains(lower, "failed to get") ||
-		strings.Contains(lower, "spurious network error") {
-		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+		strings.Contains(lower, "spurious network error")) {
+		t.Skipf("cargo clippy needs network access to crates.io, which this run did not have: %v\n%s", err, out)
 	}
 
-	t.Fatalf("cargo clippy: %v\n%s", err, out)
+	return string(out), err
+}
+
+func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
+	out, err := clippyOverTheVerifierCell(t, queriedGreetingControllerImpl)
+	if err != nil {
+		t.Fatalf("cargo clippy: %v\n%s", err, out)
+	}
 }

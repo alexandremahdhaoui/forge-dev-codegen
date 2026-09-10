@@ -784,7 +784,8 @@ pub trait {{ $c.Pascal }}Controller: Send + Sync {
 {{- end }}
 }
 
-pub struct {{ $c.Pascal }}ControllerImpl {
+{{ if $c.Ports }}#[allow(dead_code)]
+{{ end }}pub struct {{ $c.Pascal }}ControllerImpl {
 {{- range $c.Ports }}
     pub(crate) {{ .PortSnake }}: Arc<dyn {{ .Port }} + Send + Sync>,
 {{- end }}

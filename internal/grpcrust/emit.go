@@ -358,6 +358,7 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
 }
 
 {{ if .Ports }}
+#[allow(dead_code)]
 pub struct {{ .ControllerTrait }}Impl {
 {{- range .Ports }}
     pub(crate) {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,

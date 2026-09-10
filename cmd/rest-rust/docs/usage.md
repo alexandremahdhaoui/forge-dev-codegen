@@ -181,6 +181,15 @@ Declare a port once. Every other operation names it by its name. A
 second declaration that disagrees is refused, and a name no operation
 declares is refused.
 
+A controller struct holding ports carries `#[allow(dead_code)]`, so a
+body that has not reached one of its ports yet still builds. Generated
+code is judged against its declaration, the way the generated adapter
+and driver `mod.rs` already are. Nothing that matters is weakened, since
+the compiler still refuses a missing method, a wrong signature or a type
+that does not line up. A declared port no body ever reads is a real
+fault, and finding it needs something that reads the declaration and the
+bodies together, which rustc cannot do.
+
 ## Streams
 
 `x-stream: events` on a GET operation makes its 2xx response a

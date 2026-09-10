@@ -62,6 +62,10 @@ under `requires.ports`, so the skeleton refuses when no cell provides
 one and `wiring.yaml` picks the adapter.
 
 A cell naming no port still gets a unit struct that derives `Default`.
+A struct holding ports carries `#[allow(dead_code)]`, so a body that has
+not reached one of its ports yet still builds. The compiler still
+refuses a missing method, a wrong signature or a type that does not line
+up.
 
 ## What the proto decides
 
