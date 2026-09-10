@@ -92,7 +92,7 @@ func TestACellWithoutAnOpenapiDocumentEmitsTheDatagramVectorsAndNoAxumImport(t *
 		t.Fatalf("generating: %v", err)
 	}
 
-	for _, unwanted := range []string{"use axum::body::Body;", "http_driver", "HttpDriverConfig", "tower::ServiceExt"} {
+	for _, unwanted := range []string{"use axum::body::{to_bytes, Body};", "http_driver", "HttpDriverConfig", "tower::ServiceExt"} {
 		if strings.Contains(content, unwanted) {
 			t.Errorf("a service with no OpenAPI document still carries %q\n%s", unwanted, content)
 		}
@@ -124,7 +124,7 @@ func TestACellWithOnlyAGrpcProtoEmitsTheCallVectors(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if strings.Contains(files[0].Content, "use axum::body::Body;") {
+	if strings.Contains(files[0].Content, "use axum::body::{to_bytes, Body};") {
 		t.Fatalf("a grpc only service still carries the axum imports\n%s", files[0].Content)
 	}
 

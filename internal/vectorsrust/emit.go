@@ -209,9 +209,8 @@ var templates = template.Must(template.New("vectorsrust").Parse(`
 {{- define "file" -}}
 {{ .Header }}
 {{ if .HasRest }}
-use axum::body::Body;
+use axum::body::{to_bytes, Body};
 use axum::http::Request;
-use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use {{ .Crate }}::{{ .RestCell }}::driver::http_driver::{HttpDriver, HttpDriverConfig};
@@ -995,7 +994,7 @@ async fn {{ .Name }}() {
     );
 {{- end }}
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
 {{- if .HasExpectedBody }}
 {{- if .Stream }}
     let got: serde_json::Value = first_event(&body_bytes);

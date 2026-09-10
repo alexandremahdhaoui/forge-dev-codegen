@@ -184,7 +184,7 @@ async fn create_valid_name() {
 
     assert_eq!(response.status().as_u16(), 201);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");
     let want: serde_json::Value = serde_json::from_str("{\"id\":\"6ba7b810-9dad-11d1-80b4-00c04fd430c8\",\"name\":\"Songe\",\"count\":0}").expect("expectedBody is valid JSON");
     assert!(body_matches(&want, &got), "body {got} does not match {want}");

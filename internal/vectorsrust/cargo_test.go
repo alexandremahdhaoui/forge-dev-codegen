@@ -60,7 +60,6 @@ tokio = { version = "1", features = ["full"] }
 [dev-dependencies]
 mockall = "0.15"
 tower = "0.5"
-http-body-util = "0.1"
 `
 
 const cargoCrateLib = `pub mod rest;
