@@ -488,17 +488,30 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 }
 
 func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifest.ConfigField {
-	if a.Kind != ClockAdapterMemory {
-		return map[string]cellmanifest.ConfigField{}
-	}
+	config := map[string]cellmanifest.ConfigField{}
 
-	return map[string]cellmanifest.ConfigField{
-		h.InstantField: {
+	switch {
+	case h.Kind == ClockPortKind && a.Kind == ClockAdapterMemory:
+		config[h.InstantField] = cellmanifest.ConfigField{
 			Type:        cellmanifest.FieldTypeInteger,
 			Default:     0,
 			Description: "The moment the " + h.Snake + " memory clock starts at, read as the " + h.Instant + " the port answers",
-		},
+		}
+	case h.Kind == VerifierPortKind && a.Kind == VerifierAdapterSecret:
+		config["secret"] = cellmanifest.ConfigField{
+			Type:        cellmanifest.FieldTypeString,
+			Description: "The one string the " + h.Snake + " secret verifier accepts",
+		}
+
+		for _, field := range h.SubjectFields {
+			config[field.Ident] = cellmanifest.ConfigField{
+				Type:        cellmanifest.FieldTypeString,
+				Description: "The " + field.Name + " of the " + h.Subject + " the " + h.Snake + " secret verifier answers on a match",
+			}
+		}
 	}
+
+	return config
 }
 
 func addClientToManifest(m *cellmanifest.Manifest, v view) {
@@ -1275,6 +1288,52 @@ impl {{ $p.Name }} for {{ $a.Struct }} {
             })?;
 
         Ok({{ $p.Span }} { {{ $p.SpanField }} })
+    }
+}
+{{ end -}}
+
+{{- define "verifier_secret" -}}
+{{ .Header }}
+{{ $p := .Port }}{{ $a := .Adapter }}
+use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
+use {{ .CratePath }}types::{{ $p.SubjectSnake }}::{{ $p.Subject }};
+
+#[derive(Default)]
+pub struct {{ $a.ConfigStruct }} {
+    pub secret: String,
+{{- range $p.SubjectFields }}
+    pub {{ .Ident }}: String,
+{{- end }}
+}
+
+pub struct {{ $a.Struct }} {
+    secret: String,
+    subject: {{ $p.Subject }},
+}
+
+impl {{ $a.Struct }} {
+    pub fn new(config: {{ $a.ConfigStruct }}) -> Self {
+        Self {
+            secret: config.secret,
+            subject: {{ $p.Subject }} {
+{{- range $p.SubjectFields }}
+                {{ .Ident }}: config.{{ .Ident }},
+{{- end }}
+            },
+        }
+    }
+}
+
+impl {{ $p.Name }} for {{ $a.Struct }} {
+    fn verify(&self, offered: &str) -> Result<{{ $p.Subject }}, {{ $p.Error }}> {
+        if offered != self.secret {
+            return Err({{ $p.Error }}::Refused {
+                method: "verify".to_string(),
+                reason: "the offered string does not match the configured secret".to_string(),
+            });
+        }
+
+        Ok(self.subject.clone())
     }
 }
 {{ end -}}

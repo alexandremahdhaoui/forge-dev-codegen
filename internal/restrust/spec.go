@@ -80,6 +80,7 @@ type portRef struct {
 	Methods  []portMethod
 	Instant  string
 	Span     string
+	Subject  string
 	Adapters *[]string
 }
 
@@ -103,6 +104,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 		Methods  []portMethod `json:"methods"`
 		Instant  string       `json:"instant"`
 		Span     string       `json:"span"`
+		Subject  string       `json:"subject"`
 		Adapters *[]string    `json:"adapters"`
 	}
 
@@ -116,6 +118,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 	p.Methods = declared.Methods
 	p.Instant = declared.Instant
 	p.Span = declared.Span
+	p.Subject = declared.Subject
 	p.Adapters = declared.Adapters
 
 	return nil
@@ -190,22 +193,30 @@ type QueryParam struct {
 }
 
 type HandMethod struct {
-	Name    string
-	Ident   string
-	Request string
-	Reply   string
+	Name   string
+	Ident  string
+	Params []HandParam
+	Reply  string
+}
+
+type HandParam struct {
+	Ident  string
+	Type   string
+	Schema bool
 }
 
 type HandPort struct {
-	Name         string
-	Snake        string
-	Kind         string
-	Instant      string
-	InstantField string
-	Span         string
-	SpanField    string
-	Adapters     []string
-	Methods      []HandMethod
+	Name          string
+	Snake         string
+	Kind          string
+	Instant       string
+	InstantField  string
+	Span          string
+	SpanField     string
+	Subject       string
+	SubjectFields []Field
+	Adapters      []string
+	Methods       []HandMethod
 }
 
 type Operation struct {
@@ -270,19 +281,28 @@ const StorePortSuffix = "Store"
 
 const SubscribePortSuffix = "Subscribe"
 
-const ClockPortKind = "clock"
+const (
+	ClockPortKind    = "clock"
+	VerifierPortKind = "verifier"
+)
 
 const (
 	ClockAdapterMemory = "memory"
 	ClockAdapterSystem = "system"
 )
 
+const VerifierAdapterSecret = "secret"
+
 func PortKinds() []string {
-	return []string{ClockPortKind}
+	return []string{ClockPortKind, VerifierPortKind}
 }
 
 func ClockAdapterKinds() []string {
 	return []string{ClockAdapterMemory, ClockAdapterSystem}
+}
+
+func VerifierAdapterKinds() []string {
+	return []string{VerifierAdapterSecret}
 }
 
 const (
@@ -720,20 +740,45 @@ func collectHandPorts(paths map[string]map[string]json.RawMessage, byName map[st
 }
 
 func parseHandPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
-	if ref.Kind != ClockPortKind {
+	switch ref.Kind {
+	case ClockPortKind:
+		return parseClockPort(where, ref, byName, storeNames)
+	case VerifierPortKind:
+		return parseVerifierPort(where, ref, byName, storeNames)
+	default:
 		return HandPort{}, fmt.Errorf("reading %s: x-ports declares a port of kind %q, the declared kinds are %s, every other entry is the name of a store or subscribe port", where, ref.Kind, list(PortKinds()))
 	}
-
-	return parseClockPort(where, ref, byName, storeNames)
 }
 
-func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
-	if err := checkPortName(where, ClockPortKind, ref.Name, storeNames); err != nil {
-		return HandPort{}, err
+func checkPortShape(where string, ref portRef, kinds []string, storeNames map[string]bool, writes string) error {
+	if err := checkPortName(where, ref.Kind, ref.Name, storeNames); err != nil {
+		return err
 	}
 
 	if len(ref.Methods) > 0 {
-		return HandPort{}, fmt.Errorf("reading %s: clock port %q declares methods, a clock answers now and elapsed and the engine writes both", where, ref.Name)
+		return fmt.Errorf("reading %s: %s port %q declares methods, a %s %s and the engine writes them", where, ref.Kind, ref.Name, ref.Kind, writes)
+	}
+
+	if ref.Adapters == nil {
+		return fmt.Errorf("reading %s: %s port %q names no adapters, adapters lists which of %s the engine emits", where, ref.Kind, ref.Name, list(kinds))
+	}
+
+	if len(*ref.Adapters) == 0 {
+		return fmt.Errorf("reading %s: %s port %q names an empty adapters list, a %s nobody can build is a %s nobody can use", where, ref.Kind, ref.Name, ref.Kind, ref.Kind)
+	}
+
+	for _, kind := range *ref.Adapters {
+		if !holds(kinds, kind) {
+			return fmt.Errorf("reading %s: %s port %q names adapter kind %q, a %s adapter is one of %s", where, ref.Kind, ref.Name, kind, ref.Kind, list(kinds))
+		}
+	}
+
+	return nil
+}
+
+func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
+	if err := checkPortShape(where, ref, ClockAdapterKinds(), storeNames, "answers now and elapsed"); err != nil {
+		return HandPort{}, err
 	}
 
 	instantField, err := clockField(where, ref.Name, "instant", ref.Instant, byName)
@@ -750,20 +795,6 @@ func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeN
 		return HandPort{}, fmt.Errorf("reading %s: clock port %q names %q as both its instant and its span, a moment and a duration are two schemas", where, ref.Name, ref.Instant)
 	}
 
-	if ref.Adapters == nil {
-		return HandPort{}, fmt.Errorf("reading %s: clock port %q names no adapters, adapters lists which of %s the engine emits", where, ref.Name, list(ClockAdapterKinds()))
-	}
-
-	if len(*ref.Adapters) == 0 {
-		return HandPort{}, fmt.Errorf("reading %s: clock port %q names an empty adapters list, a clock nobody can build is a clock nobody can use", where, ref.Name)
-	}
-
-	for _, kind := range *ref.Adapters {
-		if !holds(ClockAdapterKinds(), kind) {
-			return HandPort{}, fmt.Errorf("reading %s: clock port %q names adapter kind %q, a clock adapter is one of %s", where, ref.Name, kind, list(ClockAdapterKinds()))
-		}
-	}
-
 	return HandPort{
 		Name:         ref.Name,
 		Snake:        rustname.Snake(ref.Name),
@@ -775,7 +806,54 @@ func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeN
 		Adapters:     *ref.Adapters,
 		Methods: []HandMethod{
 			{Name: "now", Ident: "now", Reply: ref.Instant},
-			{Name: "elapsed", Ident: "elapsed", Request: ref.Instant, Reply: ref.Span},
+			{
+				Name:   "elapsed",
+				Ident:  "elapsed",
+				Params: []HandParam{{Ident: "request", Type: ref.Instant, Schema: true}},
+				Reply:  ref.Span,
+			},
+		},
+	}, nil
+}
+
+func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
+	if err := checkPortShape(where, ref, VerifierAdapterKinds(), storeNames, "answers verify"); err != nil {
+		return HandPort{}, err
+	}
+
+	if ref.Subject == "" {
+		return HandPort{}, fmt.Errorf("reading %s: verifier port %q names no subject, a verifier declares the schema it answers when it accepts an offered string", where, ref.Name)
+	}
+
+	subject, ok := byName[ref.Subject]
+	if !ok {
+		return HandPort{}, fmt.Errorf("reading %s: verifier port %q names subject %q, which is not a schema of components.schemas", where, ref.Name, ref.Subject)
+	}
+
+	if len(subject.Fields) == 0 {
+		return HandPort{}, fmt.Errorf("reading %s: verifier port %q names subject %q, which declares no properties, a verifier that answers nothing tells the controller nothing", where, ref.Name, ref.Subject)
+	}
+
+	for _, field := range subject.Fields {
+		if field.Type.Kind != "string" || field.Optional {
+			return HandPort{}, fmt.Errorf("reading %s: verifier port %q names subject %q, whose property %q is not a required string, every property of a subject is a required string because an adapter reads it off what it verified", where, ref.Name, ref.Subject, field.Name)
+		}
+	}
+
+	return HandPort{
+		Name:          ref.Name,
+		Snake:         rustname.Snake(ref.Name),
+		Kind:          VerifierPortKind,
+		Subject:       ref.Subject,
+		SubjectFields: subject.Fields,
+		Adapters:      *ref.Adapters,
+		Methods: []HandMethod{
+			{
+				Name:   "verify",
+				Ident:  "verify",
+				Params: []HandParam{{Ident: "offered", Type: "&str"}},
+				Reply:  ref.Subject,
+			},
 		},
 	}, nil
 }

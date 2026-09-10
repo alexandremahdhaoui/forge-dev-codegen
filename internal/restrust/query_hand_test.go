@@ -331,6 +331,35 @@ func TestTheControllerPortsOfTheManifestHoldTheDeclaredPortBesideTheStore(t *tes
 
 const clockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]"
 
+const verifierDeclaration = "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [secret]"
+
+const googleIdentitySchema = `    GoogleIdentity:
+      type: object
+      description: What the Google verifier reads off a token it accepted. No client ever sends it.
+      required: [subject, email]
+      properties:
+        subject:
+          type: string
+        email:
+          type: string
+`
+
+func specWithAGoogleVerifier(t *testing.T) string {
+	t.Helper()
+
+	spec := strings.Replace(queriedSpec, clockDeclaration, bothClocksDeclaration+"\n"+verifierDeclaration, 1)
+	if spec == queriedSpec {
+		t.Fatal("the clock declaration was never replaced, the fixture moved")
+	}
+
+	withSchema := strings.Replace(spec, "    Label:", googleIdentitySchema+"    Label:", 1)
+	if withSchema == spec {
+		t.Fatal("the Label schema was never found, the fixture moved")
+	}
+
+	return withSchema
+}
+
 const systemClockDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [system]"
 
 const bothClocksDeclaration = "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory, system]"
@@ -484,6 +513,156 @@ func TestAClockTakesItsPropertyNamesFromTheSchemasItDeclaresAndNeverFromTheEngin
 	}
 
 	t.Fatal("the manifest never provides the memory clock")
+}
+
+func TestAVerifierPortIsDeclaredOnAnOperationAndTheEngineWritesItsTraitItsAdapterAndItsMock(t *testing.T) {
+	files, err := generatedByPath(t, specWithAGoogleVerifier(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	port, emitted := files["port/zz_generated_google_verifier.rs"]
+	if !emitted {
+		t.Fatalf("the verifier port was not emitted, the cell wrote %d files", len(files))
+	}
+
+	for _, want := range []string{
+		"use crate::rest::types::google_identity::GoogleIdentity;",
+		"pub enum GoogleVerifierError {",
+		`#[error("calling {method:?} on the google_verifier port: refused: {reason}")]`,
+		"#[cfg_attr(test, mockall::automock)]",
+		"pub trait GoogleVerifier: Send + Sync {",
+		"fn verify(&self, offered: &str) -> Result<GoogleIdentity, GoogleVerifierError>;",
+	} {
+		if !strings.Contains(port, want) {
+			t.Errorf("the verifier port never carried %q:\n%s", want, port)
+		}
+	}
+
+	adapter, emitted := files["adapter/zz_generated_google_verifier_secret.rs"]
+	if !emitted {
+		t.Fatal("the verifier secret adapter was not emitted")
+	}
+
+	for _, want := range []string{
+		"pub struct GoogleVerifierSecretConfig {",
+		"pub secret: String,",
+		"pub subject: String,",
+		"pub email: String,",
+		"impl GoogleVerifier for GoogleVerifierSecret {",
+		"the offered string does not match the configured secret",
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("the verifier secret adapter never carried %q:\n%s", want, adapter)
+		}
+	}
+}
+
+func TestAVerifierPortReachesTheManifestAsAPortAnAdapterAndAControllerField(t *testing.T) {
+	files, err := generatedByPath(t, specWithAGoogleVerifier(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	declared := false
+	for _, p := range m.Provides.Ports {
+		declared = declared || (p.Trait == "GoogleVerifier" && p.Module == "rest::port::google_verifier")
+	}
+
+	if !declared {
+		t.Errorf("the manifest never declares the verifier port: %+v", m.Provides.Ports)
+	}
+
+	for _, required := range m.Requires.Ports {
+		if required == "GoogleVerifier" {
+			t.Error("the cell provides the verifier adapter and still requires the port")
+		}
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "google_verifier_secret" {
+			continue
+		}
+
+		if adapter.Implements != "GoogleVerifier" {
+			t.Errorf("the verifier adapter implements %q", adapter.Implements)
+		}
+
+		for _, field := range []string{"secret", "subject", "email"} {
+			if _, named := adapter.Config[field]; !named {
+				t.Errorf("the verifier adapter config never named %q: %v", field, adapter.Config)
+			}
+		}
+
+		controller := files["controller/zz_generated_greeting_controller.rs"]
+		if !strings.Contains(controller, "pub(crate) google_verifier: Arc<dyn GoogleVerifier + Send + Sync>,") {
+			t.Errorf("the controller never held the verifier:\n%s", controller)
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provides the verifier adapter: %+v", m.Provides.Adapters)
+}
+
+func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace string
+		want    string
+	}{
+		{
+			name:    "no subject",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          adapters: [secret]",
+			want:    "names no subject",
+		},
+		{
+			name:    "a subject that is no schema",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: Person\n          adapters: [secret]",
+			want:    `names subject "Person", which is not a schema of components.schemas`,
+		},
+		{
+			name:    "a subject carrying something that is not a string",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: Greeting\n          adapters: [secret]",
+			want:    `whose property "count" is not a required string`,
+		},
+		{
+			name:    "an unknown adapter kind",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]",
+			want:    `adapter kind "jwks", a verifier adapter is one of secret`,
+		},
+		{
+			name:    "no adapters",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity",
+			want:    "names no adapters",
+		},
+		{
+			name:    "methods a verifier never declares",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [secret]\n          methods:\n            - name: verify\n              reply: GoogleIdentity",
+			want:    "declares methods, a verifier answers verify and the engine writes them",
+		},
+		{
+			name:    "the name of a store port",
+			replace: "        - kind: verifier\n          name: GreetingStore\n          subject: GoogleIdentity\n          adapters: [secret]",
+			want:    "takes the name of a store or subscribe port",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broken := strings.Replace(specWithAGoogleVerifier(t), verifierDeclaration, tc.replace, 1)
+
+			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			}
+		})
+	}
 }
 
 func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
@@ -704,6 +883,21 @@ impl GreetingController for GreetingControllerImpl {
             });
         }
 
+        let who = self
+            .google_verifier
+            .verify(name)
+            .map_err(|source| GreetingControllerError::GoogleVerifier {
+                id: name.to_string(),
+                source,
+            })?;
+
+        if who.email.is_empty() {
+            return Err(GreetingControllerError::Authentication {
+                subject: who.subject,
+                reason: "the verified identity carries no email".to_string(),
+            });
+        }
+
         let at = self
             .greeting_clock
             .now()
@@ -750,9 +944,7 @@ func TestTheQueriedCellWithADeclaredPortCompilesOnceTheUserWritesTheControllerIm
 		t.Skip("cargo is not on PATH")
 	}
 
-	spec := strings.Replace(queriedSpec, clockDeclaration, bothClocksDeclaration, 1)
-
-	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(specWithAGoogleVerifier(t)), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

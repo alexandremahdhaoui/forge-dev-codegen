@@ -117,7 +117,7 @@ parameters:
 `x-ports` takes a port name or a declaration. A name is the store port
 of an `x-store` schema, the subscribe port of the operation's own
 stream, or a port some operation declares. A declaration is an object
-naming a `kind`. The declared kinds are `clock`.
+naming a `kind`. The declared kinds are `clock` and `verifier`.
 
 ```yaml
 x-ports:
@@ -145,6 +145,29 @@ A clock names two schemas and each carries one required integer
 property. The engine takes the field names from those schemas, so the
 declaration owns them and the engine invents nothing. A schema carrying
 any other shape is refused by name.
+
+A `verifier` takes an offered string and answers a subject or refuses.
+
+```yaml
+x-ports:
+  - kind: verifier
+    name: GoogleVerifier
+    subject: GoogleIdentity
+    adapters: [secret]
+```
+
+The trait carries one method,
+`fn verify(&self, offered: &str) -> Result<<Subject>, <Name>Error>`.
+`subject` names the schema the verifier answers, and every property of
+that schema is a required string, because an adapter reads each one off
+what it verified rather than deciding it. A verifier adapter is
+`secret`, which accepts one configured string and answers a subject
+built from configuration, one key per property.
+
+The subject is a schema of the document like any other, and a verifier
+usually answers something no client ever sends. Declare it anyway and
+say so in its description. The operation whose controller does the
+verifying is the operation that declares the port.
 
 The engine writes `port/zz_generated_<snake>.rs` holding
 `<Name>Error` with a `Refused` and a `Call` arm and the trait under

@@ -146,9 +146,17 @@ type handPortView struct {
 	Span         string
 	SpanSnake    string
 	SpanField    string
-	Adapters     []handAdapterView
+	Subject       string
+	SubjectSnake  string
+	SubjectFields []subjectFieldView
+	Adapters      []handAdapterView
 	Imports      []importView
 	Methods      []handMethodView
+}
+
+type subjectFieldView struct {
+	Ident string
+	Name  string
 }
 
 type handAdapterView struct {
@@ -567,6 +575,12 @@ func buildHandPortView(h HandPort) handPortView {
 		Span:         h.Span,
 		SpanSnake:    rustname.Snake(h.Span),
 		SpanField:    h.SpanField,
+		Subject:      h.Subject,
+		SubjectSnake: rustname.Snake(h.Subject),
+	}
+
+	for _, field := range h.SubjectFields {
+		hv.SubjectFields = append(hv.SubjectFields, subjectFieldView{Ident: field.Ident, Name: field.Name})
 	}
 
 	for _, kind := range h.Adapters {
@@ -584,11 +598,17 @@ func buildHandPortView(h HandPort) handPortView {
 
 	for _, m := range h.Methods {
 		mv := handMethodView{Ident: m.Ident, Return: "()"}
+		args := []string{}
 
-		if m.Request != "" {
-			mv.Args = "request: " + m.Request
-			imports[m.Request] = true
+		for _, p := range m.Params {
+			args = append(args, p.Ident+": "+p.Type)
+
+			if p.Schema {
+				imports[p.Type] = true
+			}
 		}
+
+		mv.Args = strings.Join(args, ", ")
 
 		if m.Reply != "" {
 			mv.Return = m.Reply
