@@ -746,6 +746,12 @@ func buildMessageLiteral(
 }
 
 func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {
+	if f.Repeated {
+		literal, err := repeatedLiteral(sc, f, raw)
+
+		return literal, false, err
+	}
+
 	if isSeedPlaceholder(raw) {
 		if seedExpression == "" {
 			return "", false, fmt.Errorf("field %q reads %s and the case carries no seed", f.Name, seedPlaceholder)
@@ -764,6 +770,53 @@ func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpressio
 	}
 
 	return literal, false, nil
+}
+
+func repeatedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage) (string, error) {
+	if isSeedPlaceholder(raw) {
+		return "", fmt.Errorf("field %q is repeated and reads %s, a seed fills one value and no rule places it in a list", f.Name, seedPlaceholder)
+	}
+
+	if len(raw) == 0 || string(raw) == "null" {
+		return "Vec::new()", nil
+	}
+
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return "", fmt.Errorf("field %q is repeated and must be a JSON array: %w", f.Name, err)
+	}
+
+	parts := make([]string, 0, len(items))
+
+	for i, item := range items {
+		literal, err := itemLiteral(sc, f, item)
+		if err != nil {
+			return "", fmt.Errorf("reading item %d of field %q: %w", i, f.Name, err)
+		}
+
+		parts = append(parts, literal)
+	}
+
+	return "vec![" + strings.Join(parts, ", ") + "]", nil
+}
+
+func itemLiteral(sc scope, f grpcrust.Field, item json.RawMessage) (string, error) {
+	if isSeedPlaceholder(item) {
+		return "", fmt.Errorf("the item reads %s, a seed fills one value and no rule places it in a list", seedPlaceholder)
+	}
+
+	if f.Kind != grpcrust.FieldMessage {
+		return scalarLiteral(f, item)
+	}
+
+	nested, ok := sc.message(f.Message)
+	if !ok {
+		return "", fmt.Errorf("field %q holds message %q and the proto declares no such message", f.Name, f.Message)
+	}
+
+	literal, _, err := buildMessageLiteral(sc, nested, item, "", nil)
+
+	return literal, err
 }
 
 func nestedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {

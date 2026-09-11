@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/udprust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
@@ -342,6 +343,150 @@ func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t 
 	if err != nil {
 		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
+	}
+}
+
+const cargoRosterProto = `syntax = "proto3";
+
+package songe.roster.v1;
+
+service Roster {
+  rpc List(ListRequest) returns (ListReply);
+}
+
+message ListRequest {
+  repeated string ids = 1;
+}
+
+message ListReply {
+  repeated Entry entries = 1;
+}
+
+message Entry {
+  string id = 1;
+  uint64 seen = 2;
+}
+`
+
+const cargoRosterManifest = `[package]
+name = "songe-roster"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tonic = "0.14"
+tonic-prost = "0.14"
+
+[dev-dependencies]
+mockall = "0.15"
+
+[build-dependencies]
+protox = "0.9"
+tonic-prost-build = "0.14"
+`
+
+const cargoRosterControllerImpl = `use crate::grpc::controller::{RosterController, RosterControllerError, RosterControllerImpl};
+use crate::grpc::types::roster_messages::{ListReply, ListRequest};
+
+impl RosterController for RosterControllerImpl {
+    fn list(&self, request: ListRequest) -> Result<ListReply, RosterControllerError> {
+        let _ = request;
+
+        Ok(ListReply { entries: Vec::new() })
+    }
+}
+`
+
+const cargoRosterVectors = `{
+  "cases": [
+    {
+      "case": "a_repeated_scalar_round_trips",
+      "operation": "grpc_List",
+      "input": { "ids": ["a", "b", "c"] },
+      "controllerReply": {}
+    },
+    {
+      "case": "a_repeated_message_round_trips",
+      "operation": "grpc_List",
+      "input": {},
+      "controllerReply": { "entries": [{ "id": "a", "seen": 3 }, { "id": "b", "seen": 0 }] }
+    },
+    {
+      "case": "an_empty_list_round_trips",
+      "operation": "grpc_List",
+      "input": { "ids": [] },
+      "controllerReply": { "entries": [] }
+    }
+  ]
+}`
+
+func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGeneratedGrpcClientAndDriver(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
+	}
+
+	cellFiles, err := grpcrust.Generate([]byte(cargoRosterProto), grpcrust.Options{Service: "songe-roster"})
+	if err != nil {
+		t.Fatalf("generating the grpc cell: %v", err)
+	}
+
+	vectorFiles, err := vectorsrust.Generate(nil, []byte(cargoRosterVectors), vectorsrust.Options{
+		Service:   "songe-roster",
+		GrpcProto: []byte(cargoRosterProto),
+		GrpcCell:  "grpc",
+	})
+	if err != nil {
+		t.Fatalf("generating the vectors: %v", err)
+	}
+
+	root := t.TempDir()
+
+	write := func(rel, content string) {
+		t.Helper()
+
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("making %s: %v", filepath.Dir(p), err)
+		}
+
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", p, err)
+		}
+	}
+
+	write("Cargo.toml", cargoRosterManifest)
+	write("src/lib.rs", "pub mod grpc;\n")
+	write("build.rs", "include!(\"src/grpc/zz_generated_build.rs\");\n")
+
+	for _, f := range cellFiles {
+		if strings.HasSuffix(f.Path, ".yaml") {
+			continue
+		}
+
+		write(filepath.Join("src", "grpc", f.Path), f.Content)
+	}
+
+	for _, f := range vectorFiles {
+		write(f.Path, f.Content)
+	}
+
+	write("src/grpc/controller/roster_controller.rs", cargoRosterControllerImpl)
+
+	out, err := runCargoTest(t, root, cargo)
+	if err != nil {
+		skipOnNetworkError(t, err, out)
+		t.Fatalf("cargo test: %v\n%s", err, out)
+	}
+
+	for _, name := range []string{"a_repeated_scalar_round_trips", "a_repeated_message_round_trips", "an_empty_list_round_trips"} {
+		if !strings.Contains(string(out), name+" ... ok") {
+			t.Errorf("cargo test never reported %s passing\n%s", name, out)
+		}
 	}
 }
 

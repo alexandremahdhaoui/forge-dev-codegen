@@ -24,11 +24,12 @@ const (
 )
 
 type Field struct {
-	Name    string
-	Number  int
-	Kind    FieldKind
-	Scalar  string
-	Message string
+	Name     string
+	Number   int
+	Kind     FieldKind
+	Repeated bool
+	Scalar   string
+	Message  string
 }
 
 type Message struct {

@@ -96,6 +96,119 @@ func TestTheGeneratedCellPassesCargoCheck(t *testing.T) {
 	runCargoCheck(t, cargo, root)
 }
 
+const rosterProto = `
+syntax = "proto3";
+
+package songe.roster.v1;
+
+service Roster {
+  rpc List(ListRequest) returns (ListReply);
+}
+
+message ListRequest {
+  repeated string ids = 1;
+}
+
+message ListReply {
+  repeated Entry entries = 1;
+}
+
+message Entry {
+  string id = 1;
+  uint64 seen = 2;
+}
+`
+
+const rosterControllerImpl = `use crate::grpc::controller::{RosterController, RosterControllerError, RosterControllerImpl};
+use crate::grpc::types::roster_messages::{Entry, ListReply, ListRequest};
+
+impl RosterController for RosterControllerImpl {
+    fn list(&self, request: ListRequest) -> Result<ListReply, RosterControllerError> {
+        Ok(ListReply {
+            entries: request
+                .ids
+                .into_iter()
+                .map(|id| Entry { id, seen: 0 })
+                .collect(),
+        })
+    }
+}
+`
+
+func TestARepeatedFieldIsAVecInCoreAndOnTheWireAndEveryMessageItemConvertsAtTheBoundary(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
+	if err != nil {
+		t.Fatalf("generating the cell: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	for path, wants := range map[string][]string{
+		"types/zz_generated_roster_messages.rs": {
+			"pub ids: Vec<String>,",
+			"pub entries: Vec<Entry>,",
+			"pub struct Entry {",
+		},
+		"adapter/zz_generated_roster_grpc_client.rs": {
+			"ids: v.ids,",
+			"entries: v.entries.into_iter().map(Into::into).collect(),",
+		},
+		"driver/zz_generated_roster_grpc_driver.rs": {
+			"ids: v.ids,",
+			"entries: v.entries.into_iter().map(Into::into).collect(),",
+		},
+	} {
+		content, ok := byPath[path]
+		if !ok {
+			t.Fatalf("the cell never wrote %s", path)
+		}
+
+		for _, want := range wants {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s lacks %q\n%s", path, want, content)
+			}
+		}
+
+		if strings.Contains(content, "Option<Vec") || strings.Contains(content, "Option<Entry>") {
+			t.Errorf("%s wraps a repeated field in Option\n%s", path, content)
+		}
+	}
+}
+
+func TestACellCarryingARepeatedScalarAndARepeatedMessagePassesCargoCheck(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
+	}
+
+	files, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
+	if err != nil {
+		t.Fatalf("generating the cell: %v", err)
+	}
+
+	root := t.TempDir()
+	write := writerUnder(t, root)
+
+	write("Cargo.toml", cargoCheckCrateManifest)
+	write("src/lib.rs", cargoCheckCellLib)
+	write("build.rs", cargoCheckBuildScript)
+
+	for _, f := range files {
+		if strings.HasSuffix(f.Path, ".yaml") {
+			continue
+		}
+
+		write(filepath.Join("src", "grpc", f.Path), f.Content)
+	}
+
+	write("src/grpc/controller/roster_controller.rs", rosterControllerImpl)
+
+	runCargoCheck(t, cargo, root)
+}
+
 func writerUnder(t *testing.T, root string) func(rel, content string) {
 	t.Helper()
 

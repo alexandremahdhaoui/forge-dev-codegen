@@ -152,38 +152,41 @@ func buildMessageView(m Message) messageView {
 	mv := messageView{Name: rustname.Pascal(m.Name)}
 
 	for _, f := range m.Fields {
-		ident := rustname.RustIdent(f.Name)
-
-		var core, pb string
-
-		switch f.Kind {
-		case FieldScalar:
-			t := ScalarRustType(f.Scalar)
-			core, pb = t, t
-		case FieldMessage:
-			t := "Option<" + rustname.Pascal(f.Message) + ">"
-			pbT := "Option<pb::" + rustname.Pascal(f.Message) + ">"
-			core, pb = t, pbT
-		}
-
-		toCore := "v." + ident
-		toPb := "v." + ident
-
-		if f.Kind == FieldMessage {
-			toCore = "v." + ident + ".map(Into::into)"
-			toPb = "v." + ident + ".map(Into::into)"
-		}
-
-		mv.Fields = append(mv.Fields, fieldView{
-			Ident:    ident,
-			CoreType: core,
-			PbType:   pb,
-			ToCore:   toCore,
-			ToPb:     toPb,
-		})
+		mv.Fields = append(mv.Fields, buildFieldView(f))
 	}
 
 	return mv
+}
+
+func buildFieldView(f Field) fieldView {
+	ident := rustname.RustIdent(f.Name)
+	moved := "v." + ident
+
+	if f.Kind == FieldScalar {
+		t := ScalarRustType(f.Scalar)
+		if f.Repeated {
+			t = "Vec<" + t + ">"
+		}
+
+		return fieldView{Ident: ident, CoreType: t, PbType: t, ToCore: moved, ToPb: moved}
+	}
+
+	core := rustname.Pascal(f.Message)
+	wrapper := "Option<"
+	converted := moved + ".map(Into::into)"
+
+	if f.Repeated {
+		wrapper = "Vec<"
+		converted = moved + ".into_iter().map(Into::into).collect()"
+	}
+
+	return fieldView{
+		Ident:    ident,
+		CoreType: wrapper + core + ">",
+		PbType:   wrapper + "pb::" + core + ">",
+		ToCore:   converted,
+		ToPb:     converted,
+	}
 }
 
 func Closure(spec *Spec, roots []string) ([]Message, error) {

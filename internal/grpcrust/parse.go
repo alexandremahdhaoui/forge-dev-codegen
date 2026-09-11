@@ -323,9 +323,24 @@ func parseField(p *parser, messageName string) (Field, error) {
 		return Field{}, fmt.Errorf("parsing message %q: expected a field type, got %q", messageName, t.text)
 	}
 
+	repeated := t.text == "repeated"
+
+	if repeated {
+		t, err = p.next()
+		if err != nil {
+			return Field{}, err
+		}
+
+		if t.kind != tokIdent {
+			return Field{}, fmt.Errorf("parsing message %q: expected a field type after repeated, got %q", messageName, t.text)
+		}
+
+		if t.text == "repeated" {
+			return Field{}, fmt.Errorf("parsing message %q: repeated repeated is not supported, a field is repeated once", messageName)
+		}
+	}
+
 	switch t.text {
-	case "repeated":
-		return Field{}, fmt.Errorf("parsing message %q: repeated fields are not supported", messageName)
 	case "map":
 		return Field{}, fmt.Errorf("parsing message %q: map fields are not supported", messageName)
 	case "oneof":
@@ -375,7 +390,7 @@ func parseField(p *parser, messageName string) (Field, error) {
 		return Field{}, err
 	}
 
-	field := Field{Name: fieldName, Number: number}
+	field := Field{Name: fieldName, Number: number, Repeated: repeated}
 
 	if scalarTypes[typeName] {
 		field.Kind = FieldScalar

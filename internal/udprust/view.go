@@ -178,6 +178,18 @@ type serviceView struct {
 	DefaultTickMs    int
 }
 
+func refuseRepeatedFields(spec *grpcrust.Spec) error {
+	for _, m := range spec.Messages {
+		for _, f := range m.Fields {
+			if f.Repeated {
+				return fmt.Errorf("emitting the skeleton: field %q of message %q is repeated, udp-rust does not support repeated fields", f.Name, m.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
 func prostAttribute(f grpcrust.Field) string {
 	tag := strconv.Itoa(f.Number)
 

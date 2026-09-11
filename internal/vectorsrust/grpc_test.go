@@ -460,6 +460,102 @@ func TestAGrpcCaseWithAFieldOfTheWrongTypeIsRefused(t *testing.T) {
 	}
 }
 
+const listProto = `syntax = "proto3";
+
+package songe.roster.v1;
+
+service Roster {
+  rpc List(ListRequest) returns (ListReply);
+}
+
+message ListRequest {
+  repeated string ids = 1;
+}
+
+message ListReply {
+  repeated Entry entries = 1;
+}
+
+message Entry {
+  string id = 1;
+  uint64 seen = 2;
+}
+`
+
+func generateList(cases string) ([]vectorsrust.File, error) {
+	return vectorsrust.Generate(nil, []byte(cases), vectorsrust.Options{
+		Service:   "songe-roster",
+		GrpcProto: []byte(listProto),
+		GrpcCell:  "grpc",
+	})
+}
+
+func TestAGrpcVectorWithAListRendersAVecOfScalarsAVecOfMessagesAndAnEmptyVec(t *testing.T) {
+	files, err := generateList(`{"cases": [
+  {"case": "c", "operation": "grpc_List", "input": {"ids": ["a", "b"]}, "controllerReply": {"entries": [{"id": "a", "seen": 3}, {"id": "b"}]}},
+  {"case": "d", "operation": "grpc_List", "input": {"ids": []}, "controllerReply": {}}
+]}`)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	for _, want := range []string{
+		`let expected_request = roster_grpc_messages::ListRequest { ids: vec!["a".to_string(), "b".to_string()] };`,
+		`let controller_reply = roster_grpc_messages::ListReply { entries: vec![roster_grpc_messages::Entry { id: "a".to_string(), seen: 3 }, roster_grpc_messages::Entry { id: "b".to_string(), seen: 0 }] };`,
+		`let expected_request = roster_grpc_messages::ListRequest { ids: vec![] };`,
+		`let controller_reply = roster_grpc_messages::ListReply { entries: Vec::new() };`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the emitted file lacks %q\n%s", want, content)
+		}
+	}
+}
+
+func TestAGrpcVectorWithANonArrayOrASeedForARepeatedFieldIsRefusedByName(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "a string where the proto declares a list",
+			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": "a"}, "controllerReply": {}}`,
+			want: `reading input: field "ids" is repeated and must be a JSON array`,
+		},
+		{
+			name: "an object where the proto declares a list of messages",
+			body: `{"case": "c", "operation": "grpc_List", "input": {}, "controllerReply": {"entries": {"id": "a"}}}`,
+			want: `reading controllerReply: field "entries" is repeated and must be a JSON array`,
+		},
+		{
+			name: "an item of the wrong type",
+			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": [7]}, "controllerReply": {}}`,
+			want: `reading item 0 of field "ids": field "ids" must be a JSON string`,
+		},
+		{
+			name: "a seed as the whole list",
+			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": "<seed>"}, "controllerReply": {}}`,
+			want: `field "ids" is repeated and reads <seed>, a seed fills one value and no rule places it in a list`,
+		},
+		{
+			name: "a seed inside the list",
+			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": ["<seed>"]}, "controllerReply": {}}`,
+			want: `reading item 0 of field "ids": the item reads <seed>, a seed fills one value and no rule places it in a list`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := generateList(`{"cases": [` + tc.body + `]}`)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("generating reported %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestAGrpcProtoNamingAMessageItNeverDefinesIsRefused(t *testing.T) {
 	const missing = `syntax = "proto3";
 

@@ -131,6 +131,35 @@ service Players {
 	}
 }
 
+func TestARepeatedScalarAndARepeatedMessageKeepTheirKindAndAreMarkedRepeated(t *testing.T) {
+	spec, err := grpcrust.Parse([]byte(rosterProto))
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	fields := map[string]grpcrust.Field{}
+
+	for _, m := range spec.Messages {
+		for _, f := range m.Fields {
+			fields[m.Name+"."+f.Name] = f
+		}
+	}
+
+	ids := fields["ListRequest.ids"]
+	if ids.Kind != grpcrust.FieldScalar || ids.Scalar != "string" || !ids.Repeated {
+		t.Fatalf("ids = %+v, want a repeated string scalar", ids)
+	}
+
+	entries := fields["ListReply.entries"]
+	if entries.Kind != grpcrust.FieldMessage || entries.Message != "Entry" || !entries.Repeated {
+		t.Fatalf("entries = %+v, want a repeated Entry message", entries)
+	}
+
+	if fields["Entry.id"].Repeated {
+		t.Fatalf("Entry.id = %+v, want a singular field", fields["Entry.id"])
+	}
+}
+
 func TestAProtoThatBreaksTheSupportedSubsetIsRefused(t *testing.T) {
 	tests := []struct {
 		name string
@@ -195,15 +224,26 @@ message Outer {
 			want: "nested messages are not supported",
 		},
 		{
-			name: "a repeated field is refused",
+			name: "a field repeated twice is refused by name",
 			doc: `
 syntax = "proto3";
 package demo;
 message Group {
-  repeated string names = 1;
+  repeated repeated string names = 1;
 }
 `,
-			want: "repeated fields are not supported",
+			want: "repeated repeated is not supported",
+		},
+		{
+			name: "a repeated map field is refused by name",
+			doc: `
+syntax = "proto3";
+package demo;
+message Group {
+  repeated map<string, string> tags = 1;
+}
+`,
+			want: "map fields are not supported",
 		},
 		{
 			name: "a oneof is refused",

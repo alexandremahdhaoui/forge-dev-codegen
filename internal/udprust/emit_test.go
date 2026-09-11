@@ -404,7 +404,7 @@ func TestTheDriverAnswersTheHealthProbeBeforeItDecodesAnything(t *testing.T) {
 	}
 }
 
-func TestTheParserIsTheOneGrpcRustTonicUses(t *testing.T) {
+func TestUdpRustRefusesARepeatedFieldByItsOwnNameWhileTheSharedParserAcceptsIt(t *testing.T) {
 	const repeated = `syntax = "proto3";
 
 package songe.hello.udp.v1;
@@ -418,18 +418,15 @@ message Echo {
 }
 `
 
-	_, grpcErr := grpcrust.Parse([]byte(repeated))
-	if grpcErr == nil {
-		t.Fatal("the shared parser accepted a repeated field")
+	if _, err := grpcrust.Parse([]byte(repeated)); err != nil {
+		t.Fatalf("the shared parser refused a repeated field: %v", err)
 	}
 
-	_, udpErr := udprust.Generate([]byte(repeated), udprust.Options{Service: "songe-hello"})
-	if udpErr == nil {
-		t.Fatal("udp-rust accepted a repeated field")
-	}
+	_, err := udprust.Generate([]byte(repeated), udprust.Options{Service: "songe-hello"})
 
-	if udpErr.Error() != grpcErr.Error() {
-		t.Fatalf("udp-rust reported %q, the shared parser reports %q", udpErr, grpcErr)
+	want := `field "payload" of message "Echo" is repeated, udp-rust does not support repeated fields`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("udp-rust reported %v, want %q", err, want)
 	}
 }
 

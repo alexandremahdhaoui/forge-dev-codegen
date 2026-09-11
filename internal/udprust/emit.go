@@ -90,6 +90,10 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the skeleton: the proto document declares no service")
 	}
 
+	if err := refuseRepeatedFields(spec); err != nil {
+		return nil, err
+	}
+
 	if err := checkSessionNames(spec, opts); err != nil {
 		return nil, err
 	}
