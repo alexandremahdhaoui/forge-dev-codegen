@@ -233,6 +233,19 @@ func TestAFailedSqliteSchemaSaysIndexesWhenTheStoreHoldsMoreThanOne(t *testing.T
 	)
 }
 
+func TestAFailedSqliteSchemaSeparatesThreeIndexesWithCommasAndOnlyOneAnd(t *testing.T) {
+	spec := withMood(withTag(withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n          - { by: [tag], answers: one }\n          - { by: [mood], answers: one }\n        adapters: [sqlite]\n")))
+
+	byPath, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`#[error("creating the schema of the greeting store in sqlite {path:?}, holding the unique indexes greeting_unique_by_name, greeting_unique_by_tag and greeting_unique_by_mood")]`,
+	)
+}
+
 func TestAStoreWithoutAUniqueLookupNeverBlamesAnIndexForASchemaItCannotCreate(t *testing.T) {
 	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: [sqlite]\n"))
 	if err != nil {
@@ -258,6 +271,12 @@ func withTag(spec string) string {
 	spec = strings.Replace(spec, "      required: [id, name, count]", "      required: [id, name, count, tag]", 1)
 
 	return strings.Replace(spec, "        count:\n          type: integer\n", "        count:\n          type: integer\n        tag:\n          type: string\n", 1)
+}
+
+func withMood(spec string) string {
+	spec = strings.Replace(spec, "      required: [id, name, count, tag]", "      required: [id, name, count, tag, mood]", 1)
+
+	return strings.Replace(spec, "        tag:\n          type: string\n", "        tag:\n          type: string\n        mood:\n          type: string\n", 1)
 }
 
 func TestAStoreWithNoAdapterAtAllIsRefusedRatherThanEmittingNothing(t *testing.T) {

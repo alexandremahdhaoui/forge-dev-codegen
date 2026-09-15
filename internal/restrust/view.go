@@ -484,7 +484,16 @@ func schemaError(snake string, uniques [][]string) string {
 		noun = "indexes"
 	}
 
-	return opening + ", holding the unique " + noun + " " + strings.Join(names, " and ")
+	return opening + ", holding the unique " + noun + " " + joinLastWithAnd(names)
+}
+
+func joinLastWithAnd(names []string) string {
+	last := len(names) - 1
+	if last == 0 {
+		return names[0]
+	}
+
+	return strings.Join(names[:last], ", ") + " and " + names[last]
 }
 
 func rustLiteral(value string) string {
