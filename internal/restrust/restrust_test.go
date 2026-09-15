@@ -191,15 +191,33 @@ func TestAKeyThatIsASqlReservedWordStaysQuotedInTheSchemaAndInEveryStatement(t *
 	)
 }
 
-func TestOpeningASqliteStoreWhoseTableAlreadyHoldsDuplicatesRefusesNamingTheIndexAndTheStore(t *testing.T) {
+func TestAFailedSqliteSchemaNamesTheStoreAndTheUniqueIndexItWasCreating(t *testing.T) {
 	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n        adapters: [sqlite]\n"))
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 
 	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
-		`#[error("creating the schema of the greeting store in sqlite {path:?}, the unique index greeting_unique_by_name refuses a greeting table that already holds duplicates")]`,
+		`#[error("creating the schema of the greeting store in sqlite {path:?}, holding the unique index greeting_unique_by_name")]`,
 	)
+}
+
+func TestAFailedSqliteSchemaStatesNoCauseBecauseOnlyTheSourceChainKnowsWhySqliteRefused(t *testing.T) {
+	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n        adapters: [sqlite]\n"))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content, ok := byPath["adapter/zz_generated_greeting_sqlite.rs"]
+	if !ok {
+		t.Fatal("no file at adapter/zz_generated_greeting_sqlite.rs")
+	}
+
+	for _, cause := range []string{"already holds", "duplicates", "refuses a greeting table", "readonly", "locked"} {
+		if strings.Contains(content, cause) {
+			t.Fatalf("the sqlite adapter claims a cause with %q:\n%s", cause, content)
+		}
+	}
 }
 
 func TestAStoreWithoutAUniqueLookupNeverBlamesAnIndexForASchemaItCannotCreate(t *testing.T) {

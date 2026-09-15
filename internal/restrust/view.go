@@ -479,7 +479,7 @@ func schemaError(snake string, uniques [][]string) string {
 		names = append(names, storeddl.Index(snake, properties))
 	}
 
-	return opening + ", the unique index " + strings.Join(names, " and ") + " refuses a " + snake + " table that already holds duplicates"
+	return opening + ", holding the unique index " + strings.Join(names, " and ")
 }
 
 func rustLiteral(value string) string {

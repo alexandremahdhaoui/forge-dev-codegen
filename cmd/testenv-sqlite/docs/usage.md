@@ -34,7 +34,10 @@ properties it covers.
 
 A seed inserts. It never replaces. Two rows sharing a key, or sharing
 the properties a `one` lookup reads, make sqlite refuse the script and
-the stage fails naming the index.
+the stage fails carrying what sqlite printed. A shared key prints
+`UNIQUE constraint failed: <snake>.<key>`, naming the table and the key
+column. A shared `one` lookup joint prints `UNIQUE constraint failed:
+index '<snake>_unique_by_<joint>'`, naming the index.
 
 The artifact exports `SONGE_STORE_<UPPER>_PATH` per store, lists
 `sqlite.<snake>` under files, and reports row counts in metadata. With
