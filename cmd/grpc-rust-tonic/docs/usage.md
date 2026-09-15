@@ -8,9 +8,9 @@ holds the client adapter, the server driver, and the files tonic-build
 needs to compile the proto.
 
 The parser is small and on purpose. It reads `package`, `message` with
-scalar and message fields, and `service` with unary rpcs. It refuses
-imports, options, enums, extend, streaming, nested messages, oneofs,
-maps, repeated fields and qualified type references, with a clear error
+scalar and message fields, `repeated` or not, and `service` with unary
+rpcs. It refuses imports, options, enums, extend, streaming, nested
+messages, oneofs, maps and qualified type references, with a clear error
 naming what broke.
 
 This file sits inside the cell, at `src/grpc/forge-dev.yaml`. The build

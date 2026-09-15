@@ -504,7 +504,7 @@ func TestAGrpcVectorWithAListRendersAVecOfScalarsAVecOfMessagesAndAnEmptyVec(t *
 	for _, want := range []string{
 		`let expected_request = roster_grpc_messages::ListRequest { ids: vec!["a".to_string(), "b".to_string()] };`,
 		`let controller_reply = roster_grpc_messages::ListReply { entries: vec![roster_grpc_messages::Entry { id: "a".to_string(), seen: 3 }, roster_grpc_messages::Entry { id: "b".to_string(), seen: 0 }] };`,
-		`let expected_request = roster_grpc_messages::ListRequest { ids: vec![] };`,
+		`let expected_request = roster_grpc_messages::ListRequest { ids: Vec::new() };`,
 		`let controller_reply = roster_grpc_messages::ListReply { entries: Vec::new() };`,
 	} {
 		if !strings.Contains(content, want) {
@@ -553,6 +553,31 @@ func TestAGrpcVectorWithANonArrayOrASeedForARepeatedFieldIsRefusedByName(t *test
 				t.Fatalf("generating reported %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestADatagramProtoCarryingARepeatedFieldIsRefusedByUdpRustsOwnNameBeforeAnyVectorRenders(t *testing.T) {
+	const repeated = `syntax = "proto3";
+
+package songe.hello.udp.v1;
+
+service HelloDatagram {
+  rpc Echo(Echo) returns (Echo);
+}
+
+message Echo {
+  repeated string payload = 1;
+}
+`
+
+	_, err := vectorsrust.Generate(nil, []byte(`{"cases": [{"case": "c", "operation": "udp_echo", "input": {"payload": ["a"]}, "controllerReply": {}}]}`), vectorsrust.Options{
+		Service: "songe-hello",
+		Proto:   []byte(repeated),
+	})
+
+	want := `reading the datagram proto: emitting the skeleton: field "payload" of message "Echo" is repeated, udp-rust does not support repeated fields`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("generating reported %v, want %q", err, want)
 	}
 }
 

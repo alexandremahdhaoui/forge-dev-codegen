@@ -178,7 +178,7 @@ type serviceView struct {
 	DefaultTickMs    int
 }
 
-func refuseRepeatedFields(spec *grpcrust.Spec) error {
+func RefuseRepeatedFields(spec *grpcrust.Spec) error {
 	for _, m := range spec.Messages {
 		for _, f := range m.Fields {
 			if f.Repeated {

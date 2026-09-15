@@ -168,6 +168,10 @@ func readDatagramService(proto []byte, cell, hello string, push []string) (*data
 		return nil, err
 	}
 
+	if err := udprust.RefuseRepeatedFields(spec); err != nil {
+		return nil, fmt.Errorf("reading the datagram proto: %w", err)
+	}
+
 	if len(spec.Services) != 1 {
 		return nil, fmt.Errorf("reading the datagram proto: it must declare exactly one service, got %d", len(spec.Services))
 	}
@@ -784,6 +788,10 @@ func repeatedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage) (string, e
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return "", fmt.Errorf("field %q is repeated and must be a JSON array: %w", f.Name, err)
+	}
+
+	if len(items) == 0 {
+		return "Vec::new()", nil
 	}
 
 	parts := make([]string, 0, len(items))
