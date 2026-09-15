@@ -460,7 +460,7 @@ func TestAGrpcCaseWithAFieldOfTheWrongTypeIsRefused(t *testing.T) {
 	}
 }
 
-const listProto = `syntax = "proto3";
+const rosterProto = `syntax = "proto3";
 
 package songe.roster.v1;
 
@@ -485,7 +485,7 @@ message Entry {
 func generateList(cases string) ([]vectorsrust.File, error) {
 	return vectorsrust.Generate(nil, []byte(cases), vectorsrust.Options{
 		Service:   "songe-roster",
-		GrpcProto: []byte(listProto),
+		GrpcProto: []byte(rosterProto),
 		GrpcCell:  "grpc",
 	})
 }
@@ -513,7 +513,7 @@ func TestAGrpcVectorWithAListRendersAVecOfScalarsAVecOfMessagesAndAnEmptyVec(t *
 	}
 }
 
-func TestAGrpcVectorWithANonArrayOrASeedForARepeatedFieldIsRefusedByName(t *testing.T) {
+func TestAGrpcVectorWithANonArrayANullItemOrAMisplacedSeedForARepeatedFieldIsRefusedByName(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -543,6 +543,21 @@ func TestAGrpcVectorWithANonArrayOrASeedForARepeatedFieldIsRefusedByName(t *test
 			name: "a seed inside the list",
 			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": ["<seed>"]}, "controllerReply": {}}`,
 			want: `reading item 0 of field "ids": the item reads <seed>, a seed fills one value and no rule places it in a list`,
+		},
+		{
+			name: "a null scalar item",
+			body: `{"case": "c", "operation": "grpc_List", "input": {"ids": ["a", null]}, "controllerReply": {}}`,
+			want: `reading item 1 of field "ids": the item is null, a list carries values and proto3 JSON declares no null item`,
+		},
+		{
+			name: "a null message item",
+			body: `{"case": "c", "operation": "grpc_List", "input": {}, "controllerReply": {"entries": [null, null]}}`,
+			want: `reading item 0 of field "entries": the item is null, a list carries values and proto3 JSON declares no null item`,
+		},
+		{
+			name: "a seed inside a message inside the list",
+			body: `{"case": "c", "operation": "grpc_List", "input": {}, "controllerReply": {"entries": [{"id": "a", "seen": "<seed>"}]}}`,
+			want: `reading item 0 of field "entries": field "seen" reads <seed> and a seed fills one value and no rule places it in a list`,
 		},
 	}
 

@@ -703,14 +703,27 @@ func messageLiteral(sc scope, m grpcrust.Message, raw json.RawMessage) (string, 
 }
 
 func seededMessageLiteral(sc scope, m grpcrust.Message, raw json.RawMessage, seedExpression string) (string, bool, error) {
-	return buildMessageLiteral(sc, m, raw, seedExpression, sc.reserved)
+	return buildMessageLiteral(sc, m, raw, seedSource{expression: seedExpression, refusal: noSeedInCase}, sc.reserved)
+}
+
+type seedSource struct {
+	expression string
+	refusal    string
+}
+
+func (s seedSource) literal(field string) (string, error) {
+	if s.expression != "" {
+		return s.expression, nil
+	}
+
+	return "", fmt.Errorf("field %q reads %s %s", field, seedPlaceholder, s.refusal)
 }
 
 func buildMessageLiteral(
 	sc scope,
 	m grpcrust.Message,
 	raw json.RawMessage,
-	seedExpression string,
+	seed seedSource,
 	reserved []string,
 ) (string, bool, error) {
 	if string(raw) == "null" {
@@ -730,7 +743,7 @@ func buildMessageLiteral(
 	drawn := false
 
 	for _, f := range m.Fields {
-		literal, fieldDrawn, err := fieldLiteral(sc, f, fields[f.Name], seedExpression)
+		literal, fieldDrawn, err := fieldLiteral(sc, f, fields[f.Name], seed)
 		if err != nil {
 			return "", false, err
 		}
@@ -749,7 +762,7 @@ func buildMessageLiteral(
 	return name + " { " + strings.Join(parts, ", ") + " }", drawn, nil
 }
 
-func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {
+func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seed seedSource) (string, bool, error) {
 	if f.Repeated {
 		literal, err := repeatedLiteral(sc, f, raw)
 
@@ -757,15 +770,13 @@ func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpressio
 	}
 
 	if isSeedPlaceholder(raw) {
-		if seedExpression == "" {
-			return "", false, fmt.Errorf("field %q reads %s and the case carries no seed", f.Name, seedPlaceholder)
-		}
+		literal, err := seed.literal(f.Name)
 
-		return seedExpression, true, nil
+		return literal, err == nil, err
 	}
 
 	if f.Kind == grpcrust.FieldMessage {
-		return nestedLiteral(sc, f, raw, seedExpression)
+		return nestedLiteral(sc, f, raw, seed)
 	}
 
 	literal, err := scalarLiteral(f, raw)
@@ -778,7 +789,7 @@ func fieldLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpressio
 
 func repeatedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage) (string, error) {
 	if isSeedPlaceholder(raw) {
-		return "", fmt.Errorf("field %q is repeated and reads %s, a seed fills one value and no rule places it in a list", f.Name, seedPlaceholder)
+		return "", fmt.Errorf("field %q is repeated and reads %s, %s", f.Name, seedPlaceholder, seedNotInList)
 	}
 
 	if len(raw) == 0 || string(raw) == "null" {
@@ -810,7 +821,11 @@ func repeatedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage) (string, e
 
 func itemLiteral(sc scope, f grpcrust.Field, item json.RawMessage) (string, error) {
 	if isSeedPlaceholder(item) {
-		return "", fmt.Errorf("the item reads %s, a seed fills one value and no rule places it in a list", seedPlaceholder)
+		return "", fmt.Errorf("the item reads %s, %s", seedPlaceholder, seedNotInList)
+	}
+
+	if string(item) == "null" {
+		return "", fmt.Errorf("the item is null, a list carries values and proto3 JSON declares no null item")
 	}
 
 	if f.Kind != grpcrust.FieldMessage {
@@ -822,12 +837,12 @@ func itemLiteral(sc scope, f grpcrust.Field, item json.RawMessage) (string, erro
 		return "", fmt.Errorf("field %q holds message %q and the proto declares no such message", f.Name, f.Message)
 	}
 
-	literal, _, err := buildMessageLiteral(sc, nested, item, "", nil)
+	literal, _, err := buildMessageLiteral(sc, nested, item, seedSource{refusal: "and " + seedNotInList}, nil)
 
 	return literal, err
 }
 
-func nestedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpression string) (string, bool, error) {
+func nestedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seed seedSource) (string, bool, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "None", false, nil
 	}
@@ -837,7 +852,7 @@ func nestedLiteral(sc scope, f grpcrust.Field, raw json.RawMessage, seedExpressi
 		return "", false, fmt.Errorf("field %q holds message %q and the proto declares no such message", f.Name, f.Message)
 	}
 
-	literal, drawn, err := buildMessageLiteral(sc, nested, raw, seedExpression, nil)
+	literal, drawn, err := buildMessageLiteral(sc, nested, raw, seed, nil)
 	if err != nil {
 		return "", false, fmt.Errorf("reading field %q: %w", f.Name, err)
 	}
@@ -882,7 +897,11 @@ func checkKnownKeys(m grpcrust.Message, fields map[string]json.RawMessage, reser
 	)
 }
 
-const seedPlaceholder = "<seed>"
+const (
+	seedPlaceholder = "<seed>"
+	seedNotInList   = "a seed fills one value and no rule places it in a list"
+	noSeedInCase    = "and the case carries no seed"
+)
 
 func isSeedPlaceholder(raw json.RawMessage) bool {
 	if len(raw) == 0 {

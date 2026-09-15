@@ -400,6 +400,45 @@ taxonomy does not declare is refused with the list. A grpc case carries no
 `expectedStatus` and no `expectedBody`, both are refused. The test runs on a
 multi thread runtime because the generated client blocks inside tokio.
 
+## Lists
+
+A `repeated` field renders `vec![...]`, one item per array entry, scalars
+and messages alike. A missing key, `null` and `[]` all render
+`Vec::new()`, so an absent list and an empty one have one spelling.
+
+```json
+{
+  "case": "grpc_list_answers_two_rows",
+  "operation": "grpc_List",
+  "input": { "ids": ["a", "b"] },
+  "controllerReply": { "entries": [{ "id": "a", "seen": 3 }, { "id": "b" }] }
+}
+```
+
+That renders `ids: vec!["a".to_string(), "b".to_string()]` and
+`entries: vec![Entry { id: "a".to_string(), seen: 3 }, Entry { id:
+"b".to_string(), seen: 0 }]`. A field a message leaves out still gets its
+zero, which is what proto3 puts on the wire.
+
+Five shapes are refused by name.
+
+| The case writes | The refusal |
+|---|---|
+| a scalar or an object where the proto declares a list | `field "ids" is repeated and must be a JSON array` |
+| an item of the wrong type | `reading item 0 of field "ids": field "ids" must be a JSON string` |
+| `null` as an item | `reading item 1 of field "ids": the item is null, a list carries values and proto3 JSON declares no null item` |
+| `<seed>` as the whole list | `field "ids" is repeated and reads <seed>, a seed fills one value and no rule places it in a list` |
+| `<seed>` inside the list, at any depth | `reading item 0 of field "ids": the item reads <seed>, a seed fills one value and no rule places it in a list` |
+
+A `<seed>` inside a message inside a list names the list rule too,
+`field "seen" reads <seed> and a seed fills one value and no rule places
+it in a list`, never the missing seed rule, because the case may well
+carry a seed and the list is what forbids it.
+
+Lists are a gRPC shape only. udp-rust refuses a repeated field on the
+datagram wire before any vector renders, so a datagram case never reaches
+these rules.
+
 ## How the mock is built
 
 `hexagonal-rust` marks the controller trait `#[cfg_attr(test, mockall::automock)]`.

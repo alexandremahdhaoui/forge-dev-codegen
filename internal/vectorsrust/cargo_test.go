@@ -346,28 +346,6 @@ func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t 
 	}
 }
 
-const cargoRosterProto = `syntax = "proto3";
-
-package songe.roster.v1;
-
-service Roster {
-  rpc List(ListRequest) returns (ListReply);
-}
-
-message ListRequest {
-  repeated string ids = 1;
-}
-
-message ListReply {
-  repeated Entry entries = 1;
-}
-
-message Entry {
-  string id = 1;
-  uint64 seen = 2;
-}
-`
-
 const cargoRosterManifest = `[package]
 name = "songe-roster"
 version = "0.1.0"
@@ -430,14 +408,14 @@ func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGenerat
 		t.Skip("cargo is not on PATH")
 	}
 
-	cellFiles, err := grpcrust.Generate([]byte(cargoRosterProto), grpcrust.Options{Service: "songe-roster"})
+	cellFiles, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
 	if err != nil {
 		t.Fatalf("generating the grpc cell: %v", err)
 	}
 
 	vectorFiles, err := vectorsrust.Generate(nil, []byte(cargoRosterVectors), vectorsrust.Options{
 		Service:   "songe-roster",
-		GrpcProto: []byte(cargoRosterProto),
+		GrpcProto: []byte(rosterProto),
 		GrpcCell:  "grpc",
 	})
 	if err != nil {

@@ -15,8 +15,15 @@ uses. One rpc is one datagram kind. An rpc whose reply type is named
 The parser is the one grpc-rust-tonic uses. It reads `package`,
 `message` with scalar and message fields, and `service` with unary
 rpcs. It refuses imports, options, enums, extend, streaming, nested
-messages, oneofs, maps, repeated fields and qualified type references,
-with a clear error naming what broke.
+messages, oneofs, maps and qualified type references, with a clear
+error naming what broke.
+
+The shared parser accepts a repeated field and udp-rust refuses it by
+its own rule, `RefuseRepeatedFields`, which runs before any file is
+emitted. The message names the field and the message it sits in, `field
+"payload" of message "Echo" is repeated, udp-rust does not support
+repeated fields`. The 508 byte budget and the fixed slots make a list on
+the datagram wire a shape nobody has designed.
 
 This file sits inside the cell, at `src/udp/forge-dev.yaml`. The build
 step that runs it points `src` at the cell.

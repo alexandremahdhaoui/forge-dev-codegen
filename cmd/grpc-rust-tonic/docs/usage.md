@@ -13,6 +13,15 @@ rpcs. It refuses imports, options, enums, extend, streaming, nested
 messages, oneofs, maps and qualified type references, with a clear error
 naming what broke.
 
+It also refuses a message that reaches itself through message fields,
+`message cycle A -> B -> A, a message cannot reach itself through
+message fields`, and it refuses it whether or not the field is repeated.
+A repeated self reference would be a `Vec<Node>`, which is sized and
+would compile, so this refusal is a choice rather than a limit. No spec
+in the workspace declares that shape, and widening the generator with no
+consumer builds for a caller who does not exist. The day a spec declares
+one, lift the refusal for the repeated case alone.
+
 This file sits inside the cell, at `src/grpc/forge-dev.yaml`. The build
 step that runs it points `src` at the cell.
 
