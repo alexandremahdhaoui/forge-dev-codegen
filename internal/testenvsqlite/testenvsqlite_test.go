@@ -121,15 +121,6 @@ func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
 	}
 }
 
-func TestTheTableMatchesTheSchemaTheHexagonalRustSqliteAdapterCreates(t *testing.T) {
-	want := "CREATE TABLE IF NOT EXISTS greeting (id TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
-		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
-
-	if got := storeddl.Table("greeting", "id", nil); got != want {
-		t.Errorf("table:\n got %q\nwant %q", got, want)
-	}
-}
-
 func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testing.T) {
 	doc := "components:\n  schemas:\n    Profile:\n      type: object\n      x-store:\n        key: subject\n        lookups:\n          - { by: [alias, tag], answers: one }\n          - { by: [alias], answers: page }\n        adapters: [sqlite]\n"
 
@@ -138,14 +129,14 @@ func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testin
 		t.Fatal(err)
 	}
 
-	want := "CREATE UNIQUE INDEX IF NOT EXISTS profile_unique_by_alias_and_tag ON profile (json_extract(body, '$.alias'), json_extract(body, '$.tag'));"
+	want := `CREATE UNIQUE INDEX IF NOT EXISTS "profile_unique_by_alias_and_tag" ON "profile" (json_extract(body, '$.alias'), json_extract(body, '$.tag'));`
 
 	got := storeddl.Table(stores[0].Snake, stores[0].Key, stores[0].Uniques)
 	if !strings.Contains(got, want) {
 		t.Errorf("table:\n%s", got)
 	}
 
-	if strings.Contains(got, "profile_unique_by_alias ON") {
+	if strings.Contains(got, `profile_unique_by_alias" ON`) {
 		t.Errorf("a lookup that answers page must not become a unique index:\n%s", got)
 	}
 }
@@ -162,7 +153,7 @@ func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
 		t.Fatalf("key: %q", stores[0].Key)
 	}
 
-	if !strings.Contains(storeddl.Table(stores[0].Snake, stores[0].Key, nil), "subject TEXT PRIMARY KEY") {
+	if !strings.Contains(storeddl.Table(stores[0].Snake, stores[0].Key, nil), `"subject" TEXT PRIMARY KEY`) {
 		t.Errorf("table: %s", storeddl.Table(stores[0].Snake, stores[0].Key, nil))
 	}
 }
@@ -271,7 +262,7 @@ func TestSeedsRefusesABrokenVectorsFileAndANonObjectReply(t *testing.T) {
 func TestScriptQuotesEveryValueAndWritesOneAuditRowPerSeed(t *testing.T) {
 	script := Script(Store{Snake: "greeting", Key: "id"}, []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
 
-	if !strings.Contains(script, "INSERT OR REPLACE INTO greeting (id, body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
+	if !strings.Contains(script, "INSERT INTO \"greeting\" (\"id\", body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
 		t.Errorf("script:\n%s", script)
 	}
 
@@ -339,6 +330,42 @@ func TestTheDetectedWriterCreatesAFileThatHoldsTheSeededRows(t *testing.T) {
 
 	if !strings.Contains(string(content), `{"id":"1"}`) {
 		t.Error("the seeded body must sit in the file")
+	}
+}
+
+func TestASeedHoldingTwoRowsThatShareOneUniqueLookupIsRefusedByTheIndexThatNamesThem(t *testing.T) {
+	writer, err := DetectWriter()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	store := Store{Snake: "profile", Key: "subject", Uniques: [][]string{{"alias", "tag"}}}
+	rows := []Row{
+		{ID: "account-one", Body: `{"subject":"account-one","alias":"songe","tag":"blue"}`},
+		{ID: "account-two", Body: `{"subject":"account-two","alias":"songe","tag":"blue"}`},
+	}
+
+	err = writer.Write(context.Background(), filepath.Join(t.TempDir(), "profile.db"), Script(store, rows))
+	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed: index 'profile_unique_by_alias_and_tag'") {
+		t.Fatalf("a duplicate seed was not refused by the unique index: %v", err)
+	}
+}
+
+func TestASeedHoldingOneKeyTwiceIsRefusedRatherThanReplacingTheEarlierRow(t *testing.T) {
+	writer, err := DetectWriter()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	store := Store{Snake: "greeting", Key: "id"}
+	rows := []Row{
+		{ID: "one", Body: `{"id":"one","name":"first"}`},
+		{ID: "one", Body: `{"id":"one","name":"second"}`},
+	}
+
+	err = writer.Write(context.Background(), filepath.Join(t.TempDir(), "greeting.db"), Script(store, rows))
+	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed: greeting.id") {
+		t.Fatalf("a repeated key was not refused: %v", err)
 	}
 }
 

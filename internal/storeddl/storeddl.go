@@ -32,19 +32,31 @@ func Joint(properties []string) string {
 	return strings.Join(snakes, "_and_")
 }
 
+func Identifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func Literal(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func Index(snake string, properties []string) string {
+	return snake + "_unique_by_" + Joint(properties)
+}
+
 func Table(snake, key string, uniques [][]string) string {
 	var b strings.Builder
 
-	b.WriteString("CREATE TABLE IF NOT EXISTS " + snake + " (" + key + " TEXT PRIMARY KEY, body TEXT NOT NULL);\n")
+	b.WriteString("CREATE TABLE IF NOT EXISTS " + Identifier(snake) + " (" + Identifier(key) + " TEXT PRIMARY KEY, body TEXT NOT NULL);\n")
 
 	for _, properties := range uniques {
 		extracts := make([]string, 0, len(properties))
 
 		for _, property := range properties {
-			extracts = append(extracts, "json_extract(body, '$."+property+"')")
+			extracts = append(extracts, "json_extract(body, "+Literal("$."+property)+")")
 		}
 
-		b.WriteString("CREATE UNIQUE INDEX IF NOT EXISTS " + snake + "_unique_by_" + Joint(properties) + " ON " + snake + " (" + strings.Join(extracts, ", ") + ");\n")
+		b.WriteString("CREATE UNIQUE INDEX IF NOT EXISTS " + Identifier(Index(snake, properties)) + " ON " + Identifier(snake) + " (" + strings.Join(extracts, ", ") + ");\n")
 	}
 
 	b.WriteString(auditTable)

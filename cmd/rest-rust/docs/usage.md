@@ -300,7 +300,9 @@ neither adapter can be asked for a column it cannot read and neither
 answers a default when asked.
 
 A lookup declares `by` as a list of properties, one entry or many. A
-bare string is refused by name. One field gives `get_by_secret`. Two
+bare string is refused by name. A null `by` is refused as a lookup
+naming no by, the same words an absent `by` gets. A null item inside the
+list is refused naming its position. One field gives `get_by_secret`. Two
 give `get_by_alias_and_tag`, one argument per field, in the order the
 list spells them. Both adapters take the same list of column and value
 pairs, so a one field lookup is a one element list and nothing branches
@@ -320,6 +322,15 @@ unique index over the same properties, written beside the table.
 Memory refuses with `Duplicate`, naming the lookup, the values and the
 key already holding them. A row that overwrites itself under its own
 key is not a duplicate.
+
+`new` creates that index when it opens the file. A file that already
+holds duplicates makes sqlite refuse, and `Schema` names the index and
+the store so an operator knows what to repair. No repair runs on its
+own.
+
+The table name and the key column are quoted identifiers in the schema
+and in every statement the adapter runs, so a key named after a SQL
+keyword still reads and writes.
 
 ## What the crate needs
 

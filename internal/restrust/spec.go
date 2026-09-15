@@ -558,7 +558,7 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 }
 
 func parseLookupBy(name string, raw json.RawMessage) ([]string, error) {
-	if len(raw) == 0 {
+	if len(raw) == 0 || string(raw) == "null" {
 		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup naming no by, by is a list of the properties the lookup reads", name)
 	}
 
@@ -567,13 +567,23 @@ func parseLookupBy(name string, raw json.RawMessage) ([]string, error) {
 		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q as a string, by is a list, write [%s]", name, single, single)
 	}
 
-	var by []string
-	if err := json.Unmarshal(raw, &by); err != nil {
+	var items []*string
+	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup whose by is not a list of properties: %w", name, err)
 	}
 
-	if len(by) == 0 {
+	if len(items) == 0 {
 		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup whose by list is empty, by names at least one property", name)
+	}
+
+	by := make([]string, 0, len(items))
+
+	for position, item := range items {
+		if item == nil {
+			return nil, fmt.Errorf("reading schema %q: reading item %d of the x-store lookup by list: the item is null, a list carries values and by names properties", name, position)
+		}
+
+		by = append(by, *item)
 	}
 
 	return by, nil

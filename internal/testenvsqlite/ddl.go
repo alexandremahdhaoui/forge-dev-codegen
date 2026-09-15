@@ -27,13 +27,9 @@ func Script(store Store, rows []Row) string {
 	b.WriteString("\n")
 
 	for _, row := range rows {
-		b.WriteString("INSERT OR REPLACE INTO " + store.Snake + " (" + store.Key + ", body) VALUES (" + quote(row.ID) + ", " + quote(row.Body) + ");\n")
-		b.WriteString("INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), " + quote(store.Snake) + ", " + quote(row.ID) + ", 'seed', NULL, " + quote(row.Body) + ");\n")
+		b.WriteString("INSERT INTO " + storeddl.Identifier(store.Snake) + " (" + storeddl.Identifier(store.Key) + ", body) VALUES (" + storeddl.Literal(row.ID) + ", " + storeddl.Literal(row.Body) + ");\n")
+		b.WriteString("INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), " + storeddl.Literal(store.Snake) + ", " + storeddl.Literal(row.ID) + ", 'seed', NULL, " + storeddl.Literal(row.Body) + ");\n")
 	}
 
 	return b.String()
-}
-
-func quote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

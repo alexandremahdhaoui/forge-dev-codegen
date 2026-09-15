@@ -149,6 +149,70 @@ func TestALookupWhoseByListIsEmptyIsRefusedBecauseItReadsNothing(t *testing.T) {
 	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [], answers: one }\n        adapters: [sqlite]\n"), "x-store declares a lookup whose by list is empty, by names at least one property")
 }
 
+func TestALookupWhoseByIsNullIsRefusedWithTheWordsForAByThatIsAbsent(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: null, answers: one }\n        adapters: [sqlite]\n"), `reading schema "Greeting": x-store declares a lookup naming no by, by is a list of the properties the lookup reads`)
+}
+
+func TestALookupWhoseByListCarriesANullItemIsRefusedNamingThatItem(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [null], answers: one }\n        adapters: [sqlite]\n"), `reading schema "Greeting": reading item 0 of the x-store lookup by list: the item is null, a list carries values and by names properties`)
+}
+
+func TestTheSqliteAdapterSpellsTheTableAndTheKeyAsQuotedIdentifiersInEverySqlItWrites(t *testing.T) {
+	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n        adapters: [sqlite]\n"))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`const SCHEMA: &str = r#"CREATE TABLE IF NOT EXISTS "greeting" ("id" TEXT PRIMARY KEY, body TEXT NOT NULL);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS "greeting_unique_by_name" ON "greeting" (json_extract(body, '$.name'));`,
+		`"SELECT body FROM \"greeting\" WHERE \"id\" = ?1"`,
+		`"INSERT INTO \"greeting\" (\"id\", body) VALUES (?1, ?2) ON CONFLICT(\"id\") DO UPDATE SET body = excluded.body"`,
+		`"SELECT body FROM \"greeting\" WHERE {}\"id\" > ?{} ORDER BY \"id\" LIMIT ?{}"`,
+	)
+}
+
+func TestAKeyThatIsASqlReservedWordStaysQuotedInTheSchemaAndInEveryStatement(t *testing.T) {
+	spec := strings.NewReplacer(
+		"        key: id\n", "        key: order\n",
+		"      required: [id, name, count]", "      required: [order, name, count]",
+		"        id:\n          type: string\n        name:", "        order:\n          type: string\n        name:",
+	).Replace(helloSpec)
+
+	byPath, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`CREATE TABLE IF NOT EXISTS "greeting" ("order" TEXT PRIMARY KEY, body TEXT NOT NULL);`,
+		`"SELECT body FROM \"greeting\" WHERE \"order\" = ?1"`,
+		`"INSERT INTO \"greeting\" (\"order\", body) VALUES (?1, ?2) ON CONFLICT(\"order\") DO UPDATE SET body = excluded.body"`,
+	)
+}
+
+func TestOpeningASqliteStoreWhoseTableAlreadyHoldsDuplicatesRefusesNamingTheIndexAndTheStore(t *testing.T) {
+	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n        adapters: [sqlite]\n"))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`#[error("creating the schema of the greeting store in sqlite {path:?}, the unique index greeting_unique_by_name refuses a greeting table that already holds duplicates")]`,
+	)
+}
+
+func TestAStoreWithoutAUniqueLookupNeverBlamesAnIndexForASchemaItCannotCreate(t *testing.T) {
+	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: [sqlite]\n"))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`#[error("creating the schema of the greeting store in sqlite {path:?}")]`,
+	)
+}
+
 func TestALookupNamingOnePropertyTwiceInOneByListIsRefusedNamingIt(t *testing.T) {
 	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name, name], answers: one }\n        adapters: [sqlite]\n"), `x-store declares a lookup naming "name" twice in one by list`)
 }

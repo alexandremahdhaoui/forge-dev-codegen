@@ -815,7 +815,7 @@ use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
 use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
 {{- end }}
 
-const SCHEMA: &str = "{{ $s.Schema }}";
+const SCHEMA: &str = r#"{{ $s.Schema }}"#;
 
 pub struct {{ $s.ConfigStruct }} {
     pub path: String,
@@ -829,7 +829,7 @@ pub enum {{ $s.Name }}SqliteError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error("creating the schema in sqlite {path:?}")]
+    #[error("{{ $s.SchemaError }}")]
     Schema {
         path: String,
         #[source]
@@ -900,7 +900,7 @@ impl {{ $s.Struct }} {
         }
 
         let statement = format!(
-            "SELECT body FROM {{ $s.Snake }} WHERE {}{{ $s.Key }} > ?{} ORDER BY {{ $s.Key }} LIMIT ?{}",
+            "SELECT body FROM {{ $s.TableSQL }} WHERE {}{{ $s.KeySQL }} > ?{} ORDER BY {{ $s.KeySQL }} LIMIT ?{}",
             clauses,
             pairs.len() + 1,
             pairs.len() + 2
@@ -946,11 +946,11 @@ impl {{ $s.Struct }} {
         let mut connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
         let tx = connection.transaction().map_err(sql)?;
         let before: Option<String> = tx
-            .query_row("SELECT body FROM {{ $s.Snake }} WHERE {{ $s.Key }} = ?1", [&id], |row| row.get(0))
+            .query_row("SELECT body FROM {{ $s.TableSQL }} WHERE {{ $s.KeySQL }} = ?1", [&id], |row| row.get(0))
             .optional()
             .map_err(sql)?;
         tx.execute(
-            "INSERT INTO {{ $s.Snake }} ({{ $s.Key }}, body) VALUES (?1, ?2) ON CONFLICT({{ $s.Key }}) DO UPDATE SET body = excluded.body",
+            "INSERT INTO {{ $s.TableSQL }} ({{ $s.KeySQL }}, body) VALUES (?1, ?2) ON CONFLICT({{ $s.KeySQL }}) DO UPDATE SET body = excluded.body",
             (&id, &after),
         )
         .map_err(sql)?;
@@ -973,7 +973,7 @@ impl {{ $s.Struct }} {
     fn get_row(&self, id: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
         let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
         let body: Option<String> = connection
-            .query_row("SELECT body FROM {{ $s.Snake }} WHERE {{ $s.Key }} = ?1", [id], |row| row.get(0))
+            .query_row("SELECT body FROM {{ $s.TableSQL }} WHERE {{ $s.KeySQL }} = ?1", [id], |row| row.get(0))
             .optional()
             .map_err(|source| {{ $s.Name }}SqliteError::Sql {
                 id: id.to_string(),

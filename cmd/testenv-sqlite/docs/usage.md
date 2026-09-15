@@ -19,14 +19,22 @@ test:
 ```
 
 For each store name `Name` the engine finds `components.schemas.Name`
-with `x-store: true` and writes `<TmpDir>/<snake>.db` holding two
-tables: `<snake>(id TEXT PRIMARY KEY, body TEXT NOT NULL)` and
-`audit(at, table_name, key, op, before, after)`.
+with an `x-store` object and writes `<TmpDir>/<snake>.db` holding two
+tables: `"<snake>"("<key>" TEXT PRIMARY KEY, body TEXT NOT NULL)` and
+`audit(at, table_name, key, op, before, after)`. `key` is the property
+`x-store.key` names. Every identifier is quoted, so a key named after a
+SQL keyword still writes valid DDL. Every lookup that answers `one`
+becomes `"<snake>_unique_by_<joint>"`, a unique index over the
+properties it reads.
 
 `seed` names a vectors file. Every case whose `operation` starts with
 `create` and carries a `controllerReply` becomes one row keyed by the
-reply's `id`. The reply goes to the store whose required properties it
-covers.
+reply's key property. The reply goes to the store whose required
+properties it covers.
+
+A seed inserts. It never replaces. Two rows sharing a key, or sharing
+the properties a `one` lookup reads, make sqlite refuse the script and
+the stage fails naming the index.
 
 The artifact exports `SONGE_STORE_<UPPER>_PATH` per store, lists
 `sqlite.<snake>` under files, and reports row counts in metadata. With

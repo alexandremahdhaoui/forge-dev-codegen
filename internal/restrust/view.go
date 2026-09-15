@@ -102,9 +102,12 @@ type storeView struct {
 	PortSnake          string
 	Key                string
 	KeyIdent           string
+	TableSQL           string
+	KeySQL             string
 	Lookups            []lookupView
 	Columns            []columnView
 	Schema             string
+	SchemaError        string
 	Struct             string
 	ConfigStruct       string
 	AdapterName        string
@@ -297,6 +300,8 @@ func buildView(spec *Spec, opts Options) view {
 			PortSnake:          s.Snake + "_store",
 			Key:                s.Store.Key,
 			KeyIdent:           s.Store.KeyIdent,
+			TableSQL:           rustLiteral(storeddl.Identifier(s.Snake)),
+			KeySQL:             rustLiteral(storeddl.Identifier(s.Store.Key)),
 			Struct:             s.Name + "SqliteStore",
 			ConfigStruct:       s.Name + "SqliteStoreConfig",
 			AdapterName:        adapterName(spec.Stores, s, "sqlite"),
@@ -349,6 +354,7 @@ func buildView(spec *Spec, opts Options) view {
 		}
 
 		sv.Schema = storeddl.Table(s.Snake, s.Store.Key, uniques)
+		sv.SchemaError = schemaError(s.Snake, uniques)
 
 		if published, feeds := publishedBy[s.Name]; feeds {
 			sv.Publishes = &published
@@ -458,6 +464,26 @@ func buildView(spec *Spec, opts Options) view {
 	v.WireImports = sortedKeys(wire)
 
 	return v
+}
+
+func schemaError(snake string, uniques [][]string) string {
+	opening := "creating the schema of the " + snake + " store in sqlite {path:?}"
+
+	if len(uniques) == 0 {
+		return opening
+	}
+
+	names := make([]string, 0, len(uniques))
+
+	for _, properties := range uniques {
+		names = append(names, storeddl.Index(snake, properties))
+	}
+
+	return opening + ", the unique index " + strings.Join(names, " and ") + " refuses a " + snake + " table that already holds duplicates"
+}
+
+func rustLiteral(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`)
 }
 
 func adapterName(stores []TypeDef, store TypeDef, kind string) string {
