@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/storeddl"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
@@ -69,11 +70,20 @@ type typeView struct {
 }
 
 type lookupView struct {
-	By      string
-	Ident   string
-	Method  string
-	Variant string
-	Page    bool
+	ByJoined     string
+	Method       string
+	Page         bool
+	Args         string
+	Pairs        string
+	ValueExpr    string
+	MemoryMatch  string
+	MemoryValues string
+}
+
+type columnView struct {
+	Variant  string
+	Property string
+	Ident    string
 }
 
 type publishView struct {
@@ -93,6 +103,8 @@ type storeView struct {
 	Key                string
 	KeyIdent           string
 	Lookups            []lookupView
+	Columns            []columnView
+	Schema             string
 	Struct             string
 	ConfigStruct       string
 	AdapterName        string
@@ -300,17 +312,43 @@ func buildView(spec *Spec, opts Options) view {
 			sv.HasMemory = sv.HasMemory || kind == StoreAdapterMemory
 		}
 
+		held := map[string]bool{}
+		uniques := [][]string{}
+
 		for _, l := range s.Store.Lookups {
 			sv.HasOneLookup = sv.HasOneLookup || l.Answers == LookupOne
 
+			if l.Answers == LookupOne {
+				uniques = append(uniques, l.By)
+			}
+
+			for i, field := range l.By {
+				if held[field] {
+					continue
+				}
+
+				held[field] = true
+
+				sv.Columns = append(sv.Columns, columnView{
+					Variant:  rustname.Pascal(field),
+					Property: field,
+					Ident:    l.Idents[i],
+				})
+			}
+
 			sv.Lookups = append(sv.Lookups, lookupView{
-				By:      l.By,
-				Ident:   l.Ident,
-				Method:  lookupMethod(l),
-				Variant: rustname.Pascal(l.By),
-				Page:    l.Answers == LookupPage,
+				ByJoined:     strings.Join(l.By, ", "),
+				Method:       lookupMethod(l),
+				Page:         l.Answers == LookupPage,
+				Args:         lookupArgs(l),
+				Pairs:        lookupPairs(s.Name, l),
+				ValueExpr:    lookupValueExpr(l),
+				MemoryMatch:  lookupMemoryMatch(l),
+				MemoryValues: lookupMemoryValues(l),
 			})
 		}
+
+		sv.Schema = storeddl.Table(s.Snake, s.Store.Key, uniques)
 
 		if published, feeds := publishedBy[s.Name]; feeds {
 			sv.Publishes = &published
@@ -436,10 +474,54 @@ func feedAdapterName(event Event, kind string) string {
 
 func lookupMethod(l Lookup) string {
 	if l.Answers == LookupPage {
-		return "page_by_" + rustname.Snake(l.By)
+		return "page_by_" + storeddl.Joint(l.By)
 	}
 
-	return "get_by_" + rustname.Snake(l.By)
+	return "get_by_" + storeddl.Joint(l.By)
+}
+
+func lookupArgs(l Lookup) string {
+	args := make([]string, 0, len(l.Idents))
+
+	for _, ident := range l.Idents {
+		args = append(args, ident+": &str")
+	}
+
+	return strings.Join(args, ", ")
+}
+
+func lookupPairs(store string, l Lookup) string {
+	pairs := make([]string, 0, len(l.By))
+
+	for i, field := range l.By {
+		pairs = append(pairs, "("+store+"Column::"+rustname.Pascal(field)+", "+l.Idents[i]+")")
+	}
+
+	return "&[" + strings.Join(pairs, ", ") + "]"
+}
+
+func lookupValueExpr(l Lookup) string {
+	return "[" + strings.Join(l.Idents, ", ") + `].join(", ")`
+}
+
+func lookupMemoryMatch(l Lookup) string {
+	tests := make([]string, 0, len(l.Idents))
+
+	for _, ident := range l.Idents {
+		tests = append(tests, "row."+ident+" == v."+ident)
+	}
+
+	return strings.Join(tests, " && ")
+}
+
+func lookupMemoryValues(l Lookup) string {
+	reads := make([]string, 0, len(l.Idents))
+
+	for _, ident := range l.Idents {
+		reads = append(reads, "v."+ident+".as_str()")
+	}
+
+	return "[" + strings.Join(reads, ", ") + `].join(", ")`
 }
 
 func publishAssigns(event TypeDef) []string {

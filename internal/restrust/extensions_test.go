@@ -109,7 +109,7 @@ components:
       x-store:
         key: id
         lookups:
-          - { by: name, answers: page }
+          - { by: [name], answers: page }
         adapters: [sqlite, memory]
       required: [id, name, count]
       properties:

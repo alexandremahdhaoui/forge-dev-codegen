@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -174,8 +175,8 @@ type Store struct {
 }
 
 type Lookup struct {
-	By      string
-	Ident   string
+	By      []string
+	Idents  []string
 	Answers string
 }
 
@@ -465,9 +466,9 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 
 	var declared struct {
 		Key      string `json:"key"`
-		Lookups  *[]struct {
-			By      string `json:"by"`
-			Answers string `json:"answers"`
+		Lookups *[]struct {
+			By      json.RawMessage `json:"by"`
+			Answers string          `json:"answers"`
 		} `json:"lookups"`
 		Adapters *[]string `json:"adapters"`
 	}
@@ -497,27 +498,46 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 	seen := map[string]bool{}
 
 	for _, entry := range *declared.Lookups {
-		if err := checkStoreField(name, "lookup", entry.By, fields); err != nil {
+		by, err := parseLookupBy(name, entry.By)
+		if err != nil {
 			return nil, err
 		}
 
-		if entry.By == declared.Key {
-			return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q, which is the key and is always reachable", name, entry.By)
+		held := map[string]bool{}
+		idents := make([]string, 0, len(by))
+
+		for _, field := range by {
+			if err := checkStoreField(name, "lookup", field, fields); err != nil {
+				return nil, err
+			}
+
+			if field == declared.Key {
+				return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q, which is the key and is always reachable", name, field)
+			}
+
+			if held[field] {
+				return nil, fmt.Errorf("reading schema %q: x-store declares a lookup naming %q twice in one by list, a lookup reads each property once", name, field)
+			}
+
+			held[field] = true
+
+			idents = append(idents, rustname.RustIdent(field))
 		}
 
-		if seen[entry.By] {
-			return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q twice", name, entry.By)
+		set := fieldSet(by)
+		if seen[set] {
+			return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %s twice", name, quoted(by))
 		}
 
-		seen[entry.By] = true
+		seen[set] = true
 
 		if entry.Answers != LookupOne && entry.Answers != LookupPage {
-			return nil, fmt.Errorf("reading schema %q: the lookup by %q answers %q, a lookup answers one of %s", name, entry.By, entry.Answers, list(LookupWords()))
+			return nil, fmt.Errorf("reading schema %q: the lookup by %s answers %q, a lookup answers one of %s", name, quoted(by), entry.Answers, list(LookupWords()))
 		}
 
 		store.Lookups = append(store.Lookups, Lookup{
-			By:      entry.By,
-			Ident:   rustname.RustIdent(entry.By),
+			By:      by,
+			Idents:  idents,
 			Answers: entry.Answers,
 		})
 	}
@@ -535,6 +555,45 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 	}
 
 	return store, nil
+}
+
+func parseLookupBy(name string, raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup naming no by, by is a list of the properties the lookup reads", name)
+	}
+
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup by %q as a string, by is a list, write [%s]", name, single, single)
+	}
+
+	var by []string
+	if err := json.Unmarshal(raw, &by); err != nil {
+		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup whose by is not a list of properties: %w", name, err)
+	}
+
+	if len(by) == 0 {
+		return nil, fmt.Errorf("reading schema %q: x-store declares a lookup whose by list is empty, by names at least one property", name)
+	}
+
+	return by, nil
+}
+
+func fieldSet(by []string) string {
+	sorted := append([]string(nil), by...)
+	sort.Strings(sorted)
+
+	return strings.Join(sorted, "\x00")
+}
+
+func quoted(by []string) string {
+	parts := make([]string, 0, len(by))
+
+	for _, field := range by {
+		parts = append(parts, strconv.Quote(field))
+	}
+
+	return strings.Join(parts, ", ")
 }
 
 func checkStoreField(name, what, field string, fields []Field) error {

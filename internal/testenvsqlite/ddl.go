@@ -16,23 +16,19 @@ package testenvsqlite
 
 import (
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/storeddl"
 )
 
-const auditDDL = "CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
-
-func DDL(snake, key string) string {
-	return "CREATE TABLE IF NOT EXISTS " + identifier(snake) + " (" + identifier(key) + " TEXT PRIMARY KEY, body TEXT NOT NULL);\n" + auditDDL
-}
-
-func Script(snake, key string, rows []Row) string {
+func Script(store Store, rows []Row) string {
 	var b strings.Builder
 
-	b.WriteString(DDL(snake, key))
+	b.WriteString(storeddl.Table(store.Snake, store.Key, store.Uniques))
 	b.WriteString("\n")
 
 	for _, row := range rows {
-		b.WriteString("INSERT OR REPLACE INTO " + identifier(snake) + " (" + identifier(key) + ", body) VALUES (" + quote(row.ID) + ", " + quote(row.Body) + ");\n")
-		b.WriteString("INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), " + quote(snake) + ", " + quote(row.ID) + ", 'seed', NULL, " + quote(row.Body) + ");\n")
+		b.WriteString("INSERT OR REPLACE INTO " + store.Snake + " (" + store.Key + ", body) VALUES (" + quote(row.ID) + ", " + quote(row.Body) + ");\n")
+		b.WriteString("INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), " + quote(store.Snake) + ", " + quote(row.ID) + ", 'seed', NULL, " + quote(row.Body) + ");\n")
 	}
 
 	return b.String()
@@ -40,8 +36,4 @@ func Script(snake, key string, rows []Row) string {
 
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func identifier(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }

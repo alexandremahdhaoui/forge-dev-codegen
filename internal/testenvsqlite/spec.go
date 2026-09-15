@@ -31,6 +31,7 @@ type Store struct {
 	Snake    string
 	Upper    string
 	Key      string
+	Uniques  [][]string
 	Required []string
 }
 
@@ -57,7 +58,7 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 			return nil, fmt.Errorf("finding store %q: components.schemas has no such schema", name)
 		}
 
-		key, err := storeKey(name, schema.Store)
+		key, uniques, err := storeShape(name, schema.Store)
 		if err != nil {
 			return nil, err
 		}
@@ -76,6 +77,7 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 			Snake:    snake,
 			Upper:    rustname.Upper(name),
 			Key:      key,
+			Uniques:  uniques,
 			Required: schema.Required,
 		})
 	}
@@ -83,27 +85,46 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 	return stores, nil
 }
 
-func storeKey(name string, raw json.RawMessage) (string, error) {
+func storeShape(name string, raw json.RawMessage) (string, [][]string, error) {
 	if len(raw) == 0 {
-		return "", fmt.Errorf("finding store %q: the schema is not marked x-store", name)
+		return "", nil, fmt.Errorf("finding store %q: the schema is not marked x-store", name)
 	}
 
 	var flag bool
 	if err := json.Unmarshal(raw, &flag); err == nil {
-		return "", fmt.Errorf("finding store %q: x-store is a boolean, it is an object naming key, lookups and adapters", name)
+		return "", nil, fmt.Errorf("finding store %q: x-store is a boolean, it is an object naming key, lookups and adapters", name)
 	}
 
 	var declared struct {
-		Key string `json:"key"`
+		Key     string `json:"key"`
+		Lookups []struct {
+			By      json.RawMessage `json:"by"`
+			Answers string          `json:"answers"`
+		} `json:"lookups"`
 	}
 
 	if err := json.Unmarshal(raw, &declared); err != nil {
-		return "", fmt.Errorf("finding store %q: x-store is an object naming key, lookups and adapters: %w", name, err)
+		return "", nil, fmt.Errorf("finding store %q: x-store is an object naming key, lookups and adapters: %w", name, err)
 	}
 
 	if declared.Key == "" {
-		return "", fmt.Errorf("finding store %q: x-store names no key, key names the property every row is stored under", name)
+		return "", nil, fmt.Errorf("finding store %q: x-store names no key, key names the property every row is stored under", name)
 	}
 
-	return declared.Key, nil
+	uniques := [][]string{}
+
+	for _, lookup := range declared.Lookups {
+		if lookup.Answers != "one" {
+			continue
+		}
+
+		var by []string
+		if err := json.Unmarshal(lookup.By, &by); err != nil {
+			return "", nil, fmt.Errorf("finding store %q: x-store declares a lookup whose by is not a list of properties: %w", name, err)
+		}
+
+		uniques = append(uniques, by)
+	}
+
+	return declared.Key, uniques, nil
 }

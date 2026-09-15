@@ -299,6 +299,28 @@ A lookup names a column through the generated `<Store>Column` enum, so
 neither adapter can be asked for a column it cannot read and neither
 answers a default when asked.
 
+A lookup declares `by` as a list of properties, one entry or many. A
+bare string is refused by name. One field gives `get_by_secret`. Two
+give `get_by_alias_and_tag`, one argument per field, in the order the
+list spells them. Both adapters take the same list of column and value
+pairs, so a one field lookup is a one element list and nothing branches
+on how long the list is.
+
+```yaml
+x-store:
+  key: accountId
+  lookups:
+    - { by: [alias, tag], answers: one }
+  adapters: [sqlite, memory]
+```
+
+`answers: one` means at most one row holds those values, so both
+adapters refuse a second key that holds them. Sqlite refuses through a
+unique index over the same properties, written beside the table.
+Memory refuses with `Duplicate`, naming the lookup, the values and the
+key already holding them. A row that overwrites itself under its own
+key is not a duplicate.
+
 ## What the crate needs
 
 `axum`, `rusqlite` with `bundled`, `serde`, `serde_json`, `thiserror`

@@ -82,7 +82,7 @@ components:
       x-store:
         key: id
         lookups:
-          - { by: name, answers: page }
+          - { by: [name], answers: page }
         adapters: [sqlite, memory]
       required: [id, name, count]
       properties:
@@ -823,12 +823,12 @@ func TestALookupColumnIsAnEnumSoNeitherStoreAnswersADefaultForAColumnItCannotRea
 	wantIn(t, byPath, "adapter/zz_generated_greeting_memory.rs",
 		"fn field_of(row: &Greeting, column: GreetingColumn) -> String {",
 		"        GreetingColumn::Name => row.name.clone(),",
-		"self.rows_where(GreetingColumn::Name, name, after.as_deref(), limit)",
+		"self.rows_where(&[(GreetingColumn::Name, name)], after.as_deref(), limit)",
 	)
 
 	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
 		"column.property()",
-		"self.rows_where(GreetingColumn::Name, name, after.as_deref(), limit)",
+		"self.rows_where(&[(GreetingColumn::Name, name)], after.as_deref(), limit)",
 	)
 
 	for _, path := range []string{"adapter/zz_generated_greeting_memory.rs", "adapter/zz_generated_greeting_sqlite.rs"} {

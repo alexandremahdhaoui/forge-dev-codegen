@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/storeddl"
 )
 
 const helloSpec = `
@@ -119,12 +121,32 @@ func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
 	}
 }
 
-func TestDDLMatchesTheSchemaTheHexagonalRustSqliteAdapterCreates(t *testing.T) {
-	want := "CREATE TABLE IF NOT EXISTS \"greeting\" (\"id\" TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
+func TestTheTableMatchesTheSchemaTheHexagonalRustSqliteAdapterCreates(t *testing.T) {
+	want := "CREATE TABLE IF NOT EXISTS greeting (id TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
 		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
 
-	if got := DDL("greeting", "id"); got != want {
-		t.Errorf("DDL:\n got %q\nwant %q", got, want)
+	if got := storeddl.Table("greeting", "id", nil); got != want {
+		t.Errorf("table:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testing.T) {
+	doc := "components:\n  schemas:\n    Profile:\n      type: object\n      x-store:\n        key: subject\n        lookups:\n          - { by: [alias, tag], answers: one }\n          - { by: [alias], answers: page }\n        adapters: [sqlite]\n"
+
+	stores, err := Stores([]byte(doc), []string{"Profile"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "CREATE UNIQUE INDEX IF NOT EXISTS profile_unique_by_alias_and_tag ON profile (json_extract(body, '$.alias'), json_extract(body, '$.tag'));"
+
+	got := storeddl.Table(stores[0].Snake, stores[0].Key, stores[0].Uniques)
+	if !strings.Contains(got, want) {
+		t.Errorf("table:\n%s", got)
+	}
+
+	if strings.Contains(got, "profile_unique_by_alias ON") {
+		t.Errorf("a lookup that answers page must not become a unique index:\n%s", got)
 	}
 }
 
@@ -140,8 +162,8 @@ func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
 		t.Fatalf("key: %q", stores[0].Key)
 	}
 
-	if !strings.Contains(DDL(stores[0].Snake, stores[0].Key), `"subject" TEXT PRIMARY KEY`) {
-		t.Errorf("DDL: %s", DDL(stores[0].Snake, stores[0].Key))
+	if !strings.Contains(storeddl.Table(stores[0].Snake, stores[0].Key, nil), "subject TEXT PRIMARY KEY") {
+		t.Errorf("table: %s", storeddl.Table(stores[0].Snake, stores[0].Key, nil))
 	}
 }
 
@@ -247,9 +269,9 @@ func TestSeedsRefusesABrokenVectorsFileAndANonObjectReply(t *testing.T) {
 }
 
 func TestScriptQuotesEveryValueAndWritesOneAuditRowPerSeed(t *testing.T) {
-	script := Script("greeting", "id", []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
+	script := Script(Store{Snake: "greeting", Key: "id"}, []Row{{ID: "a'b", Body: `{"id":"a'b"}`}})
 
-	if !strings.Contains(script, "INSERT OR REPLACE INTO \"greeting\" (\"id\", body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
+	if !strings.Contains(script, "INSERT OR REPLACE INTO greeting (id, body) VALUES ('a''b', '{\"id\":\"a''b\"}');") {
 		t.Errorf("script:\n%s", script)
 	}
 
@@ -268,7 +290,7 @@ func TestPlanPairsEveryStoreWithItsRowsAndScript(t *testing.T) {
 		t.Fatalf("databases: %+v", databases)
 	}
 
-	if !strings.HasPrefix(databases[0].Script, DDL("greeting", "id")) {
+	if !strings.HasPrefix(databases[0].Script, storeddl.Table("greeting", "id", nil)) {
 		t.Errorf("script: %s", databases[0].Script)
 	}
 }
@@ -279,7 +301,7 @@ func TestPlanWithoutVectorsYieldsEmptyStores(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(databases[0].Rows) != 0 || databases[0].Script != DDL("greeting", "id")+"\n" {
+	if len(databases[0].Rows) != 0 || databases[0].Script != storeddl.Table("greeting", "id", nil)+"\n" {
 		t.Errorf("databases: %+v", databases)
 	}
 }
@@ -302,7 +324,7 @@ func TestTheDetectedWriterCreatesAFileThatHoldsTheSeededRows(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "greeting.db")
 
-	if err := writer.Write(context.Background(), path, Script("greeting", "id", []Row{{ID: "1", Body: `{"id":"1"}`}})); err != nil {
+	if err := writer.Write(context.Background(), path, Script(Store{Snake: "greeting", Key: "id"}, []Row{{ID: "1", Body: `{"id":"1"}`}})); err != nil {
 		t.Fatal(err)
 	}
 

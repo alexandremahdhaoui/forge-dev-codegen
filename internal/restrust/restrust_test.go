@@ -80,7 +80,7 @@ components:
       x-store:
         key: id
         lookups:
-          - { by: name, answers: page }
+          - { by: [name], answers: page }
         adapters: [sqlite, memory]
       required: [id, name, count]
       properties:
@@ -96,7 +96,7 @@ func withStore(block string) string {
 	return strings.Replace(helloSpec, `      x-store:
         key: id
         lookups:
-          - { by: name, answers: page }
+          - { by: [name], answers: page }
         adapters: [sqlite, memory]
 `, block, 1)
 }
@@ -122,15 +122,15 @@ func TestAStoreThatNamesNoKeyNoLookupsOrNoAdaptersIsRefusedByName(t *testing.T) 
 
 func TestAKeyOrALookupOnAPropertyTheSchemaDoesNotDeclareIsRefusedByName(t *testing.T) {
 	refusal(t, withStore("      x-store:\n        key: missing\n        lookups: []\n        adapters: [sqlite]\n"), `the x-store key names property "missing", which the schema does not declare`)
-	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: missing, answers: one }\n        adapters: [sqlite]\n"), `the x-store lookup names property "missing", which the schema does not declare`)
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [missing], answers: one }\n        adapters: [sqlite]\n"), `the x-store lookup names property "missing", which the schema does not declare`)
 }
 
 func TestALookupOnAPropertyThatIsNotARequiredStringIsRefusedByName(t *testing.T) {
-	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: count, answers: page }\n        adapters: [sqlite]\n"), `names property "count", which must be a required string property`)
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [count], answers: page }\n        adapters: [sqlite]\n"), `names property "count", which must be a required string property`)
 }
 
 func TestAnUnknownLookupWordIsRefusedWithTheWordsThatAreAllowed(t *testing.T) {
-	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: name, answers: all }\n        adapters: [sqlite]\n"), `answers "all", a lookup answers one of one, page`)
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: all }\n        adapters: [sqlite]\n"), `the lookup by "name" answers "all", a lookup answers one of one, page`)
 }
 
 func TestAnUnknownStoreAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing.T) {
@@ -138,7 +138,31 @@ func TestAnUnknownStoreAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing
 }
 
 func TestALookupByTheKeyIsRefusedBecauseTheKeyIsAlwaysReachable(t *testing.T) {
-	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: id, answers: one }\n        adapters: [sqlite]\n"), `a lookup by "id", which is the key`)
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name, id], answers: one }\n        adapters: [sqlite]\n"), `a lookup by "id", which is the key`)
+}
+
+func TestALookupThatSpellsByAsABareStringIsRefusedNamingTheListItShouldBe(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: name, answers: one }\n        adapters: [sqlite]\n"), `x-store declares a lookup by "name" as a string, by is a list, write [name]`)
+}
+
+func TestALookupWhoseByListIsEmptyIsRefusedBecauseItReadsNothing(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [], answers: one }\n        adapters: [sqlite]\n"), "x-store declares a lookup whose by list is empty, by names at least one property")
+}
+
+func TestALookupNamingOnePropertyTwiceInOneByListIsRefusedNamingIt(t *testing.T) {
+	refusal(t, withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name, name], answers: one }\n        adapters: [sqlite]\n"), `x-store declares a lookup naming "name" twice in one by list`)
+}
+
+func TestTwoLookupsReadingTheSameFieldSetAreRefusedWhateverTheOrder(t *testing.T) {
+	spec := withTag(withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name, tag], answers: one }\n          - { by: [tag, name], answers: page }\n        adapters: [sqlite]\n"))
+
+	refusal(t, spec, `x-store declares a lookup by "tag", "name" twice`)
+}
+
+func withTag(spec string) string {
+	spec = strings.Replace(spec, "      required: [id, name, count]", "      required: [id, name, count, tag]", 1)
+
+	return strings.Replace(spec, "        count:\n          type: integer\n", "        count:\n          type: integer\n        tag:\n          type: string\n", 1)
 }
 
 func TestAStoreWithNoAdapterAtAllIsRefusedRatherThanEmittingNothing(t *testing.T) {

@@ -633,9 +633,9 @@ pub enum {{ .Store.Port }}Error {
     },
 }
 
-{{ if .Store.Lookups }}#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+{{ if .Store.Columns }}#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum {{ .Store.Name }}Column {
-{{- range .Store.Lookups }}
+{{- range .Store.Columns }}
     {{ .Variant }},
 {{- end }}
 }
@@ -643,8 +643,8 @@ pub enum {{ .Store.Name }}Column {
 impl {{ .Store.Name }}Column {
     pub fn property(&self) -> &'static str {
         match self {
-{{- range .Store.Lookups }}
-            Self::{{ .Variant }} => "{{ .By }}",
+{{- range .Store.Columns }}
+            Self::{{ .Variant }} => "{{ .Property }}",
 {{- end }}
         }
     }
@@ -656,9 +656,9 @@ pub trait {{ .Store.Port }}: Send + Sync {
     fn get(&self, {{ .Store.KeyIdent }}: &str) -> Result<Option<{{ .Store.Name }}>, {{ .Store.Port }}Error>;
 {{- range .Store.Lookups }}
 {{- if .Page }}
-    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
+    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
 {{- else }}
-    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
+    fn {{ .Method }}(&self, {{ .Args }}) -> Result<Option<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
 {{- end }}
 {{- end }}
 }
@@ -815,8 +815,7 @@ use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
 use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
 {{- end }}
 
-const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS {{ $s.Snake }} ({{ $s.Key }} TEXT PRIMARY KEY, body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);";
+const SCHEMA: &str = "{{ $s.Schema }}";
 
 pub struct {{ $s.ConfigStruct }} {
     pub path: String,
@@ -879,22 +878,46 @@ impl {{ $s.Struct }} {
 
 {{- if $s.Lookups }}
 
-    fn rows_where(&self, column: {{ $s.Name }}Column, value: &str, after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+        let value = pairs
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<&str>>()
+            .join(", ");
         let sql = |source| {{ $s.Name }}SqliteError::Sql {
-            id: value.to_string(),
+            id: value.clone(),
             source,
         };
         let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
+        let mut clauses = String::new();
+
+        for (position, (column, _)) in pairs.iter().enumerate() {
+            clauses.push_str(&format!(
+                "json_extract(body, '$.{}') = ?{} AND ",
+                column.property(),
+                position + 1
+            ));
+        }
+
         let statement = format!(
-            "SELECT body FROM {{ $s.Snake }} WHERE json_extract(body, '$.{}') = ?1 AND {{ $s.Key }} > ?2 ORDER BY {{ $s.Key }} LIMIT ?3",
-            column.property()
+            "SELECT body FROM {{ $s.Snake }} WHERE {}{{ $s.Key }} > ?{} ORDER BY {{ $s.Key }} LIMIT ?{}",
+            clauses,
+            pairs.len() + 1,
+            pairs.len() + 2
         );
         let mut prepared = connection.prepare(&statement).map_err(sql)?;
+        let cursor = after.unwrap_or("");
+        let taken = limit.unwrap_or(-1);
+        let mut bound: Vec<&dyn rusqlite::ToSql> = pairs
+            .iter()
+            .map(|(_, value)| value as &dyn rusqlite::ToSql)
+            .collect();
+
+        bound.push(&cursor);
+        bound.push(&taken);
+
         let bodies = prepared
-            .query_map(
-                rusqlite::params![value, after.unwrap_or(""), limit.unwrap_or(-1)],
-                |row| row.get::<_, String>(0),
-            )
+            .query_map(&bound[..], |row| row.get::<_, String>(0))
             .map_err(sql)?
             .collect::<Result<Vec<String>, rusqlite::Error>>()
             .map_err(sql)?;
@@ -904,7 +927,7 @@ impl {{ $s.Struct }} {
             .map(|text| serde_json::from_str(text))
             .collect::<Result<Vec<{{ $s.Name }}>, serde_json::Error>>()
             .map_err(|source| {{ $s.Name }}SqliteError::Json {
-                id: value.to_string(),
+                id: value.clone(),
                 source,
             })
     }
@@ -942,15 +965,15 @@ impl {{ $s.Struct }} {
 
 {{- if $s.HasOneLookup }}
 
-    fn one_where(&self, column: {{ $s.Name }}Column, value: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
-        Ok(self.rows_where(column, value, None, Some(1))?.into_iter().next())
+    fn one_where(&self, pairs: &[({{ $s.Name }}Column, &str)]) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+        Ok(self.rows_where(pairs, None, Some(1))?.into_iter().next())
     }
 {{- end }}
 
     fn get_row(&self, id: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
         let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
         let body: Option<String> = connection
-            .query_row("SELECT body FROM {{ $s.Snake }} WHERE id = ?1", [id], |row| row.get(0))
+            .query_row("SELECT body FROM {{ $s.Snake }} WHERE {{ $s.Key }} = ?1", [id], |row| row.get(0))
             .optional()
             .map_err(|source| {{ $s.Name }}SqliteError::Sql {
                 id: id.to_string(),
@@ -999,21 +1022,21 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 {{- range $s.Lookups }}
 {{- if .Page }}
 
-    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.rows_where({{ $s.Name }}Column::{{ .Variant }}, {{ .Ident }}, after.as_deref(), limit)
+    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where({{ .Pairs }}, after.as_deref(), limit)
             .map_err(|source| {{ $s.Port }}Error::Lookup {
-                by: "{{ .By }}".to_string(),
-                value: {{ .Ident }}.to_string(),
+                by: "{{ .ByJoined }}".to_string(),
+                value: {{ .ValueExpr }},
                 source: Box::new(source),
             })
     }
 {{- else }}
 
-    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.one_where({{ $s.Name }}Column::{{ .Variant }}, {{ .Ident }})
+    fn {{ .Method }}(&self, {{ .Args }}) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.one_where({{ .Pairs }})
             .map_err(|source| {{ $s.Port }}Error::Lookup {
-                by: "{{ .By }}".to_string(),
-                value: {{ .Ident }}.to_string(),
+                by: "{{ .ByJoined }}".to_string(),
+                value: {{ .ValueExpr }},
                 source: Box::new(source),
             })
     }
@@ -1050,6 +1073,14 @@ pub enum {{ $s.Name }}MemoryError {
     Poisoned,
     #[error("the {{ $s.Snake }} memory store holds its capacity of {capacity} rows and {{ $s.Key }} {key:?} is a new one")]
     Full { capacity: usize, key: String },
+{{- if $s.HasOneLookup }}
+    #[error("the {{ $s.Snake }} memory store already holds {values:?} for the lookup by {lookup}, under {{ $s.Key }} {held:?}, and that lookup answers one")]
+    Duplicate {
+        lookup: String,
+        values: String,
+        held: String,
+    },
+{{- end }}
 }
 
 type Rows = BTreeMap<String, {{ $s.Name }}>;
@@ -1094,6 +1125,26 @@ impl {{ $s.MemoryStruct }} {
                 key,
             });
         }
+{{- if $s.HasOneLookup }}
+
+        for (held, row) in rows.iter() {
+            if held == &key {
+                continue;
+            }
+{{- range $s.Lookups }}
+{{- if not .Page }}
+
+            if {{ .MemoryMatch }} {
+                return Err({{ $s.Name }}MemoryError::Duplicate {
+                    lookup: "{{ .ByJoined }}".to_string(),
+                    values: {{ .MemoryValues }},
+                    held: held.clone(),
+                });
+            }
+{{- end }}
+{{- end }}
+        }
+{{- end }}
 
         rows.insert(key, v.clone());
 
@@ -1102,7 +1153,7 @@ impl {{ $s.MemoryStruct }} {
 
 {{- if $s.Lookups }}
 
-    fn rows_where(&self, column: {{ $s.Name }}Column, value: &str, after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}MemoryError> {
+    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}MemoryError> {
         let rows = self.rows()?;
         let taken = usize::try_from(limit.unwrap_or(-1)).unwrap_or(usize::MAX);
 
@@ -1110,17 +1161,21 @@ impl {{ $s.MemoryStruct }} {
             .iter()
             .filter(|(key, _)| after.is_none_or(|cursor| key.as_str() > cursor))
             .map(|(_, row)| row)
-            .filter(|row| field_of(row, column) == value)
+            .filter(|row| {
+                pairs
+                    .iter()
+                    .all(|(column, value)| field_of(row, *column) == *value)
+            })
             .take(taken)
             .cloned()
             .collect())
     }
 {{- end }}
 }
-{{ if $s.Lookups }}
+{{ if $s.Columns }}
 fn field_of(row: &{{ $s.Name }}, column: {{ $s.Name }}Column) -> String {
     match column {
-{{- range $s.Lookups }}
+{{- range $s.Columns }}
         {{ $s.Name }}Column::{{ .Variant }} => row.{{ .Ident }}.clone(),
 {{- end }}
     }
@@ -1163,22 +1218,22 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
 {{- range $s.Lookups }}
 {{- if .Page }}
 
-    fn {{ .Method }}(&self, {{ .Ident }}: &str, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.rows_where({{ $s.Name }}Column::{{ .Variant }}, {{ .Ident }}, after.as_deref(), limit)
+    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where({{ .Pairs }}, after.as_deref(), limit)
             .map_err(|source| {{ $s.Port }}Error::Lookup {
-                by: "{{ .By }}".to_string(),
-                value: {{ .Ident }}.to_string(),
+                by: "{{ .ByJoined }}".to_string(),
+                value: {{ .ValueExpr }},
                 source: Box::new(source),
             })
     }
 {{- else }}
 
-    fn {{ .Method }}(&self, {{ .Ident }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.rows_where({{ $s.Name }}Column::{{ .Variant }}, {{ .Ident }}, None, Some(1))
+    fn {{ .Method }}(&self, {{ .Args }}) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where({{ .Pairs }}, None, Some(1))
             .map(|found| found.into_iter().next())
             .map_err(|source| {{ $s.Port }}Error::Lookup {
-                by: "{{ .By }}".to_string(),
-                value: {{ .Ident }}.to_string(),
+                by: "{{ .ByJoined }}".to_string(),
+                value: {{ .ValueExpr }},
                 source: Box::new(source),
             })
     }
