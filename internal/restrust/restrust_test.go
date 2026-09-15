@@ -220,6 +220,19 @@ func TestAFailedSqliteSchemaStatesNoCauseBecauseOnlyTheSourceChainKnowsWhySqlite
 	}
 }
 
+func TestAFailedSqliteSchemaSaysIndexesWhenTheStoreHoldsMoreThanOne(t *testing.T) {
+	spec := withTag(withStore("      x-store:\n        key: id\n        lookups:\n          - { by: [name], answers: one }\n          - { by: [tag], answers: one }\n        adapters: [sqlite]\n"))
+
+	byPath, err := generatedByPath(t, spec)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "adapter/zz_generated_greeting_sqlite.rs",
+		`#[error("creating the schema of the greeting store in sqlite {path:?}, holding the unique indexes greeting_unique_by_name and greeting_unique_by_tag")]`,
+	)
+}
+
 func TestAStoreWithoutAUniqueLookupNeverBlamesAnIndexForASchemaItCannotCreate(t *testing.T) {
 	byPath, err := generatedByPath(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: [sqlite]\n"))
 	if err != nil {

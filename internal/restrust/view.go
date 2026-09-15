@@ -479,7 +479,12 @@ func schemaError(snake string, uniques [][]string) string {
 		names = append(names, storeddl.Index(snake, properties))
 	}
 
-	return opening + ", holding the unique index " + strings.Join(names, " and ")
+	noun := "index"
+	if len(names) > 1 {
+		noun = "indexes"
+	}
+
+	return opening + ", holding the unique " + noun + " " + strings.Join(names, " and ")
 }
 
 func rustLiteral(value string) string {
