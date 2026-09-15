@@ -716,7 +716,7 @@ func (s seedSource) literal(field string) (string, error) {
 		return s.expression, nil
 	}
 
-	return "", fmt.Errorf("field %q reads %s %s", field, seedPlaceholder, s.refusal)
+	return "", fmt.Errorf("field %q reads %s and %s", field, seedPlaceholder, s.refusal)
 }
 
 func buildMessageLiteral(
@@ -837,7 +837,7 @@ func itemLiteral(sc scope, f grpcrust.Field, item json.RawMessage) (string, erro
 		return "", fmt.Errorf("field %q holds message %q and the proto declares no such message", f.Name, f.Message)
 	}
 
-	literal, _, err := buildMessageLiteral(sc, nested, item, seedSource{refusal: "and " + seedNotInList}, nil)
+	literal, _, err := buildMessageLiteral(sc, nested, item, seedSource{refusal: seedNotInList}, nil)
 
 	return literal, err
 }
@@ -900,7 +900,7 @@ func checkKnownKeys(m grpcrust.Message, fields map[string]json.RawMessage, reser
 const (
 	seedPlaceholder = "<seed>"
 	seedNotInList   = "a seed fills one value and no rule places it in a list"
-	noSeedInCase    = "and the case carries no seed"
+	noSeedInCase    = "the case carries no seed"
 )
 
 func isSeedPlaceholder(raw json.RawMessage) bool {

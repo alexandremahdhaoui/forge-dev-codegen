@@ -416,8 +416,10 @@ and messages alike. A missing key, `null` and `[]` all render
 ```
 
 That renders `ids: vec!["a".to_string(), "b".to_string()]` and
-`entries: vec![Entry { id: "a".to_string(), seen: 3 }, Entry { id:
-"b".to_string(), seen: 0 }]`. A field a message leaves out still gets its
+`entries: vec![roster_grpc_messages::Entry { id: "a".to_string(), seen: 3
+}, roster_grpc_messages::Entry { id: "b".to_string(), seen: 0 }]`. A
+message item carries the module prefix the cell gives it. A field a
+message leaves out still gets its
 zero, which is what proto3 puts on the wire.
 
 Five shapes are refused by name.
