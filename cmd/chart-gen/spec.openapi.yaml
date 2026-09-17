@@ -9,7 +9,7 @@ components:
       properties:
         note:
           type: string
-          description: Unused. The engine has no configuration; the config schema and the cell manifests carry everything.
+          description: Unused. The engine has no configuration. The config schema and the cell manifests carry everything.
     GenerateInput:
       type: object
       description: The normalized model forge-dev hands every generator.
@@ -19,7 +19,7 @@ components:
           description: The cell name.
         version:
           type: string
-          description: The cell version. Unused; the root forge-dev.yaml version is the chart version.
+          description: The cell version. Unused. The root forge-dev.yaml version is the chart version.
         description:
           type: string
           description: The cell description.
@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. Unused; the root forge-dev.yaml lists the cells.
+          description: The kind's layout. Unused. The root forge-dev.yaml lists the cells.
         runtime:
           type: object
           additionalProperties: true

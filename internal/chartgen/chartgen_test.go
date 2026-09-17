@@ -210,7 +210,7 @@ func TestTheChartCarriesTheRootNameAndItsVersionAsBothChartAndAppVersion(t *test
 		t.Fatalf("reading Chart.yaml: %v\n%s", err, files[chartgen.ChartFile])
 	}
 
-	if chart.APIVersion != "v2" || chart.Type != "application" {
+	if chart.APIVersion != "v2" || chart.Type != "" {
 		t.Errorf("Chart.yaml = %+v", chart)
 	}
 

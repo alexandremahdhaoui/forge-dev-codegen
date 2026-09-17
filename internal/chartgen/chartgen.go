@@ -51,10 +51,8 @@ type rootConfig struct {
 }
 
 type specProperty struct {
-	Type        string `json:"type"`
-	Default     *any   `json:"default,omitempty"`
-	Description string `json:"description,omitempty"`
-	Env         string `json:"x-env,omitempty"`
+	Default *any   `json:"default,omitempty"`
+	Env     string `json:"x-env,omitempty"`
 }
 
 type specDocument struct {
@@ -69,7 +67,6 @@ type chartMetadata struct {
 	APIVersion  string `json:"apiVersion"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	Type        string `json:"type"`
 	Version     string `json:"version"`
 	AppVersion  string `json:"appVersion"`
 }
@@ -270,7 +267,6 @@ func chartYAML(root rootConfig) (string, error) {
 		APIVersion:  "v2",
 		Name:        root.Name,
 		Description: root.Description,
-		Type:        "application",
 		Version:     root.Version,
 		AppVersion:  root.Version,
 	})

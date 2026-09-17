@@ -10,5 +10,5 @@ Emits a Helm chart for one crate from the config schema hexagonal-rust writes an
 
 - **Type:** `string`
 - **Required:** No
-- **Description:** Unused. The engine has no configuration; the config schema and the cell manifests carry everything.
+- **Description:** Unused. The engine has no configuration. The config schema and the cell manifests carry everything.
 
