@@ -598,8 +598,16 @@ pub use zz_generated_config::*;
 {{- define "build" -}}
 {{ .Header }}
 {{ range .BuildScripts }}
-include!("{{ . }}");
+include!("{{ .Path }}");
 {{- end }}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+{{- range .BuildScripts }}
+    {{ .Fn }}().map_err(|source| format!("building cell {{ .Cell }}: {source}"))?;
+{{- end }}
+
+    Ok(())
+}
 {{ end -}}
 
 {{- define "main" -}}

@@ -708,7 +708,7 @@ impl pb::{{ .PbServerMod }}::{{ .ServicePascal }} for {{ .DriverService }} {
 {{- define "build" -}}
 {{ .Header }}
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn build_{{ .Cell }}() -> Result<(), Box<dyn std::error::Error>> {
     let file_descriptors = protox::compile(
         ["src/{{ .Cell }}/proto/zz_generated_{{ .Name }}.proto"],
         ["src/{{ .Cell }}/proto"],

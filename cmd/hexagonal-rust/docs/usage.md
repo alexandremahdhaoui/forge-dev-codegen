@@ -81,6 +81,18 @@ Every refusal names the thing that broke.
 | `src/config/mod.rs` | mounts the loader the config generator writes |
 | `zz_generated_config_spec.yaml` | the Spec schema the config generator reads |
 | `src/bin/zz_generated_<binary>.rs` | main |
+| `zz_generated_build.rs` | the crate root build script, when a cell manifest declares `buildScript` |
+
+## The build script
+
+A cell that compiles something before the crate, a grpc cell with its
+proto, declares `buildScript` in its manifest. That file holds one
+function named after the cell, `pub fn build_<cell>()`, and no
+`fn main`. The crate root `zz_generated_build.rs` includes every cell
+build script and writes the one `fn main`, calling each build function
+in cell name order and failing on the first error with the cell named.
+Any number of cells may declare one. No cell declaring one means no
+crate root build script.
 
 ## The config keys
 

@@ -208,10 +208,23 @@ hexagonal-rust writes from `layout.cells`:
 pub mod grpc;
 ```
 
-The cell manifest declares `buildScript`. hexagonal-rust reads it and
-writes the crate root `zz_generated_build.rs`, which includes the cell one.
-Nobody writes a `build.rs` by hand.
+The cell build script is one function named after the cell,
+`pub fn build_<cell>() -> Result<(), Box<dyn std::error::Error>>`, and
+holds no `fn main`. The cell manifest declares `buildScript`.
+hexagonal-rust reads every cell manifest, includes each cell build
+script and writes the one `fn main` at the crate root
+`zz_generated_build.rs`, calling every cell build function in cell name
+order and failing on the first error with the cell named. Any number of
+grpc cells fit in one crate. Nobody writes a `build.rs` by hand.
 
 ```rust
+include!("src/authz_client/zz_generated_build.rs");
 include!("src/grpc/zz_generated_build.rs");
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    build_authz_client().map_err(|source| format!("building cell authz_client: {source}"))?;
+    build_grpc().map_err(|source| format!("building cell grpc: {source}"))?;
+
+    Ok(())
+}
 ```

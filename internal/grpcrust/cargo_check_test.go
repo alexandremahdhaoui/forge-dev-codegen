@@ -50,6 +50,10 @@ const cargoCheckCellLib = `pub mod grpc;
 `
 
 const cargoCheckBuildScript = `include!("src/grpc/zz_generated_build.rs");
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    build_grpc()
+}
 `
 
 const helloControllerImpl = `use crate::grpc::controller::{HelloController, HelloControllerError, HelloControllerImpl};

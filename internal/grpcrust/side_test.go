@@ -90,6 +90,7 @@ func TestSideClientEmitsThePortTheAdapterAndTheTypesAndTheManifestProvidesNoDriv
 	for _, want := range []string{
 		`["src/hello_client/proto/zz_generated_hello.proto"]`,
 		`["src/hello_client/proto"]`,
+		"pub fn build_hello_client() -> Result<(), Box<dyn std::error::Error>>",
 		".build_client(true)",
 		".build_server(false)",
 	} {

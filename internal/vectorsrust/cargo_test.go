@@ -439,7 +439,7 @@ func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGenerat
 
 	write("Cargo.toml", cargoRosterManifest)
 	write("src/lib.rs", "pub mod grpc;\n")
-	write("build.rs", "include!(\"src/grpc/zz_generated_build.rs\");\n")
+	write("build.rs", "include!(\"src/grpc/zz_generated_build.rs\");\n\nfn main() -> Result<(), Box<dyn std::error::Error>> {\n    build_grpc()\n}\n")
 
 	for _, f := range cellFiles {
 		if strings.HasSuffix(f.Path, ".yaml") {
