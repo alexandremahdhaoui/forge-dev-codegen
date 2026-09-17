@@ -1,0 +1,77 @@
+openapi: 3.0.3
+info:
+  title: chart-gen Spec Schema
+  version: 0.1.0
+components:
+  schemas:
+    Spec:
+      type: object
+      properties:
+        note:
+          type: string
+          description: Unused. The engine has no configuration; the config schema and the cell manifests carry everything.
+    GenerateInput:
+      type: object
+      description: The normalized model forge-dev hands every generator.
+      properties:
+        name:
+          type: string
+          description: The cell name.
+        version:
+          type: string
+          description: The cell version. Unused; the root forge-dev.yaml version is the chart version.
+        description:
+          type: string
+          description: The cell description.
+        kind:
+          type: string
+          description: What the cell is. chart-gen fills the chart cell only.
+        language:
+          type: string
+          description: The cell's language. Unused.
+        packageName:
+          type: string
+          description: Unused.
+        layout:
+          type: object
+          additionalProperties: true
+          description: The kind's layout. Unused; the root forge-dev.yaml lists the cells.
+        runtime:
+          type: object
+          additionalProperties: true
+          description: The runnable inputs. Unused here.
+        openapiSpec:
+          type: string
+          description: The config schema hexagonal-rust writes, one Spec property per config key with its default and x-env.
+        checksum:
+          type: string
+          description: The source checksum forge-dev computed.
+        srcDir:
+          type: string
+          description: The chart cell directory. Its parent is the crate root holding forge-dev.yaml, the wiring file and src/<cell>/zz_generated_cell.yaml.
+      required:
+        - name
+        - kind
+        - openapiSpec
+    GeneratedFile:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The file path, relative to the chart cell directory.
+        content:
+          type: string
+          description: The file content.
+      required:
+        - path
+        - content
+    GenerateOutput:
+      type: object
+      properties:
+        files:
+          type: array
+          description: The emitted files. forge-dev core writes them.
+          items:
+            $ref: "#/components/schemas/GeneratedFile"
+      required:
+        - files

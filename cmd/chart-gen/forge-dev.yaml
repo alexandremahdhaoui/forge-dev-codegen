@@ -1,0 +1,15 @@
+name: chart-gen
+kind: mcp-server
+version: 0.1.0
+description: Emits a Helm chart for one crate from the config schema hexagonal-rust writes and the cell manifests. Chart.yaml, one values key per config key, a Deployment env block in the loader's spelling, one Service port per driver with a protocol.
+openapi:
+  specPath: ./spec.openapi.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-dev-codegen/refs/heads/main
+layout:
+  tools:
+    - name: generate
+      description: Answer the Helm chart of one crate from its config schema and the cell manifests.
+      input: GenerateInput
+      output: GenerateOutput

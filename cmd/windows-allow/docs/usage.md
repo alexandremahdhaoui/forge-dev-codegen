@@ -19,7 +19,7 @@ test:
   - name: windows-allow
     runner: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/windows-allow
     spec:
-      source: build/dist/songe-hello-node_windows_amd64.exe
+      source: build/dist/songe-hello-node_windows_amd64
       destination: $WIN_OUTPUT_PATH
       name: songe-hello-node
       attempts: 8

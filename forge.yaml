@@ -165,6 +165,15 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+  - name: gen-chart-gen
+    src: ./cmd/chart-gen
+    engine: forge://forge-dev
+
+  - name: chart-gen
+    src: ./cmd/chart-gen
+    dest: ./build/bin
+    engine: forge://go-build
+
   - name: gen-testenv-sqlite
     src: ./cmd/testenv-sqlite
     engine: forge://forge-dev
