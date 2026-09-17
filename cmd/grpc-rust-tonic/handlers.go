@@ -41,6 +41,7 @@ func NewHandlers() Handlers {
 			files, err := grpcrust.Generate([]byte(input.ProtoSpec), grpcrust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
+				Side:    layoutString(input.Layout, "side"),
 				Ports:   ports,
 			})
 			if err != nil {

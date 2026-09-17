@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cell names the module directory and defaults to grpc. ports names the ports this cell's controller consumes, each one a port another cell provides.
+          description: The kind's layout. cell names the module directory and defaults to grpc. side is server, client or both and defaults to both. The server side is the tonic driver and the controller trait. The client side is the client port and the tonic adapter. Both sides carry the message types. ports names the ports this cell's controller consumes, each one a port another cell provides, and is refused on a client cell.
         runtime:
           type: object
           additionalProperties: true

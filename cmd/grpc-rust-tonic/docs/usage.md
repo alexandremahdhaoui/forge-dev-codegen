@@ -33,17 +33,48 @@ generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/grpc-rust
 proto:
   specPath: ../../.forge/spec-cache/hello.v1.proto
 layout:
-  side: core
+  cell: grpc
+  side: both
 ```
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
 service and names the crates `<name>-core` and `<name>-app`. `protoSpec`
-is the proto3 document. `layout.side` picks the half of the skeleton
-this cell holds, `core` or `app`. `layout.cell` names the module
-directory and defaults to `grpc`.
+is the proto3 document. `layout.cell` names the module directory and
+defaults to `grpc`. `layout.side` is `server`, `client` or `both` and
+defaults to `both`. The server side is the tonic driver and the
+controller trait. The client side is the client port and the tonic
+adapter. Both sides carry the message types and the build script. A
+side outside the three words is refused by name.
 
 Every emitted path is relative to the cell directory. The engine never
 writes above it.
+
+## Calling another service
+
+A service calls another service through the generated client of that
+service's proto. The cell is named after the foreign service and holds
+the client side only.
+
+```yaml
+name: songe-social
+kind: grpc
+language: rust
+generator: forge://github.com/alexandremahdhaoui/forge-dev-codegen/cmd/grpc-rust-tonic
+proto:
+  specPath: ../../.forge/spec-cache/identity.v1.proto
+layout:
+  cell: identity_client
+  side: client
+```
+
+The manifest provides the port `<Service>Client` and the adapter
+`<cell>_client`, and no driver and no controller. The adapter's
+`endpoint` key carries the cell name, so two client cells over two
+protos get two endpoint keys. A controller in another cell names the
+port in its own declaration, `x-ports` for a rest cell or
+`layout.ports` for a grpc server cell, and hexagonal-rust wires the
+adapter. `layout.ports` on a client cell is refused by name, because a
+client cell holds no controller to consume a port.
 
 ## Declared ports
 
@@ -80,16 +111,17 @@ up.
 
 For every `service` in the file:
 
-| Emitted, under the cell | Holds |
-|---|---|
-| `types/zz_generated_<service>_messages.rs` | one plain serde struct per message reachable from the service's rpcs |
-| `port/zz_generated_<service>_client.rs` | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` |
-| `controller/zz_generated_<service>_controller.rs` | trait `<Service>Controller` and the impl that calls the hand body |
-| `hand/<service>_controller.rs` | the body, written once and never again |
-| `adapter/zz_generated_<service>_grpc_client.rs` | `<Service>GrpcClient`, a tonic channel behind the port trait |
-| `driver/zz_generated_<service>_grpc_driver.rs` | `<Service>GrpcDriver`, a tonic server forwarding each rpc to `Arc<dyn <Service>Controller>` from core |
-| `zz_generated_build.rs` | the build script tonic-build needs |
-| `proto/zz_generated_<service>.proto` | the proto file, copied verbatim |
+| Emitted, under the cell | Side | Holds |
+|---|---|---|
+| `types/zz_generated_<service>_messages.rs` | both | one plain serde struct per message reachable from the service's rpcs |
+| `port/zz_generated_<service>_client.rs` | client | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` |
+| `adapter/zz_generated_<service>_grpc_client.rs` | client | `<Service>GrpcClient`, a tonic channel behind the port trait |
+| `controller/zz_generated_<service>_controller.rs` | server | trait `<Service>Controller`, its error enum and `<Service>ControllerImpl` holding one boxed port per `layout.ports` entry |
+| `controller/<service>_controller.rs` | server | the impl block, written once and never again |
+| `driver/zz_generated_<service>_grpc_driver.rs` | server | `<Service>GrpcDriver`, a tonic server forwarding each rpc to `Arc<dyn <Service>Controller>` |
+| `zz_generated_build.rs` | both | the build script tonic-build needs, compiling the client half, the server half or both |
+| `proto/zz_generated_<service>.proto` | both | the proto file, copied verbatim |
+| `zz_generated_cell.yaml` | both | the cell manifest hexagonal-rust reads |
 
 Each layer directory carries a `mod.rs` that mounts its generated file
 and aliases it under the logical name, so a reader writes

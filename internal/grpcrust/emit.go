@@ -21,6 +21,7 @@ import (
 	"sort"
 	"text/template"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/layoutports"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/cellmanifest"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
@@ -37,6 +38,12 @@ const DefaultAddress = "127.0.0.1:0"
 
 const DefaultEndpoint = "http://127.0.0.1:50051"
 
+const (
+	SideServer = "server"
+	SideClient = "client"
+	SideBoth   = "both"
+)
+
 var Layers = []string{"adapter", "controller", "driver", "port", "types"}
 
 var allowingLayers = map[string]bool{"adapter": true, "driver": true}
@@ -47,6 +54,20 @@ func checkCell(name string) error {
 	}
 
 	return fmt.Errorf("emitting the skeleton: cell %q is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter", name)
+}
+
+func checkSide(side string, ports []layoutports.Spec) error {
+	switch side {
+	case SideServer, SideClient, SideBoth:
+	default:
+		return fmt.Errorf("emitting the skeleton: side %q is not one of %s, %s and %s", side, SideServer, SideClient, SideBoth)
+	}
+
+	if side == SideClient && len(ports) > 0 {
+		return fmt.Errorf("emitting the skeleton: layout.ports names %q on a client cell, a client cell holds no controller to consume a port, declare the port on the cell whose controller calls it", ports[0].Name)
+	}
+
+	return nil
 }
 
 type modEntry struct {
@@ -74,6 +95,17 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	if err := checkCell(opts.Cell); err != nil {
 		return nil, err
 	}
+
+	if opts.Side == "" {
+		opts.Side = SideBoth
+	}
+
+	if err := checkSide(opts.Side, opts.Ports); err != nil {
+		return nil, err
+	}
+
+	server := opts.Side != SideClient
+	client := opts.Side != SideServer
 
 	spec, err := Parse(doc)
 	if err != nil {
@@ -121,20 +153,44 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 
 		steps := []func() error{
 			func() error {
-				return add(path.Join("adapter", "zz_generated_"+v.ClientModule+".rs"), "adapter", v)
-			},
-			func() error {
-				return add(path.Join("driver", "zz_generated_"+v.DriverModule+".rs"), "driver", v)
-			},
-			func() error {
-				return add(path.Join("port", "zz_generated_"+v.ServiceSnake+"_client.rs"), "port", v)
-			},
-			func() error {
 				return add(path.Join("types", "zz_generated_"+v.ServiceSnake+"_messages.rs"), "types", v)
 			},
-			func() error {
-				return add(path.Join("controller", "zz_generated_"+v.ControllerSnake+"_controller.rs"), "controller", v)
-			},
+		}
+
+		mount("types", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_messages", Alias: v.ServiceSnake + "_messages"})
+
+		if client {
+			steps = append(steps,
+				func() error {
+					return add(path.Join("adapter", "zz_generated_"+v.ClientModule+".rs"), "adapter", v)
+				},
+				func() error {
+					return add(path.Join("port", "zz_generated_"+v.ServiceSnake+"_client.rs"), "port", v)
+				},
+			)
+
+			mount("adapter", modEntry{Module: "zz_generated_" + v.ClientModule, Alias: v.ClientModule})
+			mount("port", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_client", Alias: v.ServiceSnake + "_client"})
+			addClientToManifest(&manifest, v)
+		}
+
+		if server {
+			steps = append(steps,
+				func() error {
+					return add(path.Join("driver", "zz_generated_"+v.DriverModule+".rs"), "driver", v)
+				},
+				func() error {
+					return add(path.Join("controller", "zz_generated_"+v.ControllerSnake+"_controller.rs"), "controller", v)
+				},
+			)
+
+			mount("driver", modEntry{Module: "zz_generated_" + v.DriverModule, Alias: v.DriverModule})
+			mount("controller", modEntry{
+				Module:  "zz_generated_" + v.ControllerSnake + "_controller",
+				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl"},
+			})
+			userMods["controller"] = append(userMods["controller"], v.ControllerSnake+"_controller")
+			addServerToManifest(&manifest, v)
 		}
 
 		for _, step := range steps {
@@ -142,18 +198,6 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 				return nil, err
 			}
 		}
-
-		mount("adapter", modEntry{Module: "zz_generated_" + v.ClientModule, Alias: v.ClientModule})
-		mount("driver", modEntry{Module: "zz_generated_" + v.DriverModule, Alias: v.DriverModule})
-		mount("port", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_client", Alias: v.ServiceSnake + "_client"})
-		mount("types", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_messages", Alias: v.ServiceSnake + "_messages"})
-		mount("controller", modEntry{
-			Module:  "zz_generated_" + v.ControllerSnake + "_controller",
-			Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl"},
-		})
-		userMods["controller"] = append(userMods["controller"], v.ControllerSnake+"_controller")
-
-		addServiceToManifest(&manifest, v)
 	}
 
 	for _, layer := range Layers {
@@ -179,7 +223,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	files = append(files, File{Path: "mod.rs", Content: cell})
 
 	protoName := rustname.Snake(spec.Services[0].Name)
-	buildData := map[string]any{"Header": header, "Cell": opts.Cell, "Name": protoName}
+	buildData := map[string]any{"Header": header, "Cell": opts.Cell, "Name": protoName, "Client": client, "Server": server}
 
 	if err := add(BuildScriptFile, "build", buildData); err != nil {
 		return nil, err
@@ -202,7 +246,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	return files, nil
 }
 
-func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
+func addServerToManifest(m *cellmanifest.Manifest, v serviceView) {
 	ports := []string{}
 
 	for _, port := range v.Ports {
@@ -231,7 +275,9 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 			},
 		},
 	})
+}
 
+func addClientToManifest(m *cellmanifest.Manifest, v serviceView) {
 	m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
 		Trait:  v.ClientTrait,
 		Module: v.ModulePrefix + "port::" + v.ServiceSnake + "_client",
@@ -669,8 +715,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     tonic_prost_build::configure()
-        .build_client(true)
-        .build_server(true)
+        .build_client({{ .Client }})
+        .build_server({{ .Server }})
         .compile_fds(file_descriptors)?;
 
     Ok(())

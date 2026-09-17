@@ -57,6 +57,7 @@ type Spec struct {
 type Options struct {
 	Service string
 	Cell    string
+	Side    string
 	Ports   []layoutports.Spec
 }
 
