@@ -73,13 +73,13 @@ type chartMetadata struct {
 
 type envEntry struct {
 	Name string
-	Key  string
+	Read string
 }
 
 type portEntry struct {
 	Name     string
 	Protocol string
-	AddrKey  string
+	Port     string
 }
 
 type templateData struct {
@@ -232,7 +232,7 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 			return nil, fmt.Errorf("config key %q carries no x-env, the loader reads it by that name", key)
 		}
 
-		env = append(env, envEntry{Name: properties[key].Env, Key: key})
+		env = append(env, envEntry{Name: properties[key].Env, Read: valueRead(key, properties[key])})
 	}
 
 	return env, nil
@@ -255,11 +255,26 @@ func portEntries(manifests []cellmanifest.Manifest, properties map[string]specPr
 				)
 			}
 
-			ports = append(ports, portEntry{Name: driver.Name, Protocol: driver.Protocol, AddrKey: addrKey})
+			ports = append(ports, portEntry{Name: driver.Name, Protocol: driver.Protocol, Port: portRead(addrKey, properties[addrKey])})
 		}
 	}
 
 	return ports, nil
+}
+
+func valueRead(key string, property specProperty) string {
+	if property.Default != nil {
+		return ".Values." + key
+	}
+
+	return fmt.Sprintf("required %q .Values.%s", key+" has no default, set it in values", key)
+}
+
+func portRead(key string, property specProperty) string {
+	return fmt.Sprintf(
+		`{{ with %s | splitList ":" | last }}{{ if eq . "0" }}{{ fail %q }}{{ end }}{{ int . }}{{ end }}`,
+		valueRead(key, property), key+" ends in :0 and an address ending in :0 is not installable",
+	)
 }
 
 func chartYAML(root rootConfig) (string, error) {
@@ -298,7 +313,7 @@ func valuesYAML(binary string, keys []string, properties map[string]specProperty
 
 func defaultValue(property specProperty) any {
 	if property.Default == nil {
-		return ""
+		return nil
 	}
 
 	return *property.Default
@@ -337,13 +352,13 @@ spec:
           env:
 [[- range .Env ]]
             - name: [[ .Name ]]
-              value: {{ .Values.[[ .Key ]] | quote }}
+              value: {{ [[ .Read ]] | quote }}
 [[- end ]]
 [[- if .Ports ]]
           ports:
 [[- range .Ports ]]
             - name: [[ .Name ]]
-              containerPort: {{ .Values.[[ .AddrKey ]] | splitList ":" | last | int }}
+              containerPort: [[ .Port ]]
               protocol: [[ .Protocol ]]
 [[- end ]]
 [[- end ]]
@@ -362,8 +377,8 @@ spec:
 [[- range .Ports ]]
     - name: [[ .Name ]]
       protocol: [[ .Protocol ]]
-      port: {{ .Values.[[ .AddrKey ]] | splitList ":" | last | int }}
-      targetPort: {{ .Values.[[ .AddrKey ]] | splitList ":" | last | int }}
+      port: [[ .Port ]]
+      targetPort: [[ .Port ]]
 [[- end ]]
 [[ end ]]
 `))

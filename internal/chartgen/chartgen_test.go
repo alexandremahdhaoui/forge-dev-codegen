@@ -239,7 +239,7 @@ func TestValuesHoldOneKeyPerSpecPropertyPlusTheImageRepositoryAndNothingElse(t *
 		"grpc_addr":                      "127.0.0.1:0",
 		"rest_addr":                      "127.0.0.1:0",
 		"tick_interval_ms":               float64(1000),
-		"ticket_verifier_secret_secret":  "",
+		"ticket_verifier_secret_secret":  nil,
 		"udp_addr":                       "127.0.0.1:0",
 	}
 
@@ -276,11 +276,40 @@ func keys(m map[string]any) []string {
 	return out
 }
 
-func TestAPropertyWithNoDefaultIsAnEmptyString(t *testing.T) {
+const secretRequired = `required "ticket_verifier_secret_secret has no default, set it in values" .Values.ticket_verifier_secret_secret`
+
+func portRead(key string) string {
+	return `{{ with .Values.` + key + ` | splitList ":" | last }}{{ if eq . "0" }}{{ fail "` + key +
+		` ends in :0 and an address ending in :0 is not installable" }}{{ end }}{{ int . }}{{ end }}`
+}
+
+func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequiredNamingTheKey(t *testing.T) {
 	files := generateHello(t)
 
-	if !strings.Contains(files[chartgen.ValuesFile], "\nticket_verifier_secret_secret: \"\"\n") {
-		t.Errorf("values.yaml does not spell the empty default\n%s", files[chartgen.ValuesFile])
+	if !strings.Contains(files[chartgen.ValuesFile], "\nticket_verifier_secret_secret: null\n") {
+		t.Errorf("values.yaml does not list the key with no value\n%s", files[chartgen.ValuesFile])
+	}
+
+	if !strings.Contains(files[chartgen.DeploymentFile], "value: {{ "+secretRequired+" | quote }}") {
+		t.Errorf("the deployment does not read the key through required\n%s", files[chartgen.DeploymentFile])
+	}
+
+	if strings.Contains(files[chartgen.DeploymentFile], `required "rest_addr`) {
+		t.Errorf("a key with a default is read through required\n%s", files[chartgen.DeploymentFile])
+	}
+}
+
+func TestThePortReadsOfAKeyRefuseAnAddressEndingInZeroNamingTheKey(t *testing.T) {
+	files := generateHello(t)
+
+	want := `{{ fail "rest_addr ends in :0 and an address ending in :0 is not installable" }}`
+
+	if strings.Count(files[chartgen.DeploymentFile], want) != 1 {
+		t.Errorf("the deployment does not refuse rest_addr ending in :0 once\n%s", files[chartgen.DeploymentFile])
+	}
+
+	if strings.Count(files[chartgen.ServiceFile], want) != 2 {
+		t.Errorf("the service does not refuse rest_addr ending in :0 on port and targetPort\n%s", files[chartgen.ServiceFile])
 	}
 }
 
@@ -295,7 +324,7 @@ func TestTheDeploymentEnvNamesEveryPropertyByItsEnvInSortedOrder(t *testing.T) {
 		"- name: SONGE_HELLO_NODE_GRPC_ADDR\n              value: {{ .Values.grpc_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_REST_ADDR\n              value: {{ .Values.rest_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_TICK_INTERVAL_MS\n              value: {{ .Values.tick_interval_ms | quote }}",
-		"- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n              value: {{ .Values.ticket_verifier_secret_secret | quote }}",
+		"- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n              value: {{ " + secretRequired + " | quote }}",
 		"- name: SONGE_HELLO_NODE_UDP_ADDR\n              value: {{ .Values.udp_addr | quote }}",
 	}
 
@@ -327,9 +356,9 @@ func TestRestAndGrpcGetTcpPortsUdpGetsAUdpPortAndTickGetsNone(t *testing.T) {
 	deployment, service := files[chartgen.DeploymentFile], files[chartgen.ServiceFile]
 
 	for _, want := range []string{
-		"- name: rest\n              containerPort: {{ .Values.rest_addr | splitList \":\" | last | int }}\n              protocol: TCP",
-		"- name: grpc\n              containerPort: {{ .Values.grpc_addr | splitList \":\" | last | int }}\n              protocol: TCP",
-		"- name: udp\n              containerPort: {{ .Values.udp_addr | splitList \":\" | last | int }}\n              protocol: UDP",
+		"- name: rest\n              containerPort: " + portRead("rest_addr") + "\n              protocol: TCP",
+		"- name: grpc\n              containerPort: " + portRead("grpc_addr") + "\n              protocol: TCP",
+		"- name: udp\n              containerPort: " + portRead("udp_addr") + "\n              protocol: UDP",
 	} {
 		if !strings.Contains(deployment, want) {
 			t.Errorf("the deployment lacks %q\n%s", want, deployment)
@@ -337,9 +366,9 @@ func TestRestAndGrpcGetTcpPortsUdpGetsAUdpPortAndTickGetsNone(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"- name: rest\n      protocol: TCP\n      port: {{ .Values.rest_addr | splitList \":\" | last | int }}\n      targetPort: {{ .Values.rest_addr | splitList \":\" | last | int }}",
-		"- name: grpc\n      protocol: TCP\n      port: {{ .Values.grpc_addr | splitList \":\" | last | int }}",
-		"- name: udp\n      protocol: UDP\n      port: {{ .Values.udp_addr | splitList \":\" | last | int }}",
+		"- name: rest\n      protocol: TCP\n      port: " + portRead("rest_addr") + "\n      targetPort: " + portRead("rest_addr"),
+		"- name: grpc\n      protocol: TCP\n      port: " + portRead("grpc_addr"),
+		"- name: udp\n      protocol: UDP\n      port: " + portRead("udp_addr"),
 	} {
 		if !strings.Contains(service, want) {
 			t.Errorf("the service lacks %q\n%s", want, service)
@@ -479,7 +508,11 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-func TestHelmTemplateRendersOneDeploymentAndOneServiceFromTheEmittedChart(t *testing.T) {
+const installableValues = "ticket_verifier_secret_secret=s3cret,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070"
+
+func helmTemplate(t *testing.T, set string) (string, error) {
+	t.Helper()
+
 	helm, err := exec.LookPath("helm")
 	if err != nil {
 		t.Skip("helm is not on PATH")
@@ -492,14 +525,38 @@ func TestHelmTemplateRendersOneDeploymentAndOneServiceFromTheEmittedChart(t *tes
 		writeFile(t, filepath.Join(dir, path), content)
 	}
 
-	cmd := exec.Command(helm, "template", "hello", dir)
+	out, err := exec.Command(helm, "template", "hello", dir, "--set", set).CombinedOutput()
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("helm template: %v\n%s", err, out)
+	return string(out), err
+}
+
+func TestHelmTemplateRefusesARenderWithAValueNobodySetNamingTheKey(t *testing.T) {
+	out, err := helmTemplate(t, "rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070")
+	if err == nil {
+		t.Fatalf("helm template rendered with ticket_verifier_secret_secret set by nobody\n%s", out)
 	}
 
-	rendered := string(out)
+	if !strings.Contains(out, "ticket_verifier_secret_secret has no default, set it in values") {
+		t.Errorf("the refusal does not name the key\n%s", out)
+	}
+}
+
+func TestHelmTemplateRefusesTheRestAddressEndingInZeroNamingTheKey(t *testing.T) {
+	out, err := helmTemplate(t, installableValues+",rest_addr=127.0.0.1:0")
+	if err == nil {
+		t.Fatalf("helm template rendered a rest_addr ending in :0\n%s", out)
+	}
+
+	if !strings.Contains(out, "rest_addr ends in :0 and an address ending in :0 is not installable") {
+		t.Errorf("the refusal does not name the key\n%s", out)
+	}
+}
+
+func TestHelmTemplateRendersOneDeploymentAndOneServiceFromTheEmittedChart(t *testing.T) {
+	rendered, err := helmTemplate(t, installableValues)
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, rendered)
+	}
 
 	if strings.Count(rendered, "\nkind: Deployment\n") != 1 || strings.Count(rendered, "\nkind: Service\n") != 1 {
 		t.Errorf("helm template rendered other than one Deployment and one Service\n%s", rendered)
