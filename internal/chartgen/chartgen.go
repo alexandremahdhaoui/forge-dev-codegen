@@ -272,8 +272,8 @@ func valueRead(key string, property specProperty) string {
 
 func portRead(key string, property specProperty) string {
 	return fmt.Sprintf(
-		`{{ with %s | splitList ":" | last }}{{ if eq . "0" }}{{ fail %q }}{{ end }}{{ int . }}{{ end }}`,
-		valueRead(key, property), key+" ends in :0 and an address ending in :0 is not installable",
+		`{{ $%s := %s | splitList ":" | last | int }}{{ if le $%s 0 }}{{ fail %q }}{{ end }}{{ $%s }}`,
+		key, valueRead(key, property), key, key+" does not end in a port above zero, an address ending in :0 is not installable", key,
 	)
 }
 

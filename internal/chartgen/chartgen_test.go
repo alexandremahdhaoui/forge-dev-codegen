@@ -279,8 +279,12 @@ func keys(m map[string]any) []string {
 const secretRequired = `required "ticket_verifier_secret_secret has no default, set it in values" .Values.ticket_verifier_secret_secret`
 
 func portRead(key string) string {
-	return `{{ with .Values.` + key + ` | splitList ":" | last }}{{ if eq . "0" }}{{ fail "` + key +
-		` ends in :0 and an address ending in :0 is not installable" }}{{ end }}{{ int . }}{{ end }}`
+	return `{{ $` + key + ` := .Values.` + key + ` | splitList ":" | last | int }}{{ if le $` + key + ` 0 }}{{ fail "` +
+		portRefusal(key) + `" }}{{ end }}{{ $` + key + ` }}`
+}
+
+func portRefusal(key string) string {
+	return key + " does not end in a port above zero, an address ending in :0 is not installable"
 }
 
 func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequiredNamingTheKey(t *testing.T) {
@@ -302,7 +306,7 @@ func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequ
 func TestThePortReadsOfAKeyRefuseAnAddressEndingInZeroNamingTheKey(t *testing.T) {
 	files := generateHello(t)
 
-	want := `{{ fail "rest_addr ends in :0 and an address ending in :0 is not installable" }}`
+	want := `{{ fail "` + portRefusal("rest_addr") + `" }}`
 
 	if strings.Count(files[chartgen.DeploymentFile], want) != 1 {
 		t.Errorf("the deployment does not refuse rest_addr ending in :0 once\n%s", files[chartgen.DeploymentFile])
@@ -541,14 +545,16 @@ func TestHelmTemplateRefusesARenderWithAValueNobodySetNamingTheKey(t *testing.T)
 	}
 }
 
-func TestHelmTemplateRefusesTheRestAddressEndingInZeroNamingTheKey(t *testing.T) {
-	out, err := helmTemplate(t, installableValues+",rest_addr=127.0.0.1:0")
-	if err == nil {
-		t.Fatalf("helm template rendered a rest_addr ending in :0\n%s", out)
-	}
+func TestHelmTemplateRefusesARestAddressWhosePortIsNotAnIntegerAboveZeroNamingTheKey(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:0", "localhost", "", "0.0.0.0:abc", "0.0.0.0:00"} {
+		out, err := helmTemplate(t, installableValues+",rest_addr="+addr)
+		if err == nil {
+			t.Fatalf("helm template rendered rest_addr=%q\n%s", addr, out)
+		}
 
-	if !strings.Contains(out, "rest_addr ends in :0 and an address ending in :0 is not installable") {
-		t.Errorf("the refusal does not name the key\n%s", out)
+		if !strings.Contains(out, portRefusal("rest_addr")) {
+			t.Errorf("the refusal of rest_addr=%q does not name the key\n%s", addr, out)
+		}
 	}
 }
 
