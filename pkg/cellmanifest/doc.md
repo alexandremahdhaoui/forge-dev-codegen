@@ -18,8 +18,11 @@ Every manifest carries `version: "1"`. A reader refuses any other value.
 The manifest lists what the cell provides and what it needs.
 
 - `provides.drivers` a driver, the controller traits it needs, the port traits
-  it consumes under `ports`, its config fields. hexagonal-rust hands the
-  controllers to `new` first and the ports after them, in manifest order
+  it consumes under `ports`, its config fields, and under `protocol` the
+  transport it listens on, `TCP` or `UDP`. A driver that listens on nothing
+  carries no protocol. hexagonal-rust hands the controllers to `new` first
+  and the ports after them, in manifest order. chart-gen emits one container
+  port and one service port per driver with a protocol
 - `provides.adapters` an adapter, the port it implements, whether its `new` is
   fallible, the port traits it consumes under `ports`, its config fields.
   hexagonal-rust builds a consumed port before the adapter and hands it to

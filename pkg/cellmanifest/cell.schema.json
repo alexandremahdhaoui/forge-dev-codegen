@@ -78,6 +78,7 @@
         "name": { "$ref": "#/$defs/snakeName" },
         "type": { "$ref": "#/$defs/rustIdent" },
         "module": { "$ref": "#/$defs/modulePath" },
+        "protocol": { "type": "string", "enum": ["TCP", "UDP"] },
         "requires": {
           "allOf": [{ "$ref": "#/$defs/traitList" }, { "minItems": 1 }]
         },

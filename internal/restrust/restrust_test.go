@@ -377,6 +377,10 @@ func TestTheCellManifestNamesTheCellAndItsModules(t *testing.T) {
 		t.Errorf("drivers = %+v", m.Provides.Drivers)
 	}
 
+	if m.Provides.Drivers[0].Protocol != cellmanifest.ProtocolTCP {
+		t.Errorf("the http driver carries protocol %q, want TCP", m.Provides.Drivers[0].Protocol)
+	}
+
 	if len(m.Provides.Adapters) != 2 || m.Provides.Adapters[0].Module != "rest::adapter::greeting_sqlite" || m.Provides.Adapters[1].Module != "rest::adapter::greeting_memory" {
 		t.Errorf("adapters = %+v", m.Provides.Adapters)
 	}

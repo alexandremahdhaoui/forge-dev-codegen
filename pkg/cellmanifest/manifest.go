@@ -53,6 +53,7 @@ type Driver struct {
 	Name     string                 `json:"name" yaml:"name"`
 	Type     string                 `json:"type" yaml:"type"`
 	Module   string                 `json:"module" yaml:"module"`
+	Protocol string                 `json:"protocol,omitempty" yaml:"protocol,omitempty"`
 	Requires []string               `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Ports    []string               `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Config   map[string]ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
@@ -92,6 +93,11 @@ const (
 	FieldTypeInteger  = "integer"
 	FieldTypeBoolean  = "boolean"
 	FieldTypeDuration = "duration"
+)
+
+const (
+	ProtocolTCP = "TCP"
+	ProtocolUDP = "UDP"
 )
 
 var (
@@ -361,6 +367,10 @@ func (d Driver) validate(cell string) error {
 
 	if err := validateModule(owner, d.Module); err != nil {
 		return err
+	}
+
+	if d.Protocol != "" && d.Protocol != ProtocolTCP && d.Protocol != ProtocolUDP {
+		return fmt.Errorf("%s has protocol %q which is not TCP or UDP", owner, d.Protocol)
 	}
 
 	if len(d.Requires) == 0 {

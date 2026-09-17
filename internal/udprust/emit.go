@@ -350,6 +350,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Name:     v.DriverName,
 		Type:     v.DriverStruct,
 		Module:   v.ModulePrefix + "driver::" + v.DriverModule,
+		Protocol: cellmanifest.ProtocolUDP,
 		Requires: []string{v.ControllerTrait},
 		Ports:    driverPorts,
 		Config: map[string]cellmanifest.ConfigField{

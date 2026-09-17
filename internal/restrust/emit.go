@@ -378,6 +378,7 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 			Name:     v.DriverName,
 			Type:     "HttpDriver",
 			Module:   v.ModulePrefix + "driver::http_driver",
+			Protocol: cellmanifest.ProtocolTCP,
 			Requires: requires,
 			Ports:    driverPorts,
 			Config: map[string]cellmanifest.ConfigField{

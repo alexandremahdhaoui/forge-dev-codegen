@@ -384,6 +384,10 @@ func TestTheCellManifestNamesTheDriverTheAdapterTheControllerAndThePort(t *testi
 		t.Errorf("driver requires = %+v", driver.Requires)
 	}
 
+	if driver.Protocol != cellmanifest.ProtocolTCP {
+		t.Errorf("the grpc driver carries protocol %q, want TCP", driver.Protocol)
+	}
+
 	if driver.Config["addr"].Default != "127.0.0.1:0" {
 		t.Errorf("driver config = %+v", driver.Config)
 	}

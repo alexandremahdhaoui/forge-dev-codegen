@@ -188,6 +188,9 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 	driverWithoutController := exampleManifest()
 	driverWithoutController.Provides.Drivers[0].Requires = nil
 
+	driverWithAnUnknownProtocol := exampleManifest()
+	driverWithAnUnknownProtocol.Provides.Drivers[0].Protocol = "http"
+
 	driverWithoutName := exampleManifest()
 	driverWithoutName.Provides.Drivers[0].Name = ""
 
@@ -431,6 +434,11 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			name:     "a driver that requires no controller trait is refused",
 			manifest: driverWithoutController,
 			message:  `driver "grpc" in cell "grpc" requires no controller trait`,
+		},
+		{
+			name:     "a driver with a protocol that is not TCP or UDP is refused",
+			manifest: driverWithAnUnknownProtocol,
+			message:  `driver "grpc" in cell "grpc" has protocol "http" which is not TCP or UDP`,
 		},
 		{
 			name:     "a driver with no name is refused",

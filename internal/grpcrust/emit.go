@@ -221,6 +221,7 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Name:     v.DriverName,
 		Type:     v.DriverStruct,
 		Module:   v.ModulePrefix + "driver::" + v.DriverModule,
+		Protocol: cellmanifest.ProtocolTCP,
 		Requires: []string{v.ControllerTrait},
 		Config: map[string]cellmanifest.ConfigField{
 			"addr": {

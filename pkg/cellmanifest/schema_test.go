@@ -95,6 +95,18 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 				"      ports: [HelloDatagramSessionGate, HelloDatagramBroadcast]\n",
 		},
 		{
+			name: "a driver with protocol TCP validates against the schema",
+			manifestYAML: "version: \"1\"\ncell: rest\ngenerator: rest-rust\n" +
+				"provides:\n  drivers:\n    - name: rest\n      type: HttpDriver\n" +
+				"      module: rest::driver::http_driver\n      protocol: TCP\n      requires: [GreetingController]\n",
+		},
+		{
+			name: "a driver with protocol UDP validates against the schema",
+			manifestYAML: "version: \"1\"\ncell: udp\ngenerator: udp-rust\n" +
+				"provides:\n  drivers:\n    - name: udp\n      type: HelloDatagramUdpDriver\n" +
+				"      module: udp::driver::hello_datagram_udp_driver\n      protocol: UDP\n      requires: [HelloDatagramController]\n",
+		},
+		{
 			name: "a build script under a directory of the cell validates against the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"buildScript: build/zz_generated_build.rs\n",
@@ -138,6 +150,12 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n" +
 				"      implements: HelloClient\n      config:\n        addr: { type: float }\n",
+		},
+		{
+			name: "a driver with protocol http fails the schema",
+			manifestYAML: "version: \"1\"\ncell: rest\ngenerator: rest-rust\n" +
+				"provides:\n  drivers:\n    - name: rest\n      type: HttpDriver\n" +
+				"      module: rest::driver::http_driver\n      protocol: http\n      requires: [GreetingController]\n",
 		},
 		{
 			name:         "a manifest with no cell name fails the schema",

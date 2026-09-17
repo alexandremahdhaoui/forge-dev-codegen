@@ -136,6 +136,14 @@ func TestTheSessionManifestHandsTheGateAndThePeerTableToTheDriversTheBroadcastTo
 		t.Errorf("tick driver = %+v", tick)
 	}
 
+	if udp.Protocol != cellmanifest.ProtocolUDP {
+		t.Errorf("the udp driver carries protocol %q, want UDP", udp.Protocol)
+	}
+
+	if tick.Protocol != "" {
+		t.Errorf("the tick driver carries protocol %q, want none because it listens on nothing", tick.Protocol)
+	}
+
 	if !reflect.DeepEqual(tick.Requires, []string{"HelloDatagramController"}) || fmt.Sprint(tick.Config["interval_ms"].Default) != "1000" {
 		t.Errorf("tick driver = %+v", tick)
 	}
