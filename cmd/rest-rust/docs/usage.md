@@ -116,18 +116,29 @@ parameters:
 
 `x-ports` takes a port name or a declaration. A name is the store port
 of an `x-store` schema, the subscribe port of the operation's own
-stream, or a port some operation declares. A declaration is an object
-naming a `kind`. The declared kinds are `clock` and `verifier`.
+stream, a port some operation declares, or a port another cell
+provides. A declaration is an object naming a `kind`. The declared
+kinds are `clock` and `verifier`.
 
 ```yaml
 x-ports:
   - GreetingStore
+  - AuthzClient
   - kind: clock
     name: GreetingClock
     instant: Instant
     span: Span
     adapters: [memory, system]
 ```
+
+A bare name that is none of the store, subscribe or declared ports is
+a port another cell provides, such as the `<Service>Client` port of a
+grpc cell. The cell writes none of it. The controller imports it at
+`crate::port::<snake>::<Name>`, where the crate root re-exports every
+port a cell provides, and the manifest lists it under `requires.ports`.
+`hexagonal-rust` refuses a required port no cell provides, naming the
+cell, the port and the controller that asked. A name ending in
+`Subscribe` that no `x-stream` declares is refused here.
 
 The name is Pascal case and may not take the name of a store or
 subscribe port. A kind says what the port is, so the engine writes both

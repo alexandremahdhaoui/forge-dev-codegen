@@ -43,6 +43,7 @@ type view struct {
 	UsedStores       []storeView
 	Events           []eventView
 	HandPorts        []handPortView
+	ForeignPorts     []string
 	Controllers      []controllerView
 	Clients          []clientView
 	Routes           []opView
@@ -140,6 +141,7 @@ type portView struct {
 	Port      string
 	PortSnake string
 	Snake     string
+	Module    string
 	Reaching  string
 }
 
@@ -365,6 +367,7 @@ func buildView(spec *Spec, opts Options) view {
 			Port:      sv.Port,
 			PortSnake: sv.PortSnake,
 			Snake:     sv.Snake,
+			Module:    cratePath + "port::" + sv.PortSnake,
 			Reaching:  "reaching " + sv.Snake + " store for",
 		}
 	}
@@ -392,6 +395,7 @@ func buildView(spec *Spec, opts Options) view {
 			Port:      ev.Port,
 			PortSnake: ev.PortSnake,
 			Snake:     ev.Snake,
+			Module:    cratePath + "port::" + ev.PortSnake,
 			Reaching:  "subscribing to " + ev.Snake + " events for",
 		}
 	}
@@ -403,7 +407,26 @@ func buildView(spec *Spec, opts Options) view {
 			Port:      hv.Name,
 			PortSnake: hv.PortSnake,
 			Snake:     hv.Snake,
+			Module:    cratePath + "port::" + hv.PortSnake,
 			Reaching:  "calling the " + hv.Snake + " port for",
+		}
+	}
+
+	for _, c := range spec.Controllers {
+		for _, p := range c.Ports {
+			if _, own := portsByName[p]; own {
+				continue
+			}
+
+			snake := rustname.Snake(p)
+			portsByName[p] = portView{
+				Port:      p,
+				PortSnake: snake,
+				Snake:     snake,
+				Module:    "crate::port::" + snake,
+				Reaching:  "calling the " + snake + " port for",
+			}
+			v.ForeignPorts = union(v.ForeignPorts, []string{p})
 		}
 	}
 

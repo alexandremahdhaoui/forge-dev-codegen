@@ -838,13 +838,52 @@ func TestALookupColumnIsAnEnumSoNeitherStoreAnswersADefaultForAColumnItCannotRea
 	}
 }
 
-func TestAPortNameThatNoOperationDeclaresIsRefused(t *testing.T) {
-	unknown := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [GreetingStore, GreetingCalendar]", 1)
+func TestABareNameNoOperationDeclaresIsAForeignPortTheCellRequiresAndWritesNoneOf(t *testing.T) {
+	foreign := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [GreetingStore, AuthzClient]", 1)
 
-	_, err := restrust.Generate([]byte(unknown), restrust.Options{Service: "songe-hello"})
-	if err == nil || !strings.Contains(err.Error(), "no operation declares it with a kind") {
-		t.Fatalf("an undeclared port name was not refused: %v", err)
+	byPath, err := generatedByPath(t, foreign)
+	if err != nil {
+		t.Fatalf("a bare port name was refused: %v", err)
 	}
+
+	wantIn(t, byPath, "controller/zz_generated_greeting_controller.rs",
+		"use crate::port::authz_client::{AuthzClient, AuthzClientError};",
+		"pub(crate) authz_client: Arc<dyn AuthzClient + Send + Sync>,",
+		"pub fn new(authz_client: Arc<dyn AuthzClient + Send + Sync>, greeting_clock: Arc<dyn GreetingClock + Send + Sync>, greeting_store: Arc<dyn GreetingStore + Send + Sync>) -> Self {",
+	)
+
+	if _, written := byPath["port/zz_generated_authz_client.rs"]; written {
+		t.Error("the cell wrote a port file for a port another cell provides")
+	}
+
+	m, err := cellmanifest.Parse([]byte(byPath[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("reading the manifest: %v", err)
+	}
+
+	if !holds(m.Requires.Ports, "AuthzClient") {
+		t.Errorf("requires.ports = %q, want AuthzClient in it", m.Requires.Ports)
+	}
+
+	for _, p := range m.Provides.Ports {
+		if p.Trait == "AuthzClient" {
+			t.Errorf("the manifest provides the foreign port %+v", p)
+		}
+	}
+
+	if !holds(m.Provides.Controllers[0].Ports, "AuthzClient") {
+		t.Errorf("controller ports = %q, want AuthzClient in it", m.Provides.Controllers[0].Ports)
+	}
+}
+
+func holds(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func TestTheControllerErrorEnumAndTheDriverCoverTheWholeTaxonomy(t *testing.T) {

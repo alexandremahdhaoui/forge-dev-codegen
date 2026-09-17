@@ -199,13 +199,47 @@ func checkRequiredPorts(merged cellmanifest.Merged) error {
 	for _, required := range merged.RequiredPorts {
 		if _, provided := merged.Ports[required.Trait]; !provided {
 			return fmt.Errorf(
-				"wiring the ports: cell %q requires port %q and no cell manifest declares that port trait",
-				required.Cell, required.Trait,
+				"wiring the ports: cell %q requires port %q%s and no cell manifest declares that port trait",
+				required.Cell, required.Trait, askedBy(merged, required),
 			)
 		}
 	}
 
 	return nil
+}
+
+func askedBy(merged cellmanifest.Merged, required cellmanifest.RequiredPort) string {
+	askers := []string{}
+
+	for _, trait := range sortedKeys(merged.Controllers) {
+		entry := merged.Controllers[trait]
+		if entry.Cell == required.Cell && holds(entry.Controller.Ports, required.Trait) {
+			askers = append(askers, fmt.Sprintf("controller %q", trait))
+		}
+	}
+
+	for _, name := range sortedKeys(merged.Drivers) {
+		entry := merged.Drivers[name]
+		if entry.Cell == required.Cell && holds(entry.Driver.Ports, required.Trait) {
+			askers = append(askers, fmt.Sprintf("driver %q", name))
+		}
+	}
+
+	if len(askers) == 0 {
+		return ""
+	}
+
+	return " for " + strings.Join(askers, " and ")
+}
+
+func holds(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map[string]bool) error {

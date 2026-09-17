@@ -395,6 +395,8 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 		m.Requires.Ports = append(m.Requires.Ports, crateports.TicketVerifierPort)
 	}
 
+	m.Requires.Ports = append(m.Requires.Ports, v.ForeignPorts...)
+
 	for _, s := range v.Stores {
 		m.Provides.Ports = append(m.Provides.Ports, cellmanifest.Port{
 			Trait:  s.Port,
@@ -754,7 +756,7 @@ pub trait {{ $c.Trait }}: Send + Sync {
 use std::sync::Arc;
 
 {{ range $c.Ports -}}
-use {{ $.CratePath }}port::{{ .PortSnake }}::{{ "{" }}{{ .Port }}, {{ .Port }}Error{{ "}" }};
+use {{ .Module }}::{{ "{" }}{{ .Port }}, {{ .Port }}Error{{ "}" }};
 {{ end -}}
 {{ if $c.Auth -}}
 use crate::types::subject::Subject;

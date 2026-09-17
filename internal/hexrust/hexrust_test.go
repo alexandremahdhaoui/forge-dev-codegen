@@ -1005,6 +1005,24 @@ drivers:
 	}
 }
 
+func TestARestControllerNamingAPortNoCellProvidesIsRefusedNamingTheCellThePortAndTheController(t *testing.T) {
+	root := t.TempDir()
+	foreignSpec := strings.Replace(helloSpec, "x-ports: [GreetingStore]", "x-ports: [AuthzClient, GreetingStore]", 1)
+	writeRestCell(t, root, "rest", foreignSpec, restrust.SideServer, false)
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest"},
+		Wiring:  []byte(helloWiring),
+	})
+
+	want := `wiring the ports: cell "rest" requires port "AuthzClient" for controller "GreetingController" and no cell manifest declares that port trait`
+	if err == nil || err.Error() != want {
+		t.Fatalf("generating reported %v, want %q", err, want)
+	}
+}
+
 func TestADriverRequiringAControllerNoManifestProvidesIsRefused(t *testing.T) {
 	root := standUpCells(t, "rest")
 

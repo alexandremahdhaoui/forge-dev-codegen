@@ -1169,8 +1169,6 @@ func parsePorts(where string, op operation, stream bool, response string, storeN
 		if strings.HasSuffix(port, SubscribePortSuffix) {
 			return nil, fmt.Errorf("reading %s: x-ports names %q, a subscribe port is %s of an x-stream operation's response", where, port, "<Event>"+SubscribePortSuffix)
 		}
-
-		return nil, fmt.Errorf("reading %s: x-ports names %q, which is not <Name>Store of an x-store schema and no operation declares it with a kind", where, port)
 	}
 
 	if subscribe != "" {
