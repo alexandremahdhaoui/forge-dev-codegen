@@ -36,8 +36,6 @@ const BuildScriptFile = "zz_generated_build.rs"
 
 const DefaultAddress = "127.0.0.1:0"
 
-const DefaultEndpoint = "http://127.0.0.1:50051"
-
 const (
 	SideServer = "server"
 	SideClient = "client"
@@ -292,7 +290,7 @@ func addClientToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Config: map[string]cellmanifest.ConfigField{
 			"endpoint": {
 				Type:        cellmanifest.FieldTypeString,
-				Default:     DefaultEndpoint,
+				Required:    true,
 				Description: "The grpc endpoint the " + v.ServiceSnake + " client dials",
 			},
 		},
@@ -474,14 +472,6 @@ impl From<pb::{{ .Name }}> for {{ .Name }} {
 {{ end }}
 pub struct {{ .ClientConfig }} {
     pub endpoint: String,
-}
-
-impl Default for {{ .ClientConfig }} {
-    fn default() -> Self {
-        Self {
-            endpoint: "{{ .DefaultEndpoint }}".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

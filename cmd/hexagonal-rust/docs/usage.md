@@ -56,7 +56,10 @@ adapter layer, and the generated `src/adapter/mod.rs` mounts it with one
 also writes its `<Type>Config` struct.
 
 A field carries a type among string, integer, boolean and duration, plus
-`default` and `description`.
+`required`, `default` and `description`. A required field lands in the
+Spec schema's `required` list and carries no default, so the loader
+configgen-gen writes refuses to start the node by name while the key is
+unset.
 
 ## What it refuses
 

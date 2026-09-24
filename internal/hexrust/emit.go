@@ -474,6 +474,7 @@ type specProperty struct {
 
 type specSchema struct {
 	Type       string                  `json:"type"`
+	Required   []string                `json:"required,omitempty"`
 	Properties map[string]specProperty `json:"properties"`
 }
 
@@ -510,8 +511,13 @@ func FlagName(key string) string {
 
 func ConfigSpec(p plan) (string, error) {
 	properties := map[string]specProperty{}
+	required := []string{}
 
 	for _, key := range p.Keys {
+		if key.Required {
+			required = append(required, key.Key)
+		}
+
 		property := specProperty{
 			Type:        key.Type,
 			Description: describe(key, p.Binary),
@@ -532,7 +538,7 @@ func ConfigSpec(p plan) (string, error) {
 		Info:    specInfo{Title: p.Binary + " config", Version: "0.1.0"},
 		Components: specComponents{
 			Schemas: map[string]specSchema{
-				"Spec": {Type: "object", Properties: properties},
+				"Spec": {Type: "object", Required: required, Properties: properties},
 			},
 		},
 	}

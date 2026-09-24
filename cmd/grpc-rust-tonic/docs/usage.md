@@ -70,7 +70,9 @@ layout:
 The manifest provides the port `<Service>Client` and the adapter
 `<cell>_client`, and no driver and no controller. The adapter's
 `endpoint` key carries the cell name, so two client cells over two
-protos get two endpoint keys. A controller in another cell names the
+protos get two endpoint keys. The endpoint has no default and is
+required, so a node started without it refuses by name and never dials
+an address nobody declared. A controller in another cell names the
 port in its own declaration, `x-ports` for a rest cell or
 `layout.ports` for a grpc server cell, and hexagonal-rust wires the
 adapter. `layout.ports` on a client cell is refused by name, because a

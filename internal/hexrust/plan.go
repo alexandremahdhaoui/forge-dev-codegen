@@ -90,8 +90,19 @@ type driverPlan struct {
 type specKey struct {
 	Key         string
 	Type        string
+	Required    bool
 	Default     any
 	Description string
+}
+
+func declaredKey(key string, declared cellmanifest.ConfigField) specKey {
+	return specKey{
+		Key:         key,
+		Type:        specType(declared.Type),
+		Required:    declared.Required,
+		Default:     declared.Default,
+		Description: declared.Description,
+	}
 }
 
 func configKey(parts ...string) string {
@@ -286,12 +297,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 				Expr: readExpr(key, declared.Type),
 			})
 
-			p.Keys = append(p.Keys, specKey{
-				Key:         key,
-				Type:        specType(declared.Type),
-				Default:     declared.Default,
-				Description: declared.Description,
-			})
+			p.Keys = append(p.Keys, declaredKey(key, declared))
 		}
 
 		for _, trait := range entry.Driver.Requires {
@@ -604,12 +610,7 @@ func planCandidate(
 			Expr: readExpr(key, declared.Type),
 		})
 
-		p.Keys = append(p.Keys, specKey{
-			Key:         key,
-			Type:        specType(declared.Type),
-			Default:     declared.Default,
-			Description: declared.Description,
-		})
+		p.Keys = append(p.Keys, declaredKey(key, declared))
 	}
 
 	return cp, nil

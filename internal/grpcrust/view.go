@@ -115,7 +115,6 @@ type serviceView struct {
 	DriverModule     string
 	DriverName       string
 	DefaultAddress   string
-	DefaultEndpoint  string
 	ControllerSnake  string
 	ControllerTrait  string
 	ControllerError  string
@@ -294,7 +293,6 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		DriverModule:     rustname.Snake(svc.Name) + "_grpc_driver",
 		DriverName:       driverName,
 		DefaultAddress:   DefaultAddress,
-		DefaultEndpoint:  DefaultEndpoint,
 		ControllerSnake:  rustname.Snake(svc.Name),
 		ControllerTrait:  rustname.Pascal(svc.Name) + "Controller",
 		ControllerError:  rustname.Pascal(svc.Name) + "ControllerError",

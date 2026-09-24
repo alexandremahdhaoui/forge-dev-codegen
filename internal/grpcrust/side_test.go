@@ -216,3 +216,17 @@ func TestTwoClientCellsOverTwoProtosShareNoModulePathInPortOrAdapter(t *testing.
 		t.Fatalf("both adapters carry the name %q", merged.Adapters[0].Adapter.Name)
 	}
 }
+
+func TestAClientCellEndpointHasNoDefaultAndIsRequired(t *testing.T) {
+	byPath, m := generateSide(t, "hello_client", grpcrust.SideClient)
+
+	endpoint := m.Provides.Adapters[0].Config["endpoint"]
+	if !endpoint.Required || endpoint.Default != nil {
+		t.Errorf("endpoint = %+v, want required with no default", endpoint)
+	}
+
+	adapter := byPath["adapter/zz_generated_hello_grpc_client.rs"]
+	if strings.Contains(adapter, "impl Default for") {
+		t.Errorf("the client config carries a default endpoint:\n%s", adapter)
+	}
+}

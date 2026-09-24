@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/grpcrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
@@ -592,6 +594,71 @@ drivers:
 
 	if strings.Contains(spec, "description: \"\"") || strings.Contains(spec, "description: ''") {
 		t.Errorf("the config spec carries an empty description\n%s", spec)
+	}
+}
+
+func specRequired(t *testing.T, spec string) []string {
+	t.Helper()
+
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Required []string `json:"required"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+
+	if err := yaml.Unmarshal([]byte(spec), &doc); err != nil {
+		t.Fatalf("parsing the config spec: %v\n%s", err, spec)
+	}
+
+	return doc.Components.Schemas["Spec"].Required
+}
+
+func TestAnAdapterConfigKeyDeclaredRequiredLandsInTheConfigSpecRequiredList(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	writeCell(t, root, "ws", cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{{
+				Name:       "quiet",
+				Type:       "QuietStore",
+				Module:     "ws::adapter::quiet",
+				Implements: "GreetingStore",
+				Config: map[string]cellmanifest.ConfigField{
+					"token":    {Type: cellmanifest.FieldTypeString, Required: true},
+					"secret":   {Type: cellmanifest.FieldTypeString, Required: true},
+					"capacity": {Type: cellmanifest.FieldTypeInteger, Default: 100},
+				},
+			}},
+		},
+	})
+
+	files := generateHello(t, root, `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: quiet
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`, "grpc", "rest", "udp", "ws")
+
+	want := []string{"greeting_store_quiet_secret", "greeting_store_quiet_token"}
+	if got := specRequired(t, files["zz_generated_config_spec.yaml"]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("required = %q, want %q\n%s", got, want, files["zz_generated_config_spec.yaml"])
+	}
+}
+
+func TestAConfigKeyNoAdapterDeclaresRequiredStaysOutOfTheRequiredList(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+	files := generateHello(t, root, helloWiring)
+
+	if got := specRequired(t, files["zz_generated_config_spec.yaml"]); len(got) != 0 {
+		t.Fatalf("required = %q, want none\n%s", got, files["zz_generated_config_spec.yaml"])
 	}
 }
 
