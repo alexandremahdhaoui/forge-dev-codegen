@@ -44,7 +44,7 @@ writes above it.
 | Emitted, under the cell | Side | Holds |
 |---|---|---|
 | `types/zz_generated_<schema>.rs` | both | one serde struct per component schema |
-| `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put and get, plus its error enum |
+| `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put, get and delete, plus its error enum. A delete of a key that holds no row refuses by name |
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
 | `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
