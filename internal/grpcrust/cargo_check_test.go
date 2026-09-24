@@ -69,7 +69,7 @@ impl HelloController for HelloControllerImpl {
 }
 `
 
-func TestTheGeneratedCellPassesCargoCheck(t *testing.T) {
+func TestTheGeneratedCellPassesClippyDenyingWarnings(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -97,7 +97,7 @@ func TestTheGeneratedCellPassesCargoCheck(t *testing.T) {
 
 	write("src/grpc/controller/hello_controller.rs", helloControllerImpl)
 
-	runCargoCheck(t, cargo, root)
+	runClippyDenyingWarnings(t, cargo, root)
 }
 
 const rosterProto = `
@@ -107,7 +107,14 @@ package songe.roster.v1;
 
 service Roster {
   rpc List(ListRequest) returns (ListReply);
+  rpc Forget(ForgetRequest) returns (ForgetReply);
 }
+
+message ForgetRequest {
+  string id = 1;
+}
+
+message ForgetReply {}
 
 message ListRequest {
   repeated string ids = 1;
@@ -124,9 +131,13 @@ message Entry {
 `
 
 const rosterControllerImpl = `use crate::grpc::controller::{RosterController, RosterControllerError, RosterControllerImpl};
-use crate::grpc::types::roster_messages::{Entry, ListReply, ListRequest};
+use crate::grpc::types::roster_messages::{Entry, ForgetReply, ForgetRequest, ListReply, ListRequest};
 
 impl RosterController for RosterControllerImpl {
+    fn forget(&self, _: ForgetRequest) -> Result<ForgetReply, RosterControllerError> {
+        Ok(ForgetReply {})
+    }
+
     fn list(&self, request: ListRequest) -> Result<ListReply, RosterControllerError> {
         Ok(ListReply {
             entries: request
@@ -182,7 +193,37 @@ func TestARepeatedFieldIsAVecInCoreAndOnTheWireAndEveryMessageItemConvertsAtTheB
 	}
 }
 
-func TestACellCarryingARepeatedScalarAndARepeatedMessagePassesCargoCheck(t *testing.T) {
+func TestAMessageWithNoFieldsConvertsWithoutAnUnusedBinding(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
+	if err != nil {
+		t.Fatalf("generating the cell: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	for _, path := range []string{
+		"adapter/zz_generated_roster_grpc_client.rs",
+		"driver/zz_generated_roster_grpc_driver.rs",
+	} {
+		content := byPath[path]
+
+		for _, want := range []string{
+			"fn from(_: ForgetReply) -> Self {",
+			"fn from(_: pb::ForgetReply) -> Self {",
+			"fn from(v: ForgetRequest) -> Self {",
+			"fn from(v: pb::ForgetRequest) -> Self {",
+		} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s lacks %q\n%s", path, want, content)
+			}
+		}
+	}
+}
+
+func TestACellCarryingARepeatedScalarARepeatedMessageAndAnEmptyReplyPassesClippyDenyingWarnings(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -210,7 +251,7 @@ func TestACellCarryingARepeatedScalarAndARepeatedMessagePassesCargoCheck(t *test
 
 	write("src/grpc/controller/roster_controller.rs", rosterControllerImpl)
 
-	runCargoCheck(t, cargo, root)
+	runClippyDenyingWarnings(t, cargo, root)
 }
 
 func writerUnder(t *testing.T, root string) func(rel, content string) {
@@ -230,10 +271,10 @@ func writerUnder(t *testing.T, root string) func(rel, content string) {
 	}
 }
 
-func runCargoCheck(t *testing.T, cargo, root string) {
+func runClippyDenyingWarnings(t *testing.T, cargo, root string) {
 	t.Helper()
 
-	cmd := exec.Command(cargo, "check", "--workspace", "--all-targets")
+	cmd := exec.Command(cargo, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
 	cmd.Dir = root
 
 	out, err := cmd.CombinedOutput()
@@ -245,10 +286,10 @@ func runCargoCheck(t *testing.T, cargo, root string) {
 	if strings.Contains(lower, "could not resolve host") ||
 		strings.Contains(lower, "failed to get") ||
 		strings.Contains(lower, "spurious network error") {
-		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+		t.Skipf("cargo clippy needs network access to crates.io, which this run did not have: %v\n%s", err, out)
 	}
 
-	t.Fatalf("cargo check: %v\n%s", err, out)
+	t.Fatalf("cargo clippy: %v\n%s", err, out)
 }
 
 const bothEnginesOpenapi = `
@@ -323,7 +364,6 @@ pub mod rest;
 const bothEnginesGreetingControllerImpl = `use crate::rest::controller::{
     GreetingController, GreetingControllerError, GreetingControllerImpl,
 };
-use crate::rest::port::greeting_store::GreetingStore;
 use crate::rest::types::greeting::Greeting;
 
 impl GreetingController for GreetingControllerImpl {
@@ -340,7 +380,7 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
-func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
+func TestBothEnginesFillOneCrateAndTheCratePassesClippyDenyingWarnings(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -395,5 +435,5 @@ func TestBothEnginesFillOneCrateAndTheCratePassesCargoCheck(t *testing.T) {
 	write("src/rest/controller/greeting_controller.rs", bothEnginesGreetingControllerImpl)
 	write("src/grpc/controller/hello_controller.rs", helloControllerImpl)
 
-	runCargoCheck(t, cargo, root)
+	runClippyDenyingWarnings(t, cargo, root)
 }

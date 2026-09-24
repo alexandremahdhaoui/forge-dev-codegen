@@ -453,7 +453,7 @@ mod pb {
 }
 {{ range .Messages }}
 impl From<{{ .Name }}> for pb::{{ .Name }} {
-    fn from(v: {{ .Name }}) -> Self {
+    fn from({{ .Binding }}: {{ .Name }}) -> Self {
         Self {
 {{- range .Fields }}
             {{ .Ident }}: {{ .ToPb }},
@@ -463,7 +463,7 @@ impl From<{{ .Name }}> for pb::{{ .Name }} {
 }
 
 impl From<pb::{{ .Name }}> for {{ .Name }} {
-    fn from(v: pb::{{ .Name }}) -> Self {
+    fn from({{ .Binding }}: pb::{{ .Name }}) -> Self {
         Self {
 {{- range .Fields }}
             {{ .Ident }}: {{ .ToCore }},
@@ -549,7 +549,7 @@ mod pb {
 }
 {{ range .Messages }}
 impl From<pb::{{ .Name }}> for {{ .Name }} {
-    fn from(v: pb::{{ .Name }}) -> Self {
+    fn from({{ .Binding }}: pb::{{ .Name }}) -> Self {
         Self {
 {{- range .Fields }}
             {{ .Ident }}: {{ .ToCore }},
@@ -559,7 +559,7 @@ impl From<pb::{{ .Name }}> for {{ .Name }} {
 }
 
 impl From<{{ .Name }}> for pb::{{ .Name }} {
-    fn from(v: {{ .Name }}) -> Self {
+    fn from({{ .Binding }}: {{ .Name }}) -> Self {
         Self {
 {{- range .Fields }}
             {{ .Ident }}: {{ .ToPb }},

@@ -123,6 +123,10 @@ For every `service` in the file:
 | `proto/zz_generated_<service>.proto` | both | the proto file, copied verbatim |
 | `zz_generated_cell.yaml` | both | the cell manifest hexagonal-rust reads |
 
+The adapter and the driver convert every message between its plain
+struct and its wire struct. A message with no fields converts through
+the binding `_`, so clippy denying warnings finds no unused variable.
+
 Each layer directory carries a `mod.rs` that mounts its generated file
 and aliases it under the logical name, so a reader writes
 `<core_crate>::grpc::controller::hello_controller::HelloController` and

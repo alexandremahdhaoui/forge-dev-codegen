@@ -32,9 +32,15 @@ type fieldView struct {
 }
 
 type messageView struct {
-	Name   string
-	Fields []fieldView
+	Name    string
+	Binding string
+	Fields  []fieldView
 }
+
+const (
+	messageBinding = "v"
+	ignoredBinding = "_"
+)
 
 type rpcView struct {
 	Ident      string
@@ -149,9 +155,10 @@ func ScalarRustType(kind string) string {
 }
 
 func buildMessageView(m Message) messageView {
-	mv := messageView{Name: rustname.Pascal(m.Name)}
+	mv := messageView{Name: rustname.Pascal(m.Name), Binding: ignoredBinding}
 
 	for _, f := range m.Fields {
+		mv.Binding = messageBinding
 		mv.Fields = append(mv.Fields, buildFieldView(f))
 	}
 
@@ -160,7 +167,7 @@ func buildMessageView(m Message) messageView {
 
 func buildFieldView(f Field) fieldView {
 	ident := rustname.RustIdent(f.Name)
-	moved := "v." + ident
+	moved := messageBinding + "." + ident
 
 	if f.Kind == FieldScalar {
 		t := ScalarRustType(f.Scalar)
