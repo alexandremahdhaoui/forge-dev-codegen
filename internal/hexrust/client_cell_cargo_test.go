@@ -116,11 +116,11 @@ impl std::error::Error for ConfigError {}
 
 pub struct SongeHelloConfig {
     pub greeting_store: String,
-    pub greeting_store_sqlite_path: String,
+    pub sqlite_path: String,
     pub identity_client: String,
-    pub identity_client_identity_client_client_endpoint: String,
+    pub identity_client_endpoint: String,
     pub authz_client: String,
-    pub authz_client_authz_client_client_endpoint: String,
+    pub authz_client_endpoint: String,
     pub driver_grpc: bool,
     pub driver_rest: bool,
     pub grpc_addr: String,
@@ -137,11 +137,11 @@ impl SongeHelloConfig {
 
         Ok(Self {
             greeting_store: "sqlite".to_string(),
-            greeting_store_sqlite_path: ":memory:".to_string(),
-            identity_client: "identity_client_client".to_string(),
-            identity_client_identity_client_client_endpoint: "http://127.0.0.1:50051".to_string(),
-            authz_client: "authz_client_client".to_string(),
-            authz_client_authz_client_client_endpoint: "http://127.0.0.1:50052".to_string(),
+            sqlite_path: ":memory:".to_string(),
+            identity_client: "identity_client".to_string(),
+            identity_client_endpoint: "http://127.0.0.1:50051".to_string(),
+            authz_client: "authz_client".to_string(),
+            authz_client_endpoint: "http://127.0.0.1:50052".to_string(),
             driver_grpc: true,
             driver_rest: true,
             grpc_addr: "127.0.0.1:0".to_string(),
@@ -186,7 +186,7 @@ func TestARestControllerCallingTwoClientCellsBesideTheCratesOwnGrpcServerCellCom
 	generated := generateHello(t, root, clientCellWiring, "authz_client", "grpc", "identity_client", "rest")
 
 	configSpec := generated["zz_generated_config_spec.yaml"]
-	for _, key := range []string{"identity_client_identity_client_client_endpoint", "authz_client_authz_client_client_endpoint"} {
+	for _, key := range []string{"identity_client_endpoint", "authz_client_endpoint"} {
 		if !strings.Contains(configSpec, key) {
 			t.Fatalf("the config spec never carried %q:\n%s", key, configSpec)
 		}

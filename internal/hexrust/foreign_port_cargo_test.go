@@ -69,9 +69,9 @@ impl std::error::Error for ConfigError {}
 
 pub struct SongeHelloConfig {
     pub greeting_store: String,
-    pub greeting_store_sqlite_path: String,
+    pub sqlite_path: String,
     pub hello_client: String,
-    pub hello_client_grpc_client_endpoint: String,
+    pub grpc_endpoint: String,
     pub driver_grpc: bool,
     pub driver_rest: bool,
     pub grpc_addr: String,
@@ -88,9 +88,9 @@ impl SongeHelloConfig {
 
         Ok(Self {
             greeting_store: "sqlite".to_string(),
-            greeting_store_sqlite_path: ":memory:".to_string(),
-            hello_client: "grpc_client".to_string(),
-            hello_client_grpc_client_endpoint: "http://127.0.0.1:50051".to_string(),
+            sqlite_path: ":memory:".to_string(),
+            hello_client: "grpc".to_string(),
+            grpc_endpoint: "http://127.0.0.1:50051".to_string(),
             driver_grpc: true,
             driver_rest: true,
             grpc_addr: "127.0.0.1:0".to_string(),

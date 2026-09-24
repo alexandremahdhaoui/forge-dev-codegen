@@ -78,7 +78,7 @@ func TestSideClientEmitsThePortTheAdapterAndTheTypesAndTheManifestProvidesNoDriv
 	}
 
 	adapter := m.Provides.Adapters[0]
-	if adapter.Name != "hello_client_client" || adapter.Module != "hello_client::adapter::hello_grpc_client" || adapter.Implements != "HelloClient" {
+	if adapter.Name != "hello_client" || adapter.Module != "hello_client::adapter::hello_grpc_client" || adapter.Implements != "HelloClient" {
 		t.Errorf("adapter = %+v", adapter)
 	}
 

@@ -73,6 +73,7 @@ Every refusal names the thing that broke.
 - a driver a manifest provides and the wiring never names
 - a driver that requires a controller trait no manifest provides
 - a key the wiring schema does not know
+- two owners, a driver, a port or an adapter, that spell one config key
 
 ## What it emits
 
@@ -104,9 +105,14 @@ The schema holds one property per decision.
 | Key | Type | From |
 |---|---|---|
 | `<port>` | string | the port choice, defaulting to the wiring default |
-| `<port><Candidate><Field>` | the field type | one candidate config field |
+| `<candidate><Field>` | the field type | one candidate config field |
 | `driver<Name>` | boolean | whether that driver starts |
 | `<driver><Field>` | the field type | one driver config field |
+
+An adapter field and a driver field follow one rule. The key is the
+owner's name and the field, with no port in front. Adapter names are
+unique across the crate, so the key stays unique. Two owners that still
+spell one key are refused, naming both.
 
 configgen-gen cannot emit an enum, so the port choice travels as a
 string. Main matches it and answers an error naming the port and every

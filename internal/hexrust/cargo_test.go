@@ -166,8 +166,8 @@ impl std::error::Error for ConfigError {}
 
 pub struct SongeHelloConfig {
     pub greeting_store: String,
-    pub greeting_store_memory_capacity: i64,
-    pub greeting_store_sqlite_path: String,
+    pub memory_capacity: i64,
+    pub sqlite_path: String,
     pub driver_grpc: bool,
     pub driver_rest: bool,
     pub driver_udp: bool,
@@ -180,8 +180,8 @@ impl Default for SongeHelloConfig {
     fn default() -> Self {
         Self {
             greeting_store: "sqlite".to_string(),
-            greeting_store_memory_capacity: 100,
-            greeting_store_sqlite_path: ":memory:".to_string(),
+            memory_capacity: 100,
+            sqlite_path: ":memory:".to_string(),
             driver_grpc: true,
             driver_rest: true,
             driver_udp: true,
@@ -205,11 +205,11 @@ impl SongeHelloConfig {
 
             match key {
                 "greeting_store" => config.greeting_store = value.to_string(),
-                "greeting_store_memory_capacity" => {
-                    config.greeting_store_memory_capacity = parse_integer(key, value)?
+                "memory_capacity" => {
+                    config.memory_capacity = parse_integer(key, value)?
                 }
-                "greeting_store_sqlite_path" => {
-                    config.greeting_store_sqlite_path = value.to_string()
+                "sqlite_path" => {
+                    config.sqlite_path = value.to_string()
                 }
                 "driver_grpc" => config.driver_grpc = parse_boolean(key, value)?,
                 "driver_rest" => config.driver_rest = parse_boolean(key, value)?,

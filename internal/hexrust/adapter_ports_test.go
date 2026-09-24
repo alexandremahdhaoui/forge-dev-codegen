@@ -235,7 +235,7 @@ func TestAnAdapterConsumingAPortGetsItAfterItsConfigAndThatPortIsBuiltFirst(t *t
 		"let token_source: Arc<dyn TokenSource + Send + Sync> = match config.token_source.as_str() {",
 		"let greeting_client: Arc<dyn GreetingClient + Send + Sync> = match config.greeting_client.as_str() {",
 		`"rest_greeting_client" => Arc::new(`,
-		"GreetingRestClient::new(GreetingRestClientConfig {\n                base_url: config.greeting_client_rest_greeting_client_base_url.clone(),\n            }, token_source.clone()),",
+		"GreetingRestClient::new(GreetingRestClientConfig {\n                base_url: config.rest_greeting_client_base_url.clone(),\n            }, token_source.clone()),",
 		"use songe_hello::rest::adapter::greeting_rest_client::{GreetingRestClient, GreetingRestClientConfig};",
 		"use songe_hello::port::token_source::TokenSource;",
 		"use songe_hello::port::ticket_verifier::TicketVerifier;",
@@ -365,7 +365,7 @@ func TestTheConfigSpecHoldsTheChoiceOfAPortOnlyAnAdapterConsumes(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"token_source:", "token_source_file_path:", "greeting_client:", "greeting_client_rest_greeting_client_base_url:",
+		"token_source:", "file_path:", "greeting_client:", "rest_greeting_client_base_url:",
 	} {
 		if !strings.Contains(spec, want) {
 			t.Errorf("the config spec lacks %q\n%s", want, spec)

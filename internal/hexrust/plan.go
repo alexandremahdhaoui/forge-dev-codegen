@@ -89,15 +89,17 @@ type driverPlan struct {
 
 type specKey struct {
 	Key         string
+	Owner       string
 	Type        string
 	Required    bool
 	Default     any
 	Description string
 }
 
-func declaredKey(key string, declared cellmanifest.ConfigField) specKey {
+func declaredKey(key, owner string, declared cellmanifest.ConfigField) specKey {
 	return specKey{
 		Key:         key,
+		Owner:       owner,
 		Type:        specType(declared.Type),
 		Required:    declared.Required,
 		Default:     declared.Default,
@@ -207,9 +209,26 @@ func buildPlan(merged cellmanifest.Merged, wiring Wiring, opts Options) (plan, e
 
 	p.Imports = sortedKeys(imports)
 
-	sort.Slice(p.Keys, func(i, j int) bool { return p.Keys[i].Key < p.Keys[j].Key })
+	sort.SliceStable(p.Keys, func(i, j int) bool { return p.Keys[i].Key < p.Keys[j].Key })
+
+	if err := checkKeysSpelledOnce(p.Keys); err != nil {
+		return plan{}, err
+	}
 
 	return p, nil
+}
+
+func checkKeysSpelledOnce(sorted []specKey) error {
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i].Key == sorted[i-1].Key {
+			return fmt.Errorf(
+				"wiring the config: %s and %s both spell the config key %q, rename one so each key has one owner",
+				sorted[i-1].Owner, sorted[i].Owner, sorted[i].Key,
+			)
+		}
+	}
+
+	return nil
 }
 
 func checkRequiredPorts(merged cellmanifest.Merged) error {
@@ -297,7 +316,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 				Expr: readExpr(key, declared.Type),
 			})
 
-			p.Keys = append(p.Keys, declaredKey(key, declared))
+			p.Keys = append(p.Keys, declaredKey(key, fmt.Sprintf("driver %q", name), declared))
 		}
 
 		for _, trait := range entry.Driver.Requires {
@@ -310,6 +329,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 
 		p.Keys = append(p.Keys, specKey{
 			Key:         "driver_" + rustname.Snake(name),
+			Owner:       fmt.Sprintf("driver %q", name),
 			Type:        "boolean",
 			Default:     wiring.Drivers[name].Enabled,
 			Description: "Whether the " + name + " driver starts",
@@ -464,6 +484,7 @@ func planPort(
 
 	p.Keys = append(p.Keys, specKey{
 		Key:         configKey(trait),
+		Owner:       fmt.Sprintf("port %q", trait),
 		Type:        "string",
 		Default:     chosen,
 		Description: "Which " + trait + " adapter to build, one of " + pp.Names,
@@ -570,8 +591,6 @@ func planCandidate(
 	byName map[string]cellmanifest.AdapterEntry,
 	imports map[string]bool,
 ) (candidatePlan, error) {
-	portKey := configKey(trait)
-
 	entry, provided := byName[name]
 	if !provided {
 		return candidatePlan{}, fmt.Errorf(
@@ -603,14 +622,14 @@ func planCandidate(
 
 	for _, field := range sortedFieldNames(entry.Adapter.Config) {
 		declared := entry.Adapter.Config[field]
-		key := configKey(portKey, name, field)
+		key := configKey(name, field)
 
 		cp.Fields = append(cp.Fields, fieldPlan{
 			Name: field,
 			Expr: readExpr(key, declared.Type),
 		})
 
-		p.Keys = append(p.Keys, declaredKey(key, declared))
+		p.Keys = append(p.Keys, declaredKey(key, fmt.Sprintf("adapter %q", name), declared))
 	}
 
 	return cp, nil

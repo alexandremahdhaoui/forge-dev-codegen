@@ -397,7 +397,7 @@ func TestTheCellManifestNamesTheDriverTheAdapterTheControllerAndThePort(t *testi
 	}
 
 	adapter := m.Provides.Adapters[0]
-	if adapter.Name != "grpc_client" || adapter.Implements != "HelloClient" || adapter.Type != "HelloGrpcClient" {
+	if adapter.Name != "grpc" || adapter.Implements != "HelloClient" || adapter.Type != "HelloGrpcClient" {
 		t.Errorf("adapter = %+v", adapter)
 	}
 

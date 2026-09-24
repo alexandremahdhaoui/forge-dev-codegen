@@ -262,12 +262,10 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		return serviceView{}, err
 	}
 
-	driverName := opts.Cell
-	clientName := opts.Cell + "_client"
+	name := opts.Cell
 
 	if !only {
-		driverName = opts.Cell + "_" + rustname.Snake(svc.Name)
-		clientName = opts.Cell + "_" + rustname.Snake(svc.Name) + "_client"
+		name = opts.Cell + "_" + rustname.Snake(svc.Name)
 	}
 
 	sv := serviceView{
@@ -285,13 +283,13 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 		ClientConfig:     rustname.Pascal(svc.Name) + "GrpcClientConfig",
 		ClientSetupError: rustname.Pascal(svc.Name) + "GrpcClientError",
 		ClientModule:     rustname.Snake(svc.Name) + "_grpc_client",
-		ClientName:       clientName,
+		ClientName:       name,
 		DriverStruct:     rustname.Pascal(svc.Name) + "GrpcDriver",
 		DriverConfig:     rustname.Pascal(svc.Name) + "GrpcDriverConfig",
 		DriverError:      rustname.Pascal(svc.Name) + "GrpcDriverError",
 		DriverService:    rustname.Pascal(svc.Name) + "GrpcService",
 		DriverModule:     rustname.Snake(svc.Name) + "_grpc_driver",
-		DriverName:       driverName,
+		DriverName:       name,
 		DefaultAddress:   DefaultAddress,
 		ControllerSnake:  rustname.Snake(svc.Name),
 		ControllerTrait:  rustname.Pascal(svc.Name) + "Controller",
