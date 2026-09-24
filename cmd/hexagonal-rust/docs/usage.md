@@ -59,7 +59,8 @@ A field carries a type among string, integer, boolean and duration, plus
 `required`, `default` and `description`. A required field lands in the
 Spec schema's `required` list and carries no default, so the loader
 configgen-gen writes refuses to start the node by name while the key is
-unset.
+unset. The crate root secret adapter declares its `secret` and the field
+it answers, `id` for a TicketVerifier, required the same way.
 
 ## What it refuses
 

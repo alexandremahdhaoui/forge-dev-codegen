@@ -155,12 +155,14 @@ func secretConfig(shape crateports.Secret) map[string]cellmanifest.ConfigField {
 	config := map[string]cellmanifest.ConfigField{
 		"secret": {
 			Type:        cellmanifest.FieldTypeString,
+			Required:    true,
 			Description: "The one string the " + shape.Snake + " secret adapter accepts",
 		},
 	}
 
 	config[shape.Field] = cellmanifest.ConfigField{
 		Type:        cellmanifest.FieldTypeString,
+		Required:    true,
 		Description: "The " + shape.Field + " of the " + shape.Success + " the " + shape.Snake + " secret adapter answers on a match",
 	}
 

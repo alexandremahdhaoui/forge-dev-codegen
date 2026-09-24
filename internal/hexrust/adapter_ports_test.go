@@ -2,6 +2,7 @@ package hexrust_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -460,4 +461,36 @@ func TestAnUnknownCrateRootAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *tes
 
 func TestACrateRootPortWithAnEmptyAdaptersListIsRefusedByName(t *testing.T) {
 	secretRefusal(t, map[string][]string{"TicketVerifier": {}}, "the adapters list is empty")
+}
+
+func TestTheCrateRootSecretAdapterRequiresItsSecretAndItsField(t *testing.T) {
+	root := t.TempDir()
+
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, false)
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest"},
+		Ports:   guardedCrateRootPorts,
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+`),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var spec string
+	for _, f := range files {
+		if f.Path == hexrust.ConfigSpecFile {
+			spec = f.Content
+		}
+	}
+
+	want := []string{"secret_id", "secret_secret"}
+	if got := specRequired(t, spec); !reflect.DeepEqual(got, want) {
+		t.Fatalf("required = %q, want %q\n%s", got, want, spec)
+	}
 }
