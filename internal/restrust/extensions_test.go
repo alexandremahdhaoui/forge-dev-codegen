@@ -634,6 +634,83 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
+const guardedPublishTest = `use std::sync::{Arc, Mutex};
+
+use songe_hello::rest::adapter::greeting_memory::{GreetingMemoryStore, GreetingMemoryStoreConfig};
+use songe_hello::rest::adapter::greeting_sqlite::{GreetingSqliteStore, GreetingSqliteStoreConfig};
+use songe_hello::rest::port::greeting_event_subscribe::{
+    GreetingEventSubscribe, GreetingEventSubscribeError,
+};
+use songe_hello::rest::port::greeting_store::GreetingStore;
+use songe_hello::rest::types::greeting::Greeting;
+use songe_hello::rest::types::greeting_event::GreetingEvent;
+
+#[derive(Default)]
+struct RecordingPublisher {
+    published: Mutex<Vec<String>>,
+}
+
+impl GreetingEventSubscribe for RecordingPublisher {
+    fn subscribe(
+        &self,
+        key: &str,
+    ) -> Result<std::sync::mpsc::Receiver<GreetingEvent>, GreetingEventSubscribeError> {
+        Err(GreetingEventSubscribeError::Subscribe {
+            key: key.to_string(),
+            source: "the recording publisher holds no subscriber".into(),
+        })
+    }
+
+    fn publish(&self, key: &str, _event: GreetingEvent) -> Result<(), GreetingEventSubscribeError> {
+        self.published.lock().unwrap().push(key.to_string());
+
+        Ok(())
+    }
+}
+
+fn greeting(id: &str) -> Greeting {
+    Greeting {
+        count: 0,
+        id: id.to_string(),
+        name: "kay".to_string(),
+    }
+}
+
+fn publishes_only_the_put(store: &dyn GreetingStore, publisher: &RecordingPublisher) {
+    store.put(greeting("greeting-1")).unwrap();
+    store.delete("greeting-1").unwrap();
+
+    assert_eq!(
+        *publisher.published.lock().unwrap(),
+        vec!["greeting-1".to_string()]
+    );
+}
+
+#[test]
+fn a_store_feeding_a_stream_publishes_nothing_on_delete() {
+    let sqlite_publisher = Arc::new(RecordingPublisher::default());
+    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("publish.db");
+    let sqlite = GreetingSqliteStore::new(
+        GreetingSqliteStoreConfig {
+            path: path.display().to_string(),
+        },
+        sqlite_publisher.clone(),
+    )
+    .unwrap();
+
+    publishes_only_the_put(&sqlite, &sqlite_publisher);
+
+    let memory_publisher = Arc::new(RecordingPublisher::default());
+    let memory = GreetingMemoryStore::new(
+        GreetingMemoryStoreConfig { capacity: 8 },
+        memory_publisher.clone(),
+    )
+    .unwrap();
+
+    publishes_only_the_put(&memory, &memory_publisher);
+}
+`
+
 func WriteCrateRootPorts(t *testing.T, write func(rel, content string), header string) {
 	t.Helper()
 
@@ -644,7 +721,7 @@ func WriteCrateRootPorts(t *testing.T, write func(rel, content string), header s
 	write("src/port/"+crateports.TokenSourceFile, crateports.TokenSourceSource(header))
 }
 
-func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImpl(t *testing.T) {
+func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImplAndItsStreamedStorePublishesNothingOnDelete(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -683,21 +760,8 @@ func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImpl(t
 	}
 
 	write("src/rest/controller/greeting_controller.rs", guardedGreetingControllerImpl)
+	write("tests/publish.rs", guardedPublishTest)
 
-	cmd := exec.Command(cargo, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
-	cmd.Dir = root
-
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return
-	}
-
-	lower := strings.ToLower(string(out))
-	if strings.Contains(lower, "could not resolve host") ||
-		strings.Contains(lower, "failed to get") ||
-		strings.Contains(lower, "spurious network error") {
-		t.Skipf("cargo check needs network access to crates.io, which this run did not have: %v\n%s", err, out)
-	}
-
-	t.Fatalf("cargo clippy: %v\n%s", err, out)
+	runCargo(t, cargo, root, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
+	runCargo(t, cargo, root, "test", "--test", "publish")
 }

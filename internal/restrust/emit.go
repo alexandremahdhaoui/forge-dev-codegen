@@ -627,6 +627,12 @@ pub enum {{ .Store.Port }}Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("deleting {{ .Store.Snake }} {id:?}")]
+    Delete {
+        id: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("looking {{ .Store.Snake }} up by {by} {value:?}")]
     Lookup {
         by: String,
@@ -657,6 +663,7 @@ impl {{ .Store.Name }}Column {
 pub trait {{ .Store.Port }}: Send + Sync {
     fn put(&self, v: {{ .Store.Name }}) -> Result<(), {{ .Store.Port }}Error>;
     fn get(&self, {{ .Store.KeyIdent }}: &str) -> Result<Option<{{ .Store.Name }}>, {{ .Store.Port }}Error>;
+    fn delete(&self, {{ .Store.KeyIdent }}: &str) -> Result<(), {{ .Store.Port }}Error>;
 {{- range .Store.Lookups }}
 {{- if .Page }}
     fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
@@ -852,6 +859,8 @@ pub enum {{ $s.Name }}SqliteError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("the {{ $s.Snake }} sqlite store holds no row under {{ $s.Key }} {id:?}")]
+    Missing { id: String },
 }
 
 pub struct {{ $s.Struct }} {
@@ -966,6 +975,31 @@ impl {{ $s.Struct }} {
         Ok(())
     }
 
+    fn delete_row(&self, id: &str) -> Result<(), {{ $s.Name }}SqliteError> {
+        let sql = |source| {{ $s.Name }}SqliteError::Sql {
+            id: id.to_string(),
+            source,
+        };
+        let mut connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
+        let tx = connection.transaction().map_err(sql)?;
+        let before: Option<String> = tx
+            .query_row("SELECT body FROM {{ $s.TableSQL }} WHERE {{ $s.KeySQL }} = ?1", [id], |row| row.get(0))
+            .optional()
+            .map_err(sql)?;
+        let Some(before) = before else {
+            return Err({{ $s.Name }}SqliteError::Missing { id: id.to_string() });
+        };
+        tx.execute("DELETE FROM {{ $s.TableSQL }} WHERE {{ $s.KeySQL }} = ?1", [id])
+            .map_err(sql)?;
+        tx.execute(
+            "INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), '{{ $s.Snake }}', ?1, 'delete', ?2, NULL)",
+            (id, &before),
+        )
+        .map_err(sql)?;
+        tx.commit().map_err(sql)?;
+        Ok(())
+    }
+
 {{- if $s.HasOneLookup }}
 
     fn one_where(&self, pairs: &[({{ $s.Name }}Column, &str)]) -> Result<Option<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
@@ -1018,6 +1052,13 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 
     fn get(&self, {{ $s.KeyIdent }}: &str) -> Result<Option<{{ $s.Name }}>, {{ $s.Port }}Error> {
         self.get_row({{ $s.KeyIdent }}).map_err(|source| {{ $s.Port }}Error::Get {
+            id: {{ $s.KeyIdent }}.to_string(),
+            source: Box::new(source),
+        })
+    }
+
+    fn delete(&self, {{ $s.KeyIdent }}: &str) -> Result<(), {{ $s.Port }}Error> {
+        self.delete_row({{ $s.KeyIdent }}).map_err(|source| {{ $s.Port }}Error::Delete {
             id: {{ $s.KeyIdent }}.to_string(),
             source: Box::new(source),
         })
@@ -1076,6 +1117,8 @@ pub enum {{ $s.Name }}MemoryError {
     Poisoned,
     #[error("the {{ $s.Snake }} memory store holds its capacity of {capacity} rows and {{ $s.Key }} {key:?} is a new one")]
     Full { capacity: usize, key: String },
+    #[error("the {{ $s.Snake }} memory store holds no row under {{ $s.Key }} {id:?}")]
+    Missing { id: String },
 {{- if $s.HasOneLookup }}
     #[error("the {{ $s.Snake }} memory store already holds {values:?} for the lookup by {lookup}, under {{ $s.Key }} {held:?}, and that lookup answers one")]
     Duplicate {
@@ -1217,6 +1260,20 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
         })?;
 
         Ok(rows.get({{ $s.KeyIdent }}).cloned())
+    }
+
+    fn delete(&self, {{ $s.KeyIdent }}: &str) -> Result<(), {{ $s.Port }}Error> {
+        let refuse = |source: {{ $s.Name }}MemoryError| {{ $s.Port }}Error::Delete {
+            id: {{ $s.KeyIdent }}.to_string(),
+            source: Box::new(source),
+        };
+        let mut rows = self.rows().map_err(refuse)?;
+
+        rows.remove({{ $s.KeyIdent }})
+            .map(|_| ())
+            .ok_or_else(|| refuse({{ $s.Name }}MemoryError::Missing {
+                id: {{ $s.KeyIdent }}.to_string(),
+            }))
     }
 {{- range $s.Lookups }}
 {{- if .Page }}

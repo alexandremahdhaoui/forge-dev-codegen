@@ -123,14 +123,116 @@ fn profile(account_id: &str, alias: &str, tag: &str) -> Profile {
     }
 }
 
-fn sqlite_store(name: &str) -> ProfileSqliteStore {
+fn sqlite_path(name: &str) -> std::path::PathBuf {
     let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.db"));
     let _ = std::fs::remove_file(&path);
 
+    path
+}
+
+fn sqlite_store_at(path: &std::path::Path) -> ProfileSqliteStore {
     ProfileSqliteStore::new(ProfileSqliteStoreConfig {
         path: path.display().to_string(),
     })
     .unwrap()
+}
+
+fn sqlite_store(name: &str) -> ProfileSqliteStore {
+    sqlite_store_at(&sqlite_path(name))
+}
+
+fn memory_store() -> ProfileMemoryStore {
+    ProfileMemoryStore::new(ProfileMemoryStoreConfig { capacity: 8 }).unwrap()
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut cause = error.source();
+
+    while let Some(next) = cause {
+        text.push_str(": ");
+        text.push_str(&next.to_string());
+        cause = next.source();
+    }
+
+    text
+}
+
+fn audit_rows(path: &std::path::Path, op: &str) -> Vec<(String, Option<String>, Option<String>)> {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT key, before, after FROM audit WHERE op = ?1")
+        .unwrap();
+
+    statement
+        .query_map([op], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+#[test]
+fn both_stores_delete_a_held_row_and_a_later_get_answers_none() {
+    let sqlite = sqlite_store("delete_held");
+    let memory = memory_store();
+    let stores: [&dyn ProfileStore; 2] = [&sqlite, &memory];
+
+    for store in stores {
+        store.put(profile("account-1", "kay", "0001")).unwrap();
+        store.delete("account-1").unwrap();
+
+        assert_eq!(store.get("account-1").unwrap(), None);
+    }
+}
+
+#[test]
+fn both_stores_refuse_to_delete_a_key_that_holds_no_row_and_name_the_missing_key() {
+    let sqlite = sqlite_store("delete_missing");
+
+    assert_eq!(
+        error_chain(&sqlite.delete("account-9").unwrap_err()),
+        "deleting profile \"account-9\": the profile sqlite store holds no row under accountId \"account-9\""
+    );
+
+    let memory = memory_store();
+
+    assert_eq!(
+        error_chain(&memory.delete("account-9").unwrap_err()),
+        "deleting profile \"account-9\": the profile memory store holds no row under accountId \"account-9\""
+    );
+}
+
+#[test]
+fn the_sqlite_store_writes_one_audit_row_with_op_delete_holding_the_deleted_row_as_before() {
+    let path = sqlite_path("delete_audit");
+    let store = sqlite_store_at(&path);
+    let held = profile("account-1", "kay", "0001");
+
+    store.put(held.clone()).unwrap();
+    store.delete("account-1").unwrap();
+
+    assert_eq!(
+        audit_rows(&path, "delete"),
+        vec![(
+            "account-1".to_string(),
+            Some(serde_json::to_string(&held).unwrap()),
+            None
+        )]
+    );
+}
+
+#[test]
+fn a_lookup_that_answers_one_no_longer_answers_a_deleted_row_in_either_store() {
+    let sqlite = sqlite_store("delete_lookup");
+    let memory = memory_store();
+    let stores: [&dyn ProfileStore; 2] = [&sqlite, &memory];
+
+    for store in stores {
+        store.put(profile("account-1", "kay", "0001")).unwrap();
+        store.delete("account-1").unwrap();
+
+        assert_eq!(store.get_by_alias_and_tag("kay", "0001").unwrap(), None);
+    }
 }
 
 #[test]
@@ -228,7 +330,13 @@ func TestBothStoreAdaptersHoldTheirContractAgainstARealSqliteFile(t *testing.T) 
 	write("src/rest/controller/profile_controller.rs", profileControllerImpl)
 	write("tests/store.rs", profileStoreTest)
 
-	cmd := exec.Command(cargo, "test", "--test", "store")
+	runCargo(t, cargo, root, "test", "--test", "store")
+}
+
+func runCargo(t *testing.T, cargo, root string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command(cargo, args...)
 	cmd.Dir = root
 
 	out, err := cmd.CombinedOutput()
@@ -240,8 +348,8 @@ func TestBothStoreAdaptersHoldTheirContractAgainstARealSqliteFile(t *testing.T) 
 	if strings.Contains(lower, "could not resolve host") ||
 		strings.Contains(lower, "failed to get") ||
 		strings.Contains(lower, "spurious network error") {
-		t.Skipf("cargo test needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+		t.Skipf("cargo %s needs network access to crates.io, which this run did not have: %v\n%s", args[0], err, out)
 	}
 
-	t.Fatalf("cargo test: %v\n%s", err, out)
+	t.Fatalf("cargo %s: %v\n%s", strings.Join(args, " "), err, out)
 }
