@@ -640,6 +640,12 @@ pub enum {{ .Store.Port }}Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("the {{ .Store.Snake }} store holds no row under {{ .Store.Key }} {key:?}")]
+    Missing { key: String },
+{{- if .Store.HasOneLookup }}
+    #[error("the {{ .Store.Snake }} store already holds {values:?} for the lookup by {lookup}, and that lookup answers one")]
+    Duplicate { lookup: String, values: String },
+{{- end }}
 }
 
 {{ if .Store.Columns }}#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -859,9 +865,50 @@ pub enum {{ $s.Name }}SqliteError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("the {{ $s.Snake }} sqlite store holds no row under {{ $s.Key }} {id:?}")]
-    Missing { id: String },
+    #[error("the {{ $s.Snake }} sqlite store holds no row under {{ $s.Key }} {key:?}")]
+    Missing { key: String },
+{{- if $s.HasOneLookup }}
+    #[error("the {{ $s.Snake }} sqlite store already holds {values:?} for the lookup by {lookup}, and that lookup answers one")]
+    Duplicate { lookup: String, values: String },
+{{- end }}
 }
+
+impl {{ $s.Name }}SqliteError {
+    fn into_port_error(self, wrap: impl FnOnce(Box<dyn std::error::Error + Send + Sync>) -> {{ $s.Port }}Error) -> {{ $s.Port }}Error {
+        match self {
+            Self::Missing { key } => {{ $s.Port }}Error::Missing { key },
+{{- if $s.HasOneLookup }}
+            Self::Duplicate { lookup, values } => {{ $s.Port }}Error::Duplicate { lookup, values },
+{{- end }}
+            other => wrap(Box::new(other)),
+        }
+    }
+}
+{{- if $s.HasOneLookup }}
+
+fn duplicate_of(v: &{{ $s.Name }}, source: &rusqlite::Error) -> Option<{{ $s.Name }}SqliteError> {
+    let rusqlite::Error::SqliteFailure(failure, Some(message)) = source else {
+        return None;
+    };
+
+    if failure.code != rusqlite::ErrorCode::ConstraintViolation {
+        return None;
+    }
+{{- range $s.Lookups }}
+{{- if not .Page }}
+
+    if message == "UNIQUE constraint failed: index '{{ .Index }}'" {
+        return Some({{ $s.Name }}SqliteError::Duplicate {
+            lookup: "{{ .ByJoined }}".to_string(),
+            values: {{ .Values }},
+        });
+    }
+{{- end }}
+{{- end }}
+
+    None
+}
+{{- end }}
 
 pub struct {{ $s.Struct }} {
     connection: Mutex<rusqlite::Connection>,
@@ -965,7 +1012,11 @@ impl {{ $s.Struct }} {
             "INSERT INTO {{ $s.TableSQL }} ({{ $s.KeySQL }}, body) VALUES (?1, ?2) ON CONFLICT({{ $s.KeySQL }}) DO UPDATE SET body = excluded.body",
             (&id, &after),
         )
+{{- if $s.HasOneLookup }}
+        .map_err(|source| duplicate_of(v, &source).unwrap_or_else(|| sql(source)))?;
+{{- else }}
         .map_err(sql)?;
+{{- end }}
         tx.execute(
             "INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), '{{ $s.Snake }}', ?1, 'put', ?2, ?3)",
             (&id, &before, &after),
@@ -987,7 +1038,7 @@ impl {{ $s.Struct }} {
             .optional()
             .map_err(sql)?;
         let Some(before) = before else {
-            return Err({{ $s.Name }}SqliteError::Missing { id: id.to_string() });
+            return Err({{ $s.Name }}SqliteError::Missing { key: id.to_string() });
         };
         tx.execute("DELETE FROM {{ $s.TableSQL }} WHERE {{ $s.KeySQL }} = ?1", [id])
             .map_err(sql)?;
@@ -1028,9 +1079,11 @@ impl {{ $s.Struct }} {
 impl {{ $s.Port }} for {{ $s.Struct }} {
     fn put(&self, v: {{ $s.Name }}) -> Result<(), {{ $s.Port }}Error> {
         let id = v.{{ $s.KeyIdent }}.clone();
-        self.put_row(&v).map_err(|source| {{ $s.Port }}Error::Put {
-            id: id.clone(),
-            source: Box::new(source),
+        self.put_row(&v).map_err(|source| {
+            source.into_port_error(|source| {{ $s.Port }}Error::Put {
+                id: id.clone(),
+                source,
+            })
         })?;
 {{- if $s.Publishes }}
         self.{{ $s.Publishes.PortSnake }}
@@ -1058,9 +1111,11 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
     }
 
     fn delete(&self, {{ $s.KeyIdent }}: &str) -> Result<(), {{ $s.Port }}Error> {
-        self.delete_row({{ $s.KeyIdent }}).map_err(|source| {{ $s.Port }}Error::Delete {
-            id: {{ $s.KeyIdent }}.to_string(),
-            source: Box::new(source),
+        self.delete_row({{ $s.KeyIdent }}).map_err(|source| {
+            source.into_port_error(|source| {{ $s.Port }}Error::Delete {
+                id: {{ $s.KeyIdent }}.to_string(),
+                source,
+            })
         })
     }
 {{- range $s.Lookups }}
@@ -1117,8 +1172,8 @@ pub enum {{ $s.Name }}MemoryError {
     Poisoned,
     #[error("the {{ $s.Snake }} memory store holds its capacity of {capacity} rows and {{ $s.Key }} {key:?} is a new one")]
     Full { capacity: usize, key: String },
-    #[error("the {{ $s.Snake }} memory store holds no row under {{ $s.Key }} {id:?}")]
-    Missing { id: String },
+    #[error("the {{ $s.Snake }} memory store holds no row under {{ $s.Key }} {key:?}")]
+    Missing { key: String },
 {{- if $s.HasOneLookup }}
     #[error("the {{ $s.Snake }} memory store already holds {values:?} for the lookup by {lookup}, under {{ $s.Key }} {held:?}, and that lookup answers one")]
     Duplicate {
@@ -1127,6 +1182,18 @@ pub enum {{ $s.Name }}MemoryError {
         held: String,
     },
 {{- end }}
+}
+
+impl {{ $s.Name }}MemoryError {
+    fn into_port_error(self, wrap: impl FnOnce(Box<dyn std::error::Error + Send + Sync>) -> {{ $s.Port }}Error) -> {{ $s.Port }}Error {
+        match self {
+            Self::Missing { key } => {{ $s.Port }}Error::Missing { key },
+{{- if $s.HasOneLookup }}
+            Self::Duplicate { lookup, values, .. } => {{ $s.Port }}Error::Duplicate { lookup, values },
+{{- end }}
+            other => wrap(Box::new(other)),
+        }
+    }
 }
 
 type Rows = BTreeMap<String, {{ $s.Name }}>;
@@ -1183,7 +1250,7 @@ impl {{ $s.MemoryStruct }} {
             if {{ .MemoryMatch }} {
                 return Err({{ $s.Name }}MemoryError::Duplicate {
                     lookup: "{{ .ByJoined }}".to_string(),
-                    values: {{ .MemoryValues }},
+                    values: {{ .Values }},
                     held: held.clone(),
                 });
             }
@@ -1231,9 +1298,11 @@ fn field_of(row: &{{ $s.Name }}, column: {{ $s.Name }}Column) -> String {
 impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
     fn put(&self, v: {{ $s.Name }}) -> Result<(), {{ $s.Port }}Error> {
         let id = v.{{ $s.KeyIdent }}.clone();
-        self.put_row(&v).map_err(|source| {{ $s.Port }}Error::Put {
-            id: id.clone(),
-            source: Box::new(source),
+        self.put_row(&v).map_err(|source| {
+            source.into_port_error(|source| {{ $s.Port }}Error::Put {
+                id: id.clone(),
+                source,
+            })
         })?;
 {{- if $s.Publishes }}
         self.{{ $s.Publishes.PortSnake }}
@@ -1263,16 +1332,18 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
     }
 
     fn delete(&self, {{ $s.KeyIdent }}: &str) -> Result<(), {{ $s.Port }}Error> {
-        let refuse = |source: {{ $s.Name }}MemoryError| {{ $s.Port }}Error::Delete {
-            id: {{ $s.KeyIdent }}.to_string(),
-            source: Box::new(source),
+        let refuse = |source: {{ $s.Name }}MemoryError| {
+            source.into_port_error(|source| {{ $s.Port }}Error::Delete {
+                id: {{ $s.KeyIdent }}.to_string(),
+                source,
+            })
         };
         let mut rows = self.rows().map_err(refuse)?;
 
         rows.remove({{ $s.KeyIdent }})
             .map(|_| ())
             .ok_or_else(|| refuse({{ $s.Name }}MemoryError::Missing {
-                id: {{ $s.KeyIdent }}.to_string(),
+                key: {{ $s.KeyIdent }}.to_string(),
             }))
     }
 {{- range $s.Lookups }}

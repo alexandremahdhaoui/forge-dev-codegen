@@ -78,7 +78,8 @@ type lookupView struct {
 	Pairs        string
 	ValueExpr    string
 	MemoryMatch  string
-	MemoryValues string
+	Values       string
+	Index        string
 }
 
 type columnView struct {
@@ -351,7 +352,8 @@ func buildView(spec *Spec, opts Options) view {
 				Pairs:        lookupPairs(s.Name, l),
 				ValueExpr:    lookupValueExpr(l),
 				MemoryMatch:  lookupMemoryMatch(l),
-				MemoryValues: lookupMemoryValues(l),
+				Values:       lookupValues(l),
+				Index:        storeddl.Index(s.Snake, l.By),
 			})
 		}
 
@@ -577,7 +579,7 @@ func lookupMemoryMatch(l Lookup) string {
 	return strings.Join(tests, " && ")
 }
 
-func lookupMemoryValues(l Lookup) string {
+func lookupValues(l Lookup) string {
 	reads := make([]string, 0, len(l.Idents))
 
 	for _, ident := range l.Idents {

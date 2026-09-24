@@ -112,7 +112,7 @@ const profileStoreTest = `use songe_identity::rest::adapter::profile_memory::{
     ProfileMemoryStore, ProfileMemoryStoreConfig,
 };
 use songe_identity::rest::adapter::profile_sqlite::{ProfileSqliteStore, ProfileSqliteStoreConfig};
-use songe_identity::rest::port::profile_store::ProfileStore;
+use songe_identity::rest::port::profile_store::{ProfileStore, ProfileStoreError};
 use songe_identity::rest::types::profile::Profile;
 
 fn profile(account_id: &str, alias: &str, tag: &str) -> Profile {
@@ -186,19 +186,24 @@ fn both_stores_delete_a_held_row_and_a_later_get_answers_none() {
 }
 
 #[test]
-fn both_stores_refuse_to_delete_a_key_that_holds_no_row_and_name_the_missing_key() {
-    let sqlite = sqlite_store("delete_missing");
+fn the_sqlite_store_refuses_to_delete_a_key_that_holds_no_row_with_the_port_missing_arm() {
+    let refused = sqlite_store("delete_missing").delete("account-9").unwrap_err();
 
+    assert!(matches!(&refused, ProfileStoreError::Missing { key } if key == "account-9"));
     assert_eq!(
-        error_chain(&sqlite.delete("account-9").unwrap_err()),
-        "deleting profile \"account-9\": the profile sqlite store holds no row under accountId \"account-9\""
+        error_chain(&refused),
+        "the profile store holds no row under accountId \"account-9\""
     );
+}
 
-    let memory = memory_store();
+#[test]
+fn the_memory_store_refuses_to_delete_a_key_that_holds_no_row_with_the_port_missing_arm() {
+    let refused = memory_store().delete("account-9").unwrap_err();
 
+    assert!(matches!(&refused, ProfileStoreError::Missing { key } if key == "account-9"));
     assert_eq!(
-        error_chain(&memory.delete("account-9").unwrap_err()),
-        "deleting profile \"account-9\": the profile memory store holds no row under accountId \"account-9\""
+        error_chain(&refused),
+        "the profile store holds no row under accountId \"account-9\""
     );
 }
 
@@ -261,19 +266,33 @@ fn a_sqlite_store_finds_a_row_by_every_field_of_a_composite_lookup() {
     assert_eq!(store.get_by_alias_and_tag("kay", "0003").unwrap(), None);
 }
 
+fn assert_refused_as_duplicate(refused: ProfileStoreError) {
+    assert!(matches!(
+        &refused,
+        ProfileStoreError::Duplicate { lookup, values } if lookup == "alias, tag" && values == "kay, 0001"
+    ));
+    assert_eq!(
+        error_chain(&refused),
+        "the profile store already holds \"kay, 0001\" for the lookup by alias, tag, and that lookup answers one"
+    );
+}
+
 #[test]
-fn both_stores_refuse_a_second_key_holding_the_values_of_a_lookup_that_answers_one() {
+fn the_sqlite_store_refuses_a_second_key_holding_the_values_of_a_lookup_that_answers_one_with_the_port_duplicate_arm() {
     let sqlite = sqlite_store("duplicate");
 
     sqlite.put(profile("account-1", "kay", "0001")).unwrap();
 
-    assert!(sqlite.put(profile("account-2", "kay", "0001")).is_err());
+    assert_refused_as_duplicate(sqlite.put(profile("account-2", "kay", "0001")).unwrap_err());
+}
 
-    let memory = ProfileMemoryStore::new(ProfileMemoryStoreConfig { capacity: 8 }).unwrap();
+#[test]
+fn the_memory_store_refuses_a_second_key_holding_the_values_of_a_lookup_that_answers_one_with_the_port_duplicate_arm() {
+    let memory = memory_store();
 
     memory.put(profile("account-1", "kay", "0001")).unwrap();
 
-    assert!(memory.put(profile("account-2", "kay", "0001")).is_err());
+    assert_refused_as_duplicate(memory.put(profile("account-2", "kay", "0001")).unwrap_err());
 }
 
 #[test]

@@ -44,7 +44,7 @@ writes above it.
 | Emitted, under the cell | Side | Holds |
 |---|---|---|
 | `types/zz_generated_<schema>.rs` | both | one serde struct per component schema |
-| `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put, get and delete, plus its error enum. A delete of a key that holds no row refuses by name |
+| `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put, get and delete, plus its error enum. A delete of a key that holds no row answers the arm `Missing` naming the key |
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
 | `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
@@ -329,10 +329,19 @@ x-store:
 
 `answers: one` means at most one row holds those values, so both
 adapters refuse a second key that holds them. Sqlite refuses through a
-unique index over the same properties, written beside the table.
-Memory refuses with `Duplicate`, naming the lookup, the values and the
-key already holding them. A row that overwrites itself under its own
-key is not a duplicate.
+unique index over the same properties, written beside the table, and
+reads the index name out of the constraint failure. Memory refuses with
+its own `Duplicate`, which also names the key already holding the
+values. A row that overwrites itself under its own key is not a
+duplicate.
+
+The store port error carries two named refusals beside the arms that box
+a fault. `Missing { key }` answers a delete of a key that holds no row.
+`Duplicate { lookup, values }` answers a put that breaks a lookup that
+answers one, and exists only when the store declares one. Both adapters
+map their own refusal into the port arm and box every other failure
+under `Put` or `Delete`. A controller matches the arm by pattern and
+needs no prior read to tell a refusal from a fault.
 
 `new` creates that index when it opens the file. A file that already
 holds duplicates makes sqlite refuse, and `Schema` names the index and

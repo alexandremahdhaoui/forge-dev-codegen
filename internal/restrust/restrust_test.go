@@ -213,9 +213,21 @@ func TestAFailedSqliteSchemaStatesNoCauseBecauseOnlyTheSourceChainKnowsWhySqlite
 		t.Fatal("no file at adapter/zz_generated_greeting_sqlite.rs")
 	}
 
+	schemaError := ""
+
+	for _, line := range strings.Split(content, "\n") {
+		if strings.Contains(line, "creating the schema of the greeting store") {
+			schemaError = line
+		}
+	}
+
+	if schemaError == "" {
+		t.Fatalf("the sqlite adapter states no schema error:\n%s", content)
+	}
+
 	for _, cause := range []string{"already holds", "duplicates", "refuses a greeting table", "readonly", "locked"} {
-		if strings.Contains(content, cause) {
-			t.Fatalf("the sqlite adapter claims a cause with %q:\n%s", cause, content)
+		if strings.Contains(schemaError, cause) {
+			t.Fatalf("the sqlite schema error claims a cause with %q: %s", cause, schemaError)
 		}
 	}
 }
