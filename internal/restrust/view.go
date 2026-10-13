@@ -22,6 +22,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/storeddl"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/testenvsqlite"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
@@ -122,6 +123,12 @@ type storeView struct {
 	HasSqlite          bool
 	HasOneLookup       bool
 	Publishes          *publishView
+	Seeds              []seedView
+}
+
+type seedView struct {
+	ID   string
+	Body string
 }
 
 type eventView struct {
@@ -519,6 +526,49 @@ func joinLastWithAnd(names []string) string {
 	}
 
 	return strings.Join(names[:last], ", ") + " and " + names[last]
+}
+
+func bakeSeeds(spec *Spec, vectors []byte, stores []storeView) error {
+	if vectors == nil {
+		for _, s := range stores {
+			if s.HasSqlite {
+				return fmt.Errorf("store %s declares a sqlite adapter and layout.vectors names no vectors file, the sqlite adapter bakes its seed rows from the create cases of that file", s.Name)
+			}
+		}
+
+		return nil
+	}
+
+	declared := make([]testenvsqlite.Store, 0, len(spec.Stores))
+
+	for _, s := range spec.Stores {
+		declared = append(declared, testenvsqlite.Store{Name: s.Name, Snake: s.Snake, Key: s.Store.Key, Required: requiredFields(s.Fields)})
+	}
+
+	rows, err := testenvsqlite.Seeds(vectors, declared)
+	if err != nil {
+		return fmt.Errorf("reading the seed rows of layout.vectors: %w", err)
+	}
+
+	for i := range stores {
+		for _, row := range rows[stores[i].Snake] {
+			stores[i].Seeds = append(stores[i].Seeds, seedView{ID: rustLiteral(row.ID), Body: rustLiteral(row.Body)})
+		}
+	}
+
+	return nil
+}
+
+func requiredFields(fields []Field) []string {
+	names := []string{}
+
+	for _, f := range fields {
+		if !f.Optional {
+			names = append(names, f.Name)
+		}
+	}
+
+	return names
 }
 
 func rustLiteral(value string) string {

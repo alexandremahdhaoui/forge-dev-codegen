@@ -132,6 +132,8 @@ components:
 func generateSpec(t *testing.T, spec string, opts restrust.Options) map[string]restrust.File {
 	t.Helper()
 
+	opts.Vectors = noCases
+
 	files, err := restrust.Generate([]byte(spec), opts)
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -534,7 +536,7 @@ func TestAnXStreamOperationWithoutAnEventStreamSchemaIsRefused(t *testing.T) {
 func TestXPortsMayNameTheSubscribePortOfItsOwnStreamAndNoOther(t *testing.T) {
 	named := strings.Replace(guardedSpec, "x-ports: [GreetingStore]\n      x-auth: bearer\n      x-stream:", "x-ports: [GreetingStore, GreetingEventSubscribe]\n      x-auth: bearer\n      x-stream:", 1)
 
-	if _, err := restrust.Generate([]byte(named), restrust.Options{Service: "songe-hello"}); err != nil {
+	if _, err := restrust.Generate([]byte(named), restrust.Options{Service: "songe-hello", Vectors: noCases}); err != nil {
 		t.Fatalf("naming the subscribe port of the stream operation was refused: %v", err)
 	}
 
@@ -727,7 +729,7 @@ func TestTheGuardedCellWithBothSidesCompilesOnceTheUserWritesTheControllerImplAn
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth, Vectors: noCases})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

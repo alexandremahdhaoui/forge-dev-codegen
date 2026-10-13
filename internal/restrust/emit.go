@@ -56,6 +56,7 @@ type Options struct {
 	Side      string
 	Header    string
 	Generator string
+	Vectors   []byte
 }
 
 type File struct {
@@ -116,6 +117,12 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	v := buildView(spec, opts)
+
+	if v.Server {
+		if err := bakeSeeds(spec, opts.Vectors, v.Stores); err != nil {
+			return nil, fmt.Errorf("emitting the rest cell %q: %w", opts.Cell, err)
+		}
+	}
 
 	if opts.Header != "" {
 		v.Header = opts.Header
@@ -835,6 +842,12 @@ use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
 
 const SCHEMA: &str = r#"{{ $s.Schema }}"#;
 
+const SEEDS: &[(&str, &str)] = &[
+{{- range $s.Seeds }}
+    ("{{ .ID }}", "{{ .Body }}"),
+{{- end }}
+];
+
 pub struct {{ $s.ConfigStruct }} {
     pub path: String,
 }
@@ -850,6 +863,19 @@ pub enum {{ $s.Name }}SqliteError {
     #[error("{{ $s.SchemaError }}")]
     Schema {
         path: String,
+        #[source]
+        source: rusqlite::Error,
+    },
+    #[error("seeding the {{ $s.Snake }} sqlite store {path:?}")]
+    Seeding {
+        path: String,
+        #[source]
+        source: rusqlite::Error,
+    },
+    #[error("seeding the {{ $s.Snake }} sqlite store {path:?} with {{ $s.Key }} {key:?}")]
+    SeedRow {
+        path: String,
+        key: String,
         #[source]
         source: rusqlite::Error,
     },
@@ -912,6 +938,53 @@ fn duplicate_of(v: &{{ $s.Name }}, source: &rusqlite::Error) -> Option<{{ $s.Nam
 }
 {{- end }}
 
+fn open(path: String) -> Result<rusqlite::Connection, {{ $s.Name }}SqliteError> {
+    let mut connection = rusqlite::Connection::open(&path).map_err(|source| {{ $s.Name }}SqliteError::Open {
+        path: path.clone(),
+        source,
+    })?;
+    connection
+        .execute_batch(SCHEMA)
+        .map_err(|source| {{ $s.Name }}SqliteError::Schema {
+            path: path.clone(),
+            source,
+        })?;
+    seed(&mut connection, &path)?;
+    Ok(connection)
+}
+
+fn seed(connection: &mut rusqlite::Connection, path: &str) -> Result<(), {{ $s.Name }}SqliteError> {
+    let seeding = |source| {{ $s.Name }}SqliteError::Seeding {
+        path: path.to_string(),
+        source,
+    };
+    let tx = connection.transaction().map_err(seeding)?;
+    let held: bool = tx
+        .query_row("SELECT EXISTS (SELECT 1 FROM {{ $s.TableSQL }})", [], |row| row.get(0))
+        .map_err(seeding)?;
+
+    if held {
+        return Ok(());
+    }
+
+    for &(key, body) in SEEDS {
+        let row = |source| {{ $s.Name }}SqliteError::SeedRow {
+            path: path.to_string(),
+            key: key.to_string(),
+            source,
+        };
+        tx.execute("INSERT INTO {{ $s.TableSQL }} ({{ $s.KeySQL }}, body) VALUES (?1, ?2)", (key, body))
+            .map_err(row)?;
+        tx.execute(
+            "INSERT INTO audit (at, table_name, key, op, before, after) VALUES (datetime('now'), '{{ $s.Snake }}', ?1, 'seed', NULL, ?2)",
+            (key, body),
+        )
+        .map_err(row)?;
+    }
+
+    tx.commit().map_err(seeding)
+}
+
 pub struct {{ $s.Struct }} {
     connection: Mutex<rusqlite::Connection>,
 {{- if $s.Publishes }}
@@ -921,16 +994,8 @@ pub struct {{ $s.Struct }} {
 
 impl {{ $s.Struct }} {
     pub fn new(config: {{ $s.ConfigStruct }}{{ if $s.Publishes }}, {{ $s.Publishes.PortSnake }}: Arc<dyn {{ $s.Publishes.Port }} + Send + Sync>{{ end }}) -> Result<Self, {{ $s.Name }}SqliteError> {
-        let path = config.path;
-        let connection = rusqlite::Connection::open(&path).map_err(|source| {{ $s.Name }}SqliteError::Open {
-            path: path.clone(),
-            source,
-        })?;
-        connection
-            .execute_batch(SCHEMA)
-            .map_err(|source| {{ $s.Name }}SqliteError::Schema { path, source })?;
         Ok(Self {
-            connection: Mutex::new(connection),
+            connection: Mutex::new(open(config.path)?),
 {{- if $s.Publishes }}
             {{ $s.Publishes.PortSnake }},
 {{- end }}
@@ -1143,6 +1208,60 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
     }
 {{- end }}
 {{- end }}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(connection: &rusqlite::Connection) -> Vec<(String, String)> {
+        let mut statement = connection
+            .prepare("SELECT {{ $s.KeySQL }}, body FROM {{ $s.TableSQL }} ORDER BY {{ $s.KeySQL }}")
+            .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<(String, String)>, rusqlite::Error>>()
+            .unwrap()
+    }
+
+    fn seed_audit_rows(connection: &rusqlite::Connection) -> usize {
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM audit WHERE table_name = '{{ $s.Snake }}' AND op = 'seed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        usize::try_from(count).unwrap()
+    }
+
+    #[test]
+    fn the_empty_{{ $s.Snake }}_store_opens_holding_every_seed_row_with_one_seed_audit_row_each() {
+        let connection = open(":memory:".to_string()).unwrap();
+        let mut expected: Vec<(String, String)> = SEEDS
+            .iter()
+            .map(|&(key, body)| (key.to_string(), body.to_string()))
+            .collect();
+        expected.sort();
+
+        assert_eq!(rows(&connection), expected);
+        assert_eq!(seed_audit_rows(&connection), SEEDS.len());
+    }
+
+    #[test]
+    fn the_{{ $s.Snake }}_store_already_holding_a_row_is_left_alone_by_the_seed() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch(SCHEMA).unwrap();
+        connection
+            .execute("INSERT INTO {{ $s.TableSQL }} ({{ $s.KeySQL }}, body) VALUES ('held', '{}')", [])
+            .unwrap();
+
+        seed(&mut connection, ":memory:").unwrap();
+
+        assert_eq!(rows(&connection), vec![("held".to_string(), "{}".to_string())]);
+        assert_eq!(seed_audit_rows(&connection), 0);
+    }
 }
 {{ end -}}
 

@@ -386,7 +386,7 @@ func TestBothEnginesFillOneCrateAndTheCratePassesClippyDenyingWarnings(t *testin
 		t.Skip("cargo is not on PATH")
 	}
 
-	restFiles, err := restrust.Generate([]byte(bothEnginesOpenapi), restrust.Options{Service: "songe-hello"})
+	restFiles, err := restrust.Generate([]byte(bothEnginesOpenapi), restrust.Options{Service: "songe-hello", Vectors: []byte(`{"cases":[]}`)})
 	if err != nil {
 		t.Fatalf("generating the rest cell: %v", err)
 	}

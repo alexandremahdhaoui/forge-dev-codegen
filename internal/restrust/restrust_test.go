@@ -295,8 +295,12 @@ func TestAStoreWithNoAdapterAtAllIsRefusedRatherThanEmittingNothing(t *testing.T
 	refusal(t, withStore("      x-store:\n        key: id\n        lookups: []\n        adapters: []\n"), "x-store names an empty adapters list")
 }
 
+var noCases = []byte(`{"cases":[]}`)
+
 func generate(t *testing.T, opts restrust.Options) map[string]restrust.File {
 	t.Helper()
+
+	opts.Vectors = noCases
 
 	files, err := restrust.Generate([]byte(helloSpec), opts)
 	if err != nil {
@@ -312,7 +316,7 @@ func generate(t *testing.T, opts restrust.Options) map[string]restrust.File {
 }
 
 func TestTheCellEmitsFiveLayersAModFileAndAManifest(t *testing.T) {
-	files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello"})
+	files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello", Vectors: noCases})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
@@ -480,7 +484,7 @@ func TestTheGeneratedCellCompilesOnceTheUserWritesTheControllerImpl(t *testing.T
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello"})
+	files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello", Vectors: noCases})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

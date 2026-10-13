@@ -125,7 +125,7 @@ components:
 func generatedByPath(t *testing.T, spec string) (map[string]string, error) {
 	t.Helper()
 
-	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth, Vectors: noCases})
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func TestTheClientAdapterBuildsTheQueryStringIntoTheUrlAndSkipsAnAbsentOptionalP
 }
 
 func TestAClientWithoutAnyQueryParameterCarriesNoQueryHelper(t *testing.T) {
-	files, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth, Vectors: noCases})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
@@ -1099,7 +1099,7 @@ func clippyOverTheVerifierCell(t *testing.T, controllerImpl string) (string, err
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(specWithAGoogleVerifier(t)), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth})
+	files, err := restrust.Generate([]byte(specWithAGoogleVerifier(t)), restrust.Options{Service: "songe-hello", Side: restrust.SideBoth, Vectors: noCases})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

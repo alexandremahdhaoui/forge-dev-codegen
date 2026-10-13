@@ -67,6 +67,11 @@ components:
           type: string
 `
 
+const profileCases = `{"cases":[
+  {"case":"create_a_profile","operation":"createProfile","controllerReply":{"accountId":"seeded-account","alias":"seeded","tag":"0000"}},
+  {"case":"create_a_second_profile","operation":"createProfile","controllerReply":{"accountId":"another-seeded-account","alias":"another","tag":"0000"}}
+]}`
+
 const profileCrateManifest = `[package]
 name = "songe-identity"
 version = "0.1.0"
@@ -315,7 +320,7 @@ func TestBothStoreAdaptersHoldTheirContractAgainstARealSqliteFile(t *testing.T) 
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(profileSpec), restrust.Options{Service: "songe-identity"})
+	files, err := restrust.Generate([]byte(profileSpec), restrust.Options{Service: "songe-identity", Vectors: []byte(profileCases)})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
@@ -349,7 +354,7 @@ func TestBothStoreAdaptersHoldTheirContractAgainstARealSqliteFile(t *testing.T) 
 	write("src/rest/controller/profile_controller.rs", profileControllerImpl)
 	write("tests/store.rs", profileStoreTest)
 
-	runCargo(t, cargo, root, "test", "--test", "store")
+	runCargo(t, cargo, root, "test", "--lib", "--test", "store")
 }
 
 func runCargo(t *testing.T, cargo, root string, args ...string) {

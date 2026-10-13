@@ -69,7 +69,7 @@ drivers:
 func standUpTheRestCell(t *testing.T) string {
 	t.Helper()
 
-	files, err := restrust.Generate([]byte(smallSpec), restrust.Options{Service: "svc"})
+	files, err := restrust.Generate([]byte(smallSpec), restrust.Options{Service: "svc", Vectors: []byte(`{"cases":[]}`)})
 	if err != nil {
 		t.Fatalf("generating the rest cell: %v", err)
 	}

@@ -148,7 +148,7 @@ func writeRestCell(t *testing.T, root, cell, spec, side string, sources bool) {
 
 	write := writeUnder(t, root)
 
-	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Cell: cell, Side: side})
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello", Cell: cell, Side: side, Vectors: []byte(`{"cases":[]}`)})
 	if err != nil {
 		t.Fatalf("generating the %s cell: %v", cell, err)
 	}

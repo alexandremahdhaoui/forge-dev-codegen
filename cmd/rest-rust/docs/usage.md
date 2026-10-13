@@ -27,6 +27,7 @@ openapi:
 layout:
   cell: rest
   side: server
+  vectors: ../../.forge/spec-cache/cases.json
 ```
 
 The `generate` tool takes the normalized forge-dev model. `name` is the
@@ -34,7 +35,8 @@ service. `openapiSpec` is the document. `layout.cell` names the module
 directory and defaults to `rest`. `layout.side` is `server`, `client` or
 `both` and defaults to `server`. The server side is the driver, the
 controllers and the ports they consume. The client side is one client
-port per controller and a reqwest adapter for each.
+port per controller and a reqwest adapter for each. `layout.vectors`
+names the vectors file the sqlite adapters seed from.
 
 Every emitted path is relative to the cell directory. The engine never
 writes above it.
@@ -46,7 +48,7 @@ writes above it.
 | `types/zz_generated_<schema>.rs` | both | one serde struct per component schema |
 | `port/zz_generated_<store>_store.rs` | server | trait `<Store>Store` with put, get and delete, plus its error enum. A delete of a key that holds no row answers the arm `Missing` naming the key |
 | `port/zz_generated_<event>_subscribe.rs` | server, with `x-stream` | trait `<Event>Subscribe` with `subscribe`, answering a `std::sync::mpsc::Receiver<Event>` for a key |
-| `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table and the audit table |
+| `adapter/zz_generated_<store>_sqlite.rs` | server | `<Store>SqliteStore`, `new` taking `<Store>SqliteStoreConfig`, the table, the audit table, the seed rows and their two tests |
 | `controller/zz_generated_<name>_controller.rs` | server | trait `<Name>Controller`, its error enum, and `<Name>ControllerImpl` holding one boxed port per `x-ports` entry plus the subscribe port of each stream |
 | `port/zz_generated_<port>.rs` | server | one port per declaration entry of `x-ports`, its error enum and its trait under mockall |
 | `driver/zz_generated_wire.rs` | server | one wire struct per schema, `RejectionWire`, and the mapping both ways |
@@ -354,6 +356,26 @@ own.
 The table name and the key column are quoted identifiers in the schema
 and in every statement the adapter runs, so a key named after a SQL
 keyword still reads and writes.
+
+Each sqlite adapter carries its seed rows as the constant `SEEDS`. The
+rows come from the create cases of the file `layout.vectors` names,
+relative to the cell directory, read through the same rule testenv-sqlite
+seeds with. A case whose `controllerReply` is absent or null is an error
+case and seeds nothing. A create case whose reply fits no declared store
+is refused, naming the case, the operation and the stores. A server cell
+holding a sqlite store and naming no `layout.vectors` is refused, naming
+the cell and the key.
+
+`new` opens the file, runs the schema, and seeds a table that holds no
+row. One transaction inserts every seed row with a plain `INSERT` and
+writes one audit row with op `seed` for each. A duplicate makes sqlite
+raise, and `new` refuses with `SeedRow`, naming the store and the key. A
+table that already holds a row is left alone. A store with no create
+case carries an empty constant and runs the same code.
+
+The adapter file holds two tests under `#[cfg(test)]`. One proves an
+empty store opens holding every seed row. One proves a store already
+holding a row is left alone. `cargo test --lib` runs both.
 
 ## What the crate needs
 
