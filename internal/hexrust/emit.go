@@ -137,7 +137,7 @@ func crateRootSecrets(merged *cellmanifest.Merged, roots []crateports.Port, decl
 		merged.Adapters = append(merged.Adapters, cellmanifest.AdapterEntry{
 			Cell: "crate root",
 			Adapter: cellmanifest.Adapter{
-				Name:       crateports.SecretAdapterKind,
+				Name:       rustname.AdapterName(trait, crateports.SecretAdapterKind),
 				Type:       shape.Struct,
 				Module:     "adapter::" + shape.Module,
 				Implements: trait,

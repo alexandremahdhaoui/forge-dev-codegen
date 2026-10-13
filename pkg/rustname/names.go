@@ -82,6 +82,10 @@ func Upper(s string) string {
 	return strings.ToUpper(Snake(s))
 }
 
+func AdapterName(port, kind string) string {
+	return Snake(port) + "_" + kind
+}
+
 func IsSnakeIdent(name string) bool {
 	return snakeIdent.MatchString(name)
 }

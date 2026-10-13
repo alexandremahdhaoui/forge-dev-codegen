@@ -60,7 +60,10 @@ A field carries a type among string, integer, boolean and duration, plus
 Spec schema's `required` list and carries no default, so the loader
 configgen-gen writes refuses to start the node by name while the key is
 unset. The crate root secret adapter declares its `secret` and the field
-it answers, `id` for a TicketVerifier, required the same way.
+it answers, `id` for a TicketVerifier, required the same way. It is
+named `<port>_secret`, the rule every hand port adapter follows, so a
+TicketVerifier reads `ticket_verifier_secret_secret` and
+`ticket_verifier_secret_id` and two secret ports never share a key.
 
 ## What it refuses
 

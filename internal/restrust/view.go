@@ -736,7 +736,7 @@ func buildHandPortView(h HandPort) handPortView {
 			Template:     h.Kind + "_" + kind,
 			Struct:       h.Name + rustname.Pascal(kind),
 			ConfigStruct: h.Name + rustname.Pascal(kind) + "Config",
-			AdapterName:  h.Snake + "_" + kind,
+			AdapterName:  rustname.AdapterName(h.Name, kind),
 			Module:       h.Snake + "_" + kind,
 		})
 	}

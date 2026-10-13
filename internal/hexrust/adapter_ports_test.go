@@ -489,8 +489,51 @@ drivers:
 		}
 	}
 
-	want := []string{"secret_id", "secret_secret"}
+	want := []string{"ticket_verifier_secret_id", "ticket_verifier_secret_secret"}
 	if got := specRequired(t, spec); !reflect.DeepEqual(got, want) {
 		t.Fatalf("required = %q, want %q\n%s", got, want, spec)
+	}
+}
+
+func TestTheCrateRootSecretAdapterIsNamedAfterItsPortSoItsKeysCarryThePort(t *testing.T) {
+	root := t.TempDir()
+
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, false)
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest"},
+		Ports:   guardedCrateRootPorts,
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+`),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = f.Content
+	}
+
+	for path, wants := range map[string][]string{
+		"src/bin/zz_generated_songe_hello_node.rs": {
+			`"ticket_verifier_secret" => Arc::new(`,
+			"secret: config.ticket_verifier_secret_secret.clone(),",
+		},
+		hexrust.ConfigSpecFile: {
+			"x-env: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_ID",
+			"x-env: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET",
+			"default: ticket_verifier_secret",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(byPath[path], want) {
+				t.Errorf("%s lacks %q\n%s", path, want, byPath[path])
+			}
+		}
 	}
 }
