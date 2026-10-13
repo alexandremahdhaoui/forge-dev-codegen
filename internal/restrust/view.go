@@ -528,7 +528,7 @@ func joinLastWithAnd(names []string) string {
 	return strings.Join(names[:last], ", ") + " and " + names[last]
 }
 
-func bakeSeeds(spec *Spec, vectors []byte, stores []storeView) error {
+func bakeSeeds(doc []byte, spec *Spec, vectors []byte, stores []storeView) error {
 	if vectors == nil {
 		for _, s := range stores {
 			if s.HasSqlite {
@@ -539,10 +539,15 @@ func bakeSeeds(spec *Spec, vectors []byte, stores []storeView) error {
 		return nil
 	}
 
-	declared := make([]testenvsqlite.Store, 0, len(spec.Stores))
+	names := make([]string, 0, len(spec.Stores))
 
 	for _, s := range spec.Stores {
-		declared = append(declared, testenvsqlite.Store{Name: s.Name, Snake: s.Snake, Key: s.Store.Key, Required: requiredFields(s.Fields)})
+		names = append(names, s.Name)
+	}
+
+	declared, err := testenvsqlite.Stores(doc, names)
+	if err != nil {
+		return fmt.Errorf("reading the stores the seed rows land in: %w", err)
 	}
 
 	rows, err := testenvsqlite.Seeds(vectors, declared)
@@ -557,18 +562,6 @@ func bakeSeeds(spec *Spec, vectors []byte, stores []storeView) error {
 	}
 
 	return nil
-}
-
-func requiredFields(fields []Field) []string {
-	names := []string{}
-
-	for _, f := range fields {
-		if !f.Optional {
-			names = append(names, f.Name)
-		}
-	}
-
-	return names
 }
 
 func rustLiteral(value string) string {

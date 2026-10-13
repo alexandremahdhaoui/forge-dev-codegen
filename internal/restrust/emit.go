@@ -119,7 +119,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	v := buildView(spec, opts)
 
 	if v.Server {
-		if err := bakeSeeds(spec, opts.Vectors, v.Stores); err != nil {
+		if err := bakeSeeds(doc, spec, opts.Vectors, v.Stores); err != nil {
 			return nil, fmt.Errorf("emitting the rest cell %q: %w", opts.Cell, err)
 		}
 	}

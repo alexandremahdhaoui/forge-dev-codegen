@@ -158,6 +158,28 @@ func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
 	}
 }
 
+func TestACamelCaseKeyIsAQuotedColumnTheWriterSeeds(t *testing.T) {
+	doc := "components:\n  schemas:\n    Consent:\n      type: object\n      x-store:\n        key: accountId\n        lookups: []\n        adapters: [sqlite]\n      required: [accountId]\n"
+
+	databases, err := Plan([]byte(doc), []string{"Consent"}, []byte(`{"cases":[{"case":"c","operation":"createConsent","controllerReply":{"accountId":"a1"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(databases[0].Script, `"accountId" TEXT PRIMARY KEY`) || !strings.Contains(databases[0].Script, `INSERT INTO "consent" ("accountId", body) VALUES ('a1',`) {
+		t.Fatalf("the key is not a quoted column:\n%s", databases[0].Script)
+	}
+
+	writer, err := DetectWriter()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	if err := writer.Write(context.Background(), filepath.Join(t.TempDir(), "consent.db"), databases[0].Script); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTheBooleanFormOfXStoreIsRefusedNamingTheSchema(t *testing.T) {
 	doc := "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store: true\n"
 

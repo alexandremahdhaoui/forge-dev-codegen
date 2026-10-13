@@ -68,10 +68,6 @@ func Stores(doc []byte, names []string) ([]Store, error) {
 			return nil, fmt.Errorf("naming the table of store %q: %q is not a table name matching %s", name, snake, tableName)
 		}
 
-		if !tableName.MatchString(key) {
-			return nil, fmt.Errorf("naming the key column of store %q: %q is not a column name matching %s", name, key, tableName)
-		}
-
 		stores = append(stores, Store{
 			Name:     name,
 			Snake:    snake,

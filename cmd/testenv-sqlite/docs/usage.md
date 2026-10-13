@@ -23,7 +23,7 @@ with an `x-store` object and writes `<TmpDir>/<snake>.db` holding two
 tables: `"<snake>"("<key>" TEXT PRIMARY KEY, body TEXT NOT NULL)` and
 `audit(at, table_name, key, op, before, after)`. `key` is the property
 `x-store.key` names. Every identifier is quoted, so a key named after a
-SQL keyword still writes valid DDL. Every lookup that answers `one`
+SQL keyword or spelled in camelCase still writes valid DDL. Every lookup that answers `one`
 becomes `"<snake>_unique_by_<joint>"`, a unique index over the
 properties it reads.
 
