@@ -26,8 +26,6 @@ const (
 	ServiceFile    = "templates/zz_generated_service.yaml"
 )
 
-const addrSuffix = "_addr"
-
 type Options struct {
 	OpenapiSpec []byte
 	SrcDir      string
@@ -247,7 +245,7 @@ func portEntries(manifests []cellmanifest.Manifest, properties map[string]specPr
 				continue
 			}
 
-			addrKey := driver.Name + addrSuffix
+			addrKey := hexrust.ConfigKey(driver.Name, "addr")
 			if _, ok := properties[addrKey]; !ok {
 				return nil, fmt.Errorf(
 					"driver %q in cell %q listens on %s and the config spec has no %q key to read its port from",
@@ -273,7 +271,7 @@ func valueRead(key string, property specProperty) string {
 func portRead(key string, property specProperty) string {
 	return fmt.Sprintf(
 		`{{ $%s := %s | splitList ":" | last | int }}{{ if le $%s 0 }}{{ fail %q }}{{ end }}{{ $%s }}`,
-		key, valueRead(key, property), key, key+" does not end in a port above zero, an address ending in :0 is not installable", key,
+		key, valueRead(key, property), key, key+" does not end in an integer port above zero", key,
 	)
 }
 

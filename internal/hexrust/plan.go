@@ -107,7 +107,7 @@ func declaredKey(key, owner string, declared cellmanifest.ConfigField) specKey {
 	}
 }
 
-func configKey(parts ...string) string {
+func ConfigKey(parts ...string) string {
 	out := make([]string, 0, len(parts))
 
 	for _, part := range parts {
@@ -309,7 +309,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 
 		for _, field := range sortedFieldNames(entry.Driver.Config) {
 			declared := entry.Driver.Config[field]
-			key := configKey(name, field)
+			key := ConfigKey(name, field)
 
 			dp.Fields = append(dp.Fields, fieldPlan{
 				Name: field,
@@ -467,7 +467,7 @@ func planPort(
 	pp := portPlan{
 		Trait:     trait,
 		Var:       rustname.Snake(trait),
-		ConfigVar: configKey(trait),
+		ConfigVar: ConfigKey(trait),
 		Names:     list(names),
 	}
 
@@ -483,7 +483,7 @@ func planPort(
 	}
 
 	p.Keys = append(p.Keys, specKey{
-		Key:         configKey(trait),
+		Key:         ConfigKey(trait),
 		Owner:       fmt.Sprintf("port %q", trait),
 		Type:        "string",
 		Default:     chosen,
@@ -622,7 +622,7 @@ func planCandidate(
 
 	for _, field := range sortedFieldNames(entry.Adapter.Config) {
 		declared := entry.Adapter.Config[field]
-		key := configKey(name, field)
+		key := ConfigKey(name, field)
 
 		cp.Fields = append(cp.Fields, fieldPlan{
 			Name: field,

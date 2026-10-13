@@ -284,7 +284,7 @@ func portRead(key string) string {
 }
 
 func portRefusal(key string) string {
-	return key + " does not end in a port above zero, an address ending in :0 is not installable"
+	return key + " does not end in an integer port above zero"
 }
 
 func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequiredNamingTheKey(t *testing.T) {
@@ -303,17 +303,17 @@ func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequ
 	}
 }
 
-func TestThePortReadsOfAKeyRefuseAnAddressEndingInZeroNamingTheKey(t *testing.T) {
+func TestThePortReadsOfAKeyRefuseAPortThatIsNotAnIntegerAboveZeroNamingTheKey(t *testing.T) {
 	files := generateHello(t)
 
 	want := `{{ fail "` + portRefusal("rest_addr") + `" }}`
 
 	if strings.Count(files[chartgen.DeploymentFile], want) != 1 {
-		t.Errorf("the deployment does not refuse rest_addr ending in :0 once\n%s", files[chartgen.DeploymentFile])
+		t.Errorf("the deployment does not refuse a rest_addr port that is not an integer above zero once\n%s", files[chartgen.DeploymentFile])
 	}
 
 	if strings.Count(files[chartgen.ServiceFile], want) != 2 {
-		t.Errorf("the service does not refuse rest_addr ending in :0 on port and targetPort\n%s", files[chartgen.ServiceFile])
+		t.Errorf("the service does not refuse a rest_addr port that is not an integer above zero on port and targetPort\n%s", files[chartgen.ServiceFile])
 	}
 }
 

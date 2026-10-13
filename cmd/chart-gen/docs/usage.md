@@ -30,9 +30,11 @@ It emits, relative to the cell.
 | `templates/zz_generated_service.yaml` | one Service with one port per driver with a protocol. Absent when no driver carries one |
 
 A container port and a service port read the text after the last colon of
-`.Values.<driver>_addr` at template time. The driver name and `_addr` compose
-the key, spelled as the config schema spells it. A driver whose key the
-schema lacks is refused by name.
+`.Values.<driver>_addr` at template time. hexagonal-rust's config key rule
+composes the key from the driver name and the field `addr`, so the chart and
+the config schema spell it one way. A driver whose key the schema lacks is
+refused by name. A port that is not an integer above zero fails the render
+naming the key.
 
 Every object carries `app.kubernetes.io/name` equal to `.Chart.Name` and
 nothing else. No ingress, no configmap, no secret, no helpers, no notes.
