@@ -121,6 +121,10 @@ func ConfigKey(parts ...string) string {
 	return strings.Join(out, "_")
 }
 
+func DriverEnabledKey(driver string) string {
+	return ConfigKey("driver", driver)
+}
+
 func rustType(fieldType string) string {
 	switch fieldType {
 	case cellmanifest.FieldTypeInteger, cellmanifest.FieldTypeDuration:
@@ -304,7 +308,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 			Var:        rustname.Snake(name) + "_driver",
 			Type:       entry.Driver.Type,
 			ConfigType: entry.Driver.Type + "Config",
-			EnabledVar: "driver_" + rustname.Snake(name),
+			EnabledVar: DriverEnabledKey(name),
 		}
 
 		for _, field := range sortedFieldNames(entry.Driver.Config) {
@@ -328,7 +332,7 @@ func planDrivers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports map
 		}
 
 		p.Keys = append(p.Keys, specKey{
-			Key:         "driver_" + rustname.Snake(name),
+			Key:         DriverEnabledKey(name),
 			Owner:       fmt.Sprintf("driver %q", name),
 			Type:        "boolean",
 			Default:     wiring.Drivers[name].Enabled,

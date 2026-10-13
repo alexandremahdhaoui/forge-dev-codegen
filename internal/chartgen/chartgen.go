@@ -78,6 +78,7 @@ type portEntry struct {
 	Name     string
 	Protocol string
 	Port     string
+	Enabled  string
 }
 
 type templateData struct {
@@ -253,7 +254,20 @@ func portEntries(manifests []cellmanifest.Manifest, properties map[string]specPr
 				)
 			}
 
-			ports = append(ports, portEntry{Name: driver.Name, Protocol: driver.Protocol, Port: portRead(addrKey, properties[addrKey])})
+			enabledKey := hexrust.DriverEnabledKey(driver.Name)
+			if _, ok := properties[enabledKey]; !ok {
+				return nil, fmt.Errorf(
+					"driver %q in cell %q listens on %s and the config spec has no %q key to read whether it starts",
+					driver.Name, m.Cell, driver.Protocol, enabledKey,
+				)
+			}
+
+			ports = append(ports, portEntry{
+				Name:     driver.Name,
+				Protocol: driver.Protocol,
+				Port:     portRead(addrKey, properties[addrKey]),
+				Enabled:  valueRead(enabledKey, properties[enabledKey]),
+			})
 		}
 	}
 
@@ -363,13 +377,16 @@ spec:
 [[- if .Ports ]]
           ports:
 [[- range .Ports ]]
+            {{- if [[ .Enabled ]] }}
             - name: [[ .Name ]]
               containerPort: [[ .Port ]]
               protocol: [[ .Protocol ]]
+            {{- end }}
 [[- end ]]
 [[- end ]]
 [[ end ]]
 [[- define "service" -]]
+{{- if or[[ range .Ports ]] ([[ .Enabled ]])[[ end ]] }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -381,10 +398,13 @@ spec:
     app.kubernetes.io/name: {{ .Chart.Name }}
   ports:
 [[- range .Ports ]]
+    {{- if [[ .Enabled ]] }}
     - name: [[ .Name ]]
       protocol: [[ .Protocol ]]
       port: [[ .Port ]]
       targetPort: [[ .Port ]]
+    {{- end }}
 [[- end ]]
+{{- end }}
 [[ end ]]
 `))

@@ -26,8 +26,8 @@ It emits, relative to the cell.
 |---|---|
 | `Chart.yaml` | the root name and description, the root version as both `version` and `appVersion` |
 | `values.yaml` | `image.repository` set to the binary, then one key per config key with its default |
-| `templates/zz_generated_deployment.yaml` | one Deployment, one replica, one env entry per config key named by its `x-env`, one container port per driver with a protocol |
-| `templates/zz_generated_service.yaml` | one Service with one port per driver with a protocol. Absent when no driver carries one |
+| `templates/zz_generated_deployment.yaml` | one Deployment, one replica, one env entry per config key named by its `x-env`, one container port per enabled driver with a protocol |
+| `templates/zz_generated_service.yaml` | one Service with one port per enabled driver with a protocol. Absent when no driver carries one, and renders nothing when every such driver is off |
 
 A container port and a service port read the text after the last colon of
 `.Values.<driver>_addr` at template time. hexagonal-rust's config key rule
@@ -36,6 +36,11 @@ the config schema spell it one way. A driver whose key the schema lacks is
 refused by name. A port that is not an integer above zero fails the render
 naming the key. So does a loopback host, `127.0.0.0/8`, `localhost` or
 `[::1]`, since nothing outside the pod reaches it.
+
+A port renders only when `.Values.driver_<driver>` is on, in the Service and
+in the container alike, and the render never reads the addr of a driver that
+is off. The same config key rule spells that flag key. A driver whose flag key
+the schema lacks is refused by name.
 
 Every object carries `app.kubernetes.io/name` equal to `.Chart.Name` and
 nothing else. No ingress, no configmap, no secret, no helpers, no notes.

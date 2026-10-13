@@ -39,12 +39,24 @@ components:
   schemas:
     Spec:
       properties:
+        driver_grpc:
+          default: true
+          description: Whether the grpc driver starts
+          type: boolean
+          x-env: SONGE_HELLO_NODE_DRIVER_GRPC
+          x-flag: driver-grpc
         driver_rest:
           default: true
           description: Whether the rest driver starts
           type: boolean
           x-env: SONGE_HELLO_NODE_DRIVER_REST
           x-flag: driver-rest
+        driver_udp:
+          default: true
+          description: Whether the udp driver starts
+          type: boolean
+          x-env: SONGE_HELLO_NODE_DRIVER_UDP
+          x-flag: driver-udp
         greeting_store_memory_capacity:
           default: 100
           description: How many greeting rows the memory store holds
@@ -233,7 +245,9 @@ func TestValuesHoldOneKeyPerSpecPropertyPlusTheImageRepositoryAndNothingElse(t *
 
 	want := map[string]any{
 		"image":                          map[string]any{"repository": "songe-hello-node"},
+		"driver_grpc":                    true,
 		"driver_rest":                    true,
+		"driver_udp":                     true,
 		"greeting_store_memory_capacity": float64(100),
 		"greeting_store_sqlite_path":     ":memory:",
 		"grpc_addr":                      "127.0.0.1:0",
@@ -345,7 +359,9 @@ func TestTheDeploymentEnvNamesEveryPropertyByItsEnvInSortedOrder(t *testing.T) {
 	deployment := files[chartgen.DeploymentFile]
 
 	wantInOrder := []string{
+		"- name: SONGE_HELLO_NODE_DRIVER_GRPC\n              value: {{ .Values.driver_grpc | quote }}",
 		"- name: SONGE_HELLO_NODE_DRIVER_REST\n              value: {{ .Values.driver_rest | quote }}",
+		"- name: SONGE_HELLO_NODE_DRIVER_UDP\n              value: {{ .Values.driver_udp | quote }}",
 		"- name: SONGE_HELLO_NODE_GREETING_STORE_MEMORY_CAPACITY\n              value: {{ .Values.greeting_store_memory_capacity | quote }}",
 		"- name: SONGE_HELLO_NODE_GREETING_STORE_SQLITE_PATH\n              value: {{ .Values.greeting_store_sqlite_path | quote }}",
 		"- name: SONGE_HELLO_NODE_GRPC_ADDR\n              value: {{ .Values.grpc_addr | quote }}",
@@ -383,9 +399,9 @@ func TestRestAndGrpcGetTcpPortsUdpGetsAUdpPortAndTickGetsNone(t *testing.T) {
 	deployment, service := files[chartgen.DeploymentFile], files[chartgen.ServiceFile]
 
 	for _, want := range []string{
-		"- name: rest\n              containerPort: " + portRead("rest_addr") + "\n              protocol: TCP",
-		"- name: grpc\n              containerPort: " + portRead("grpc_addr") + "\n              protocol: TCP",
-		"- name: udp\n              containerPort: " + portRead("udp_addr") + "\n              protocol: UDP",
+		"{{- if .Values.driver_rest }}\n            - name: rest\n              containerPort: " + portRead("rest_addr") + "\n              protocol: TCP\n            {{- end }}",
+		"{{- if .Values.driver_grpc }}\n            - name: grpc\n              containerPort: " + portRead("grpc_addr") + "\n              protocol: TCP\n            {{- end }}",
+		"{{- if .Values.driver_udp }}\n            - name: udp\n              containerPort: " + portRead("udp_addr") + "\n              protocol: UDP\n            {{- end }}",
 	} {
 		if !strings.Contains(deployment, want) {
 			t.Errorf("the deployment lacks %q\n%s", want, deployment)
@@ -393,9 +409,10 @@ func TestRestAndGrpcGetTcpPortsUdpGetsAUdpPortAndTickGetsNone(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"- name: rest\n      protocol: TCP\n      port: " + portRead("rest_addr") + "\n      targetPort: " + portRead("rest_addr"),
-		"- name: grpc\n      protocol: TCP\n      port: " + portRead("grpc_addr"),
-		"- name: udp\n      protocol: UDP\n      port: " + portRead("udp_addr"),
+		"{{- if or (.Values.driver_rest) (.Values.driver_grpc) (.Values.driver_udp) }}\napiVersion: v1",
+		"{{- if .Values.driver_rest }}\n    - name: rest\n      protocol: TCP\n      port: " + portRead("rest_addr") + "\n      targetPort: " + portRead("rest_addr") + "\n    {{- end }}",
+		"{{- if .Values.driver_grpc }}\n    - name: grpc\n      protocol: TCP\n      port: " + portRead("grpc_addr"),
+		"{{- if .Values.driver_udp }}\n    - name: udp\n      protocol: UDP\n      port: " + portRead("udp_addr"),
 	} {
 		if !strings.Contains(service, want) {
 			t.Errorf("the service lacks %q\n%s", want, service)
@@ -471,6 +488,21 @@ func TestADriverWhoseAddrKeyIsMissingFromTheSpecIsRefusedByName(t *testing.T) {
 	}
 
 	want := `driver "http" in cell "rest" listens on TCP and the config spec has no "http_addr" key to read its port from`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("got %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+func TestADriverWhoseEnabledKeyIsMissingFromTheSpecIsRefusedByName(t *testing.T) {
+	_, err := chartgen.Generate(chartgen.Options{
+		OpenapiSpec: []byte(strings.Replace(configSpec, "        driver_udp:", "        udp_enabled:", 1)),
+		SrcDir:      filepath.Join(crate(t, manifests()), "chart"),
+	})
+	if err == nil {
+		t.Fatal("a driver with no enabled key in the spec was accepted")
+	}
+
+	want := `driver "udp" in cell "udp" listens on UDP and the config spec has no "driver_udp" key to read whether it starts`
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("got %q, want it to contain %q", err.Error(), want)
 	}
@@ -591,6 +623,36 @@ func TestHelmTemplateRefusesARestAddressOnALoopbackHostNamingTheKey(t *testing.T
 		if !strings.Contains(out, loopbackRefusal("rest_addr")) {
 			t.Errorf("the refusal of rest_addr=%q does not name the key\n%s", addr, out)
 		}
+	}
+}
+
+func TestHelmTemplateRendersNoPortOfADisabledDriverAndNeverReadsItsAddr(t *testing.T) {
+	rendered, err := helmTemplate(t, installableValues+",driver_rest=false,rest_addr=127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, rendered)
+	}
+
+	if strings.Contains(rendered, "- name: rest\n") {
+		t.Errorf("a port of the disabled rest driver rendered\n%s", rendered)
+	}
+
+	if strings.Count(rendered, "containerPort:") != 2 || strings.Count(rendered, "targetPort:") != 2 {
+		t.Errorf("want the grpc and udp ports only\n%s", rendered)
+	}
+}
+
+func TestHelmTemplateRendersNoServiceWhenEveryListeningDriverIsDisabled(t *testing.T) {
+	rendered, err := helmTemplate(t, "ticket_verifier_secret_secret=s3cret,driver_rest=false,driver_grpc=false,driver_udp=false")
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, rendered)
+	}
+
+	if strings.Contains(rendered, "\nkind: Service\n") || strings.Contains(rendered, "containerPort:") {
+		t.Errorf("a service or a port rendered with every listening driver disabled\n%s", rendered)
+	}
+
+	if strings.Count(rendered, "\nkind: Deployment\n") != 1 {
+		t.Errorf("the deployment did not render\n%s", rendered)
 	}
 }
 
