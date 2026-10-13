@@ -222,15 +222,15 @@ func TestSeedsFallsBackToTheStoreWhoseRequiredKeysTheReplyCovers(t *testing.T) {
 	}
 }
 
-func TestSeedsSkipsAReplyThatMatchesNoStoreOrHasNoId(t *testing.T) {
+func TestSeedsSkipsAnErrorCaseWhoseControllerReplyIsAbsentOrNull(t *testing.T) {
 	stores, err := Stores([]byte(helloSpec), []string{"Greeting"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	vectors := `{"cases":[
-	  {"case":"a","operation":"createGreeting","controllerReply":{"name":"no id"}},
-	  {"case":"b","operation":"createOther","controllerReply":{"id":"x","other":true}}
+	  {"case":"absent","operation":"createGreeting"},
+	  {"case":"null","operation":"createGreeting","controllerReply":null}
 	]}`
 
 	rows, err := Seeds([]byte(vectors), stores)
@@ -240,6 +240,23 @@ func TestSeedsSkipsAReplyThatMatchesNoStoreOrHasNoId(t *testing.T) {
 
 	if len(rows) != 0 {
 		t.Errorf("rows: %+v", rows)
+	}
+}
+
+func TestPlanRefusesACreateCaseAnsweringARowOfNoDeclaredStoreNamingTheCaseTheOperationAndTheStores(t *testing.T) {
+	for _, reply := range []string{`{"name":"no id"}`, `{"id":"x","other":true}`} {
+		vectors := `{"cases":[{"case":"stray","operation":"createOther","controllerReply":` + reply + `}]}`
+
+		_, err := Plan([]byte(helloSpec), []string{"Greeting", "PlayerScore"}, []byte(vectors))
+		if err == nil {
+			t.Fatalf("a create case answering %s matches no store and must be refused", reply)
+		}
+
+		for _, name := range []string{`"stray"`, "createOther", "Greeting, PlayerScore"} {
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("the refusal names no %s: %v", name, err)
+			}
+		}
 	}
 }
 

@@ -45,7 +45,7 @@ func Seeds(vectors []byte, stores []Store) (map[string][]Row, error) {
 	rows := map[string][]Row{}
 
 	for _, v := range file.Cases {
-		if !strings.HasPrefix(strings.ToLower(v.Operation), "create") || len(v.ControllerReply) == 0 {
+		if !strings.HasPrefix(strings.ToLower(v.Operation), "create") || refused(v.ControllerReply) {
 			continue
 		}
 
@@ -56,7 +56,7 @@ func Seeds(vectors []byte, stores []Store) (map[string][]Row, error) {
 
 		store, ok := storeOf(v.Operation, reply, stores)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("seeding from case %q: operation %s answers a row of no declared store, the stores are %s", v.Case, v.Operation, storeNames(stores))
 		}
 
 		var id string
@@ -73,6 +73,20 @@ func Seeds(vectors []byte, stores []Store) (map[string][]Row, error) {
 	}
 
 	return rows, nil
+}
+
+func refused(reply json.RawMessage) bool {
+	return len(reply) == 0 || string(bytes.TrimSpace(reply)) == "null"
+}
+
+func storeNames(stores []Store) string {
+	names := make([]string, 0, len(stores))
+
+	for _, s := range stores {
+		names = append(names, s.Name)
+	}
+
+	return strings.Join(names, ", ")
 }
 
 func storeOf(operation string, reply map[string]json.RawMessage, stores []Store) (Store, bool) {

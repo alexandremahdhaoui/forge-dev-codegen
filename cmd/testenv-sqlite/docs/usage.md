@@ -30,7 +30,9 @@ properties it reads.
 `seed` names a vectors file. Every case whose `operation` starts with
 `create` and carries a `controllerReply` becomes one row keyed by the
 reply's key property. The reply goes to the store whose required
-properties it covers.
+properties it covers. A case whose `controllerReply` is absent or null
+is an error case and seeds nothing. A create case whose reply fits no
+listed store is refused, naming the case, the operation and the stores.
 
 A seed inserts. It never replaces. Two rows sharing a key, or sharing
 the properties a `one` lookup reads, make sqlite refuse the script and
