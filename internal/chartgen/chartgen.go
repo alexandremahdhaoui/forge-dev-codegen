@@ -269,9 +269,17 @@ func valueRead(key string, property specProperty) string {
 }
 
 func portRead(key string, property specProperty) string {
+	port, host := "$"+key+"_port", "$"+key+"_host"
+
 	return fmt.Sprintf(
-		`{{ $%s := %s | splitList ":" | last | int }}{{ if le $%s 0 }}{{ fail %q }}{{ end }}{{ $%s }}`,
-		key, valueRead(key, property), key, key+" does not end in an integer port above zero", key,
+		`{{ $%s := %s }}`+
+			`{{ %s := $%s | splitList ":" | last | int }}{{ if le %s 0 }}{{ fail %q }}{{ end }}`+
+			`{{ %s := $%s | splitList ":" | initial | join ":" }}{{ if or (hasPrefix "127." %s) (eq %s "localhost" "[::1]") }}{{ fail %q }}{{ end }}`+
+			`{{ %s }}`,
+		key, valueRead(key, property),
+		port, key, port, key+" does not end in an integer port above zero",
+		host, key, host, host, key+" binds a loopback host, so nothing outside the pod reaches it",
+		port,
 	)
 }
 

@@ -34,7 +34,8 @@ A container port and a service port read the text after the last colon of
 composes the key from the driver name and the field `addr`, so the chart and
 the config schema spell it one way. A driver whose key the schema lacks is
 refused by name. A port that is not an integer above zero fails the render
-naming the key.
+naming the key. So does a loopback host, `127.0.0.0/8`, `localhost` or
+`[::1]`, since nothing outside the pod reaches it.
 
 Every object carries `app.kubernetes.io/name` equal to `.Chart.Name` and
 nothing else. No ingress, no configmap, no secret, no helpers, no notes.

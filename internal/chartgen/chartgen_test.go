@@ -279,12 +279,21 @@ func keys(m map[string]any) []string {
 const secretRequired = `required "ticket_verifier_secret_secret has no default, set it in values" .Values.ticket_verifier_secret_secret`
 
 func portRead(key string) string {
-	return `{{ $` + key + ` := .Values.` + key + ` | splitList ":" | last | int }}{{ if le $` + key + ` 0 }}{{ fail "` +
-		portRefusal(key) + `" }}{{ end }}{{ $` + key + ` }}`
+	port, host := "$"+key+"_port", "$"+key+"_host"
+
+	return `{{ $` + key + ` := .Values.` + key + ` }}` +
+		`{{ ` + port + ` := $` + key + ` | splitList ":" | last | int }}{{ if le ` + port + ` 0 }}{{ fail "` + portRefusal(key) + `" }}{{ end }}` +
+		`{{ ` + host + ` := $` + key + ` | splitList ":" | initial | join ":" }}` +
+		`{{ if or (hasPrefix "127." ` + host + `) (eq ` + host + ` "localhost" "[::1]") }}{{ fail "` + loopbackRefusal(key) + `" }}{{ end }}` +
+		`{{ ` + port + ` }}`
 }
 
 func portRefusal(key string) string {
 	return key + " does not end in an integer port above zero"
+}
+
+func loopbackRefusal(key string) string {
+	return key + " binds a loopback host, so nothing outside the pod reaches it"
 }
 
 func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequiredNamingTheKey(t *testing.T) {
@@ -314,6 +323,20 @@ func TestThePortReadsOfAKeyRefuseAPortThatIsNotAnIntegerAboveZeroNamingTheKey(t 
 
 	if strings.Count(files[chartgen.ServiceFile], want) != 2 {
 		t.Errorf("the service does not refuse a rest_addr port that is not an integer above zero on port and targetPort\n%s", files[chartgen.ServiceFile])
+	}
+}
+
+func TestThePortReadsOfAKeyRefuseALoopbackHostNamingTheKey(t *testing.T) {
+	files := generateHello(t)
+
+	want := `{{ fail "` + loopbackRefusal("rest_addr") + `" }}`
+
+	if strings.Count(files[chartgen.DeploymentFile], want) != 1 {
+		t.Errorf("the deployment does not refuse a rest_addr loopback host once\n%s", files[chartgen.DeploymentFile])
+	}
+
+	if strings.Count(files[chartgen.ServiceFile], want) != 2 {
+		t.Errorf("the service does not refuse a rest_addr loopback host on port and targetPort\n%s", files[chartgen.ServiceFile])
 	}
 }
 
@@ -553,6 +576,19 @@ func TestHelmTemplateRefusesARestAddressWhosePortIsNotAnIntegerAboveZeroNamingTh
 		}
 
 		if !strings.Contains(out, portRefusal("rest_addr")) {
+			t.Errorf("the refusal of rest_addr=%q does not name the key\n%s", addr, out)
+		}
+	}
+}
+
+func TestHelmTemplateRefusesARestAddressOnALoopbackHostNamingTheKey(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:8080", "127.1.2.3:8080", "localhost:8080", "[::1]:8080"} {
+		out, err := helmTemplate(t, installableValues+",rest_addr="+addr)
+		if err == nil {
+			t.Fatalf("helm template rendered rest_addr=%q\n%s", addr, out)
+		}
+
+		if !strings.Contains(out, loopbackRefusal("rest_addr")) {
 			t.Errorf("the refusal of rest_addr=%q does not name the key\n%s", addr, out)
 		}
 	}
