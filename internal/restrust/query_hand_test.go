@@ -610,6 +610,35 @@ func TestAVerifierPortReachesTheManifestAsAPortAnAdapterAndAControllerField(t *t
 	t.Fatalf("the manifest never provides the verifier adapter: %+v", m.Provides.Adapters)
 }
 
+func TestEveryFieldOfTheSecretVerifierAdapterIsRequiredWithNoDefault(t *testing.T) {
+	files, err := generatedByPath(t, specWithAGoogleVerifier(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "google_verifier_secret" {
+			continue
+		}
+
+		for _, field := range []string{"secret", "subject", "email"} {
+			declared := adapter.Config[field]
+			if !declared.Required || declared.Default != nil {
+				t.Errorf("field %q = %+v, want required with no default", field, declared)
+			}
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provides the verifier adapter: %+v", m.Provides.Adapters)
+}
+
 func TestAControllerHoldingAPortNoBodyReadsYetStillCompiles(t *testing.T) {
 	out, err := clippyOverTheVerifierCell(t, controllerImplLeavingTheVerifierUnread)
 	if err != nil {

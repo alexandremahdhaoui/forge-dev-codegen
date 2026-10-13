@@ -503,12 +503,14 @@ func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifes
 	case h.Kind == VerifierPortKind && a.Kind == VerifierAdapterSecret:
 		config["secret"] = cellmanifest.ConfigField{
 			Type:        cellmanifest.FieldTypeString,
+			Required:    true,
 			Description: "The one string the " + h.Snake + " secret verifier accepts",
 		}
 
 		for _, field := range h.SubjectFields {
 			config[field.Ident] = cellmanifest.ConfigField{
 				Type:        cellmanifest.FieldTypeString,
+				Required:    true,
 				Description: "The " + field.Name + " of the " + h.Subject + " the " + h.Snake + " secret verifier answers on a match",
 			}
 		}

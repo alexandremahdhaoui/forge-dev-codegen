@@ -173,7 +173,10 @@ The trait carries one method,
 that schema is a required string, because an adapter reads each one off
 what it verified rather than deciding it. A verifier adapter is
 `secret`, which accepts one configured string and answers a subject
-built from configuration, one key per property.
+built from configuration, one key per property. Every one of those keys
+is required with no default, so a node left without one refuses to
+start by name. The adapter is named `<port>_secret`, the rule every hand
+port adapter follows.
 
 The subject is a schema of the document like any other, and a verifier
 usually answers something no client ever sends. Declare it anyway and
