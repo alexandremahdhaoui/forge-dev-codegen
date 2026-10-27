@@ -100,13 +100,54 @@ fn the_config_adapter_answers_the_address_its_configuration_named_on_every_call(
 }
 `
 
-func TestTheConfigStringAdapterAnswersTheValueItsConfigurationNamed(t *testing.T) {
+var eightPortNames = []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"}
+
+func eightPortSpec() string {
+	declarations := ""
+	for _, name := range eightPortNames {
+		declarations += "        - kind: string\n          name: " + name + "Address\n          value: Address\n          adapters: [config]\n"
+	}
+
+	return strings.Replace(combatAddressSpec, "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]\n", declarations, 1)
+}
+
+const eightPortControllerImpl = `use crate::rest::controller::{
+    AddressController, AddressControllerError, AddressControllerImpl,
+};
+use crate::rest::types::address::Address;
+
+impl AddressController for AddressControllerImpl {
+    fn get_combat_address(&self) -> Result<Address, AddressControllerError> {
+        self.alpha_address
+            .get()
+            .map_err(|source| AddressControllerError::AlphaAddress {
+                id: "alpha".to_string(),
+                source,
+            })
+    }
+}
+`
+
+func TestARestControllerHoldingEightPortsPassesClippyDenyingWarningsBecauseItsConstructorCarriesTheTooManyArgumentsAllow(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
 	}
 
-	files, err := restrust.Generate([]byte(combatAddressSpec), restrust.Options{Service: "songe-world"})
+	spec := eightPortSpec()
+	if spec == combatAddressSpec {
+		t.Fatal("the combat address declaration was never replaced, the fixture moved")
+	}
+
+	root := writeAddressCrate(t, spec, eightPortControllerImpl)
+
+	runCargo(t, cargo, root, "clippy", "--all-targets", "--", "-D", "warnings")
+}
+
+func writeAddressCrate(t *testing.T, spec, controllerImpl string) string {
+	t.Helper()
+
+	files, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-world"})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
@@ -137,8 +178,26 @@ func TestTheConfigStringAdapterAnswersTheValueItsConfigurationNamed(t *testing.T
 		write(filepath.Join("src", "rest", f.Path), f.Content)
 	}
 
-	write("src/rest/controller/address_controller.rs", addressControllerImpl)
-	write("tests/string.rs", combatAddressTest)
+	write("src/rest/controller/address_controller.rs", controllerImpl)
+
+	return root
+}
+
+func TestTheConfigStringAdapterAnswersTheValueItsConfigurationNamed(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
+	}
+
+	root := writeAddressCrate(t, combatAddressSpec, addressControllerImpl)
+
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatalf("making the tests directory: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "tests", "string.rs"), []byte(combatAddressTest), 0o644); err != nil {
+		t.Fatalf("writing the string test: %v", err)
+	}
 
 	runCargo(t, cargo, root, "clippy", "--all-targets", "--", "-D", "warnings")
 	runCargo(t, cargo, root, "test", "--test", "string")

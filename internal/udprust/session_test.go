@@ -268,6 +268,15 @@ func TestAFullPeerTableRefusesByNamingMaxSessionsAndNeverAnswersABareFalse(t *te
 	}
 }
 
+func TestAUdpControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgumentsAllow(t *testing.T) {
+	controller := generateSession(t)["controller/zz_generated_hello_datagram_controller.rs"].Content
+
+	want := "impl HelloDatagramControllerImpl {\n    #[allow(clippy::too_many_arguments)]\n    pub fn new(\n        hello_datagram_broadcast:"
+	if !strings.Contains(controller, want) {
+		t.Fatalf("the controller constructor never carried the too many arguments allow:\n%s", controller)
+	}
+}
+
 func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *testing.T) {
 	files := generateSession(t)
 

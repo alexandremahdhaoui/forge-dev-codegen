@@ -80,6 +80,32 @@ func TestAGrpcControllerHoldsEveryPortItsCellNamesAsABoxedFieldAndTheManifestReq
 	}
 }
 
+func TestAGrpcControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgumentsAllow(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
+		Service: "songe-hello",
+		Cell:    "grpc",
+		Ports:   []layoutports.Spec{{Name: "TicketStore"}, {Name: "GreetingClock"}},
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	for _, f := range files {
+		if f.Path != "controller/zz_generated_hello_controller.rs" {
+			continue
+		}
+
+		want := "impl HelloControllerImpl {\n    #[allow(clippy::too_many_arguments)]\n    pub fn new(\n        ticket_store:"
+		if !strings.Contains(f.Content, want) {
+			t.Fatalf("the controller constructor never carried the too many arguments allow:\n%s", f.Content)
+		}
+
+		return
+	}
+
+	t.Fatal("the cell never wrote the controller")
+}
+
 func TestAGrpcCellNamingNoPortStillWritesAUnitControllerThatDerivesDefault(t *testing.T) {
 	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
 	if err != nil {

@@ -843,6 +843,7 @@ pub struct {{ .ControllerTrait }}Impl {
 }
 
 impl {{ .ControllerTrait }}Impl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
 {{- if .Session }}
         {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,

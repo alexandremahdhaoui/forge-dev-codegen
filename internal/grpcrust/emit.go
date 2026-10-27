@@ -411,6 +411,7 @@ pub struct {{ .ControllerTrait }}Impl {
 }
 
 impl {{ .ControllerTrait }}Impl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
 {{- range .Ports }}
         {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,

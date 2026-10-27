@@ -817,6 +817,7 @@ pub trait {{ $c.Pascal }}Controller: Send + Sync {
 }
 
 impl {{ $c.Pascal }}ControllerImpl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new({{ range $i, $p := $c.Ports }}{{ if $i }}, {{ end }}{{ $p.PortSnake }}: Arc<dyn {{ $p.Port }} + Send + Sync>{{ end }}) -> Self {
         Self {{ "{" }}{{ range $i, $p := $c.Ports }}{{ if $i }},{{ end }} {{ $p.PortSnake }}{{ end }} {{ "}" }}
     }
@@ -1840,6 +1841,7 @@ pub struct HttpDriver {
 }
 
 impl HttpDriver {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(config: HttpDriverConfig{{ range .Controllers }}, {{ .Snake }}_controller: Arc<dyn {{ .Pascal }}Controller + Send + Sync>{{ end }}{{ if .Auth }}, ticket_verifier: Arc<dyn TicketVerifier + Send + Sync>{{ end }}) -> Self {
         Self {
             config,

@@ -312,6 +312,12 @@ func TestTheManifestDeclaresTheDeclaredPortAndTheAdapterItsKindEmits(t *testing.
 	}
 }
 
+func TestTheHttpDriverConstructorTakingOneArgumentPerControllerCarriesTheTooManyArgumentsAllow(t *testing.T) {
+	wantIn(t, queriedFiles(t), "driver/zz_generated_http_driver.rs",
+		"impl HttpDriver {\n    #[allow(clippy::too_many_arguments)]\n    pub fn new(config: HttpDriverConfig, greeting_controller:",
+	)
+}
+
 func TestTheControllerPortsOfTheManifestHoldTheDeclaredPortBesideTheStore(t *testing.T) {
 	byPath := queriedFiles(t)
 
