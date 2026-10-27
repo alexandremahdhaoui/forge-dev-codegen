@@ -754,6 +754,61 @@ func specSecrets(t *testing.T, spec string) []string {
 	return secrets
 }
 
+func TestTheSkeletonRefusesARequiredAdapterFieldThatIsNotAStringNamingTheFieldItsTypeAndItsAdapter(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	body, err := cellmanifest.Marshal(cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{{
+				Name:       "quiet",
+				Type:       "QuietStore",
+				Module:     "ws::adapter::quiet",
+				Implements: "GreetingStore",
+				Config:     map[string]cellmanifest.ConfigField{"retries": {Type: cellmanifest.FieldTypeInteger, Default: 3}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshalling the manifest: %v", err)
+	}
+
+	required := strings.Replace(string(body), "default: 3", "required: true", 1)
+	if required == string(body) {
+		t.Fatalf("the default line was never found, the manifest shape moved\n%s", body)
+	}
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), required)
+
+	_, err = hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: quiet
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`),
+	})
+	if err == nil {
+		t.Fatal("a required adapter field of type integer was accepted")
+	}
+
+	want := `config field "retries" of adapter "quiet" in cell "ws" is required and of type "integer", ` +
+		`a required adapter field waits on its port choice and the config loader has no rule yet for a waiting key that is not a string`
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %q, want it to carry %q", err.Error(), want)
+	}
+}
+
 func TestOnlyAnAdapterConfigKeyDeclaredSecretCarriesXSecretInTheConfigSpec(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 

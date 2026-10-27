@@ -44,7 +44,9 @@ Validation refuses by name a field marked `secret: true` that is not
 `required`, because no value can stand in for a missing secret.
 hexagonal-rust writes a required adapter field into the config spec as
 `x-required-when`, naming the port choice key and the adapter name, so the
-field is required only while the choice names its adapter. Names
+field is required only while the choice names its adapter. Validation
+refuses by name a required adapter field that is not a string, because
+the config loader has no rule yet for a waiting key of another type. Names
 are snake case. Types and traits are Rust idents. Modules are `::` paths and
 every driver, adapter, controller and port names one.
 

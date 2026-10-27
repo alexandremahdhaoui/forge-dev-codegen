@@ -430,7 +430,35 @@ func (a Adapter) validate(cell string) error {
 		}
 	}
 
-	return validateConfig(owner, a.Config)
+	if err := validateConfig(owner, a.Config); err != nil {
+		return err
+	}
+
+	return refuseAWaitingFieldThatIsNoString(owner, a.Config)
+}
+
+func refuseAWaitingFieldThatIsNoString(owner string, config map[string]ConfigField) error {
+	for _, name := range sortedNames(config) {
+		if config[name].Required && config[name].Type != FieldTypeString {
+			return fmt.Errorf(
+				"config field %q of %s is required and of type %q, a required adapter field waits on its port choice and the config loader has no rule yet for a waiting key that is not a string",
+				name, owner, config[name].Type,
+			)
+		}
+	}
+
+	return nil
+}
+
+func sortedNames(config map[string]ConfigField) []string {
+	names := make([]string, 0, len(config))
+	for name := range config {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
 }
 
 func (c Controller) validate(cell string) error {
@@ -524,14 +552,7 @@ func validateModule(owner, module string) error {
 }
 
 func validateConfig(owner string, config map[string]ConfigField) error {
-	names := make([]string, 0, len(config))
-	for name := range config {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	for _, name := range names {
+	for _, name := range sortedNames(config) {
 		if !snakeNamePattern.MatchString(name) {
 			return fmt.Errorf("config field %q of %s is not snake case", name, owner)
 		}

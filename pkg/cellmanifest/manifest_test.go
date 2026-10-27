@@ -299,6 +299,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 		Secret: true,
 	}
 
+	requiredAdapterFieldThatIsNoString := exampleManifest()
+	requiredAdapterFieldThatIsNoString.Provides.Adapters[0].Config["retries"] = cellmanifest.ConfigField{
+		Type:     cellmanifest.FieldTypeInteger,
+		Required: true,
+	}
+
 	absoluteBuildScript := exampleManifest()
 	absoluteBuildScript.BuildScript = "/zz_generated_build.rs"
 
@@ -534,6 +540,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			manifest: secretFieldNotRequired,
 			message: `config field "token" of driver "grpc" in cell "grpc" is marked secret and is not required, ` +
 				`a secret is required because git holds no secret to fall back on`,
+		},
+		{
+			name:     "a required adapter field that is not a string is refused",
+			manifest: requiredAdapterFieldThatIsNoString,
+			message: `config field "retries" of adapter "hello_grpc_client" in cell "grpc" is required and of type "integer", ` +
+				`a required adapter field waits on its port choice and the config loader has no rule yet for a waiting key that is not a string`,
 		},
 	}
 
