@@ -726,6 +726,16 @@ func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			replace: "        - kind: verifier\n          name: GreetingStore\n          subject: GoogleIdentity\n          adapters: [secret]",
 			want:    "takes the name of a store or subscribe port",
 		},
+		{
+			name:    "an instant that belongs to a clock port",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          instant: Instant\n          adapters: [secret]",
+			want:    `verifier port "GoogleVerifier" declares instant, which belongs to the clock kind, a verifier port declares only subject`,
+		},
+		{
+			name:    "a value that belongs to a string port",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          value: GoogleIdentity\n          adapters: [secret]",
+			want:    `verifier port "GoogleVerifier" declares value, which belongs to the string kind, a verifier port declares only subject`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -907,6 +917,21 @@ func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			replace: "        - kind: string\n          name: GreetingStore\n          value: Address\n          adapters: [config]",
 			want:    "takes the name of a store or subscribe port",
 		},
+		{
+			name:    "an instant that belongs to a clock port",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          instant: Instant\n          adapters: [config]",
+			want:    `reading GET /greetings: string port "CombatAddress" declares instant, which belongs to the clock kind, a string port declares only value`,
+		},
+		{
+			name:    "a span that belongs to a clock port",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          span: Span\n          adapters: [config]",
+			want:    `reading GET /greetings: string port "CombatAddress" declares span, which belongs to the clock kind, a string port declares only value`,
+		},
+		{
+			name:    "a subject that belongs to a verifier port",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          subject: Address\n          adapters: [config]",
+			want:    `reading GET /greetings: string port "CombatAddress" declares subject, which belongs to the verifier kind, a string port declares only value`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -981,6 +1006,16 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			name:    "the name of a store port",
 			replace: "        - kind: clock\n          name: GreetingStore\n          instant: Instant\n          span: Span\n          adapters: [memory]",
 			want:    "takes the name of a store or subscribe port",
+		},
+		{
+			name:    "a value that belongs to a string port",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          value: Label\n          adapters: [memory]",
+			want:    `reading GET /greetings: clock port "GreetingClock" declares value, which belongs to the string kind, a clock port declares only instant, span`,
+		},
+		{
+			name:    "a subject that belongs to a verifier port",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          subject: Label\n          adapters: [memory]",
+			want:    `reading GET /greetings: clock port "GreetingClock" declares subject, which belongs to the verifier kind, a clock port declares only instant, span`,
 		},
 	}
 

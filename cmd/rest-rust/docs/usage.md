@@ -147,6 +147,11 @@ its trait and every adapter its `adapters` list names. There is no kind
 that carries raw Rust signatures and leaves the adapter to the user. A
 port the engine cannot write is a port that belongs in its own spec.
 
+A declaration carries only the keys of its own kind. A clock declares
+`instant` and `span`. A `string` port declares `value`. A verifier
+declares `subject`. A key of another kind is refused naming the key, the
+port and the kind the key belongs to.
+
 A clock adapter is `memory` or `system`. The memory clock starts at the
 moment its configuration names and steps one unit per call, so a vector
 reads the same stamp on every run. The system clock reads the machine

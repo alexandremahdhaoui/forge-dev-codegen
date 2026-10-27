@@ -833,8 +833,40 @@ func parseHandPort(where string, ref portRef, byName map[string]TypeDef, storeNa
 	}
 }
 
+var portKindKeys = map[string][]string{
+	ClockPortKind:    {"instant", "span"},
+	StringPortKind:   {"value"},
+	VerifierPortKind: {"subject"},
+}
+
+func (p portRef) kindKeys() map[string]string {
+	return map[string]string{"instant": p.Instant, "span": p.Span, "subject": p.Subject, "value": p.Value}
+}
+
+func refuseAnotherKindsKey(where string, ref portRef) error {
+	declared := ref.kindKeys()
+
+	for _, kind := range PortKinds() {
+		if kind == ref.Kind {
+			continue
+		}
+
+		for _, key := range portKindKeys[kind] {
+			if declared[key] != "" {
+				return fmt.Errorf("reading %s: %s port %q declares %s, which belongs to the %s kind, a %s port declares only %s", where, ref.Kind, ref.Name, key, kind, ref.Kind, list(portKindKeys[ref.Kind]))
+			}
+		}
+	}
+
+	return nil
+}
+
 func checkPortShape(where string, ref portRef, kinds []string, storeNames map[string]bool, writes string) error {
 	if err := checkPortName(where, ref.Kind, ref.Name, storeNames); err != nil {
+		return err
+	}
+
+	if err := refuseAnotherKindsKey(where, ref); err != nil {
 		return err
 	}
 
