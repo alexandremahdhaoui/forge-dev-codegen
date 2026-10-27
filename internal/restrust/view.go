@@ -51,6 +51,8 @@ type view struct {
 	UsesPath         bool
 	UsesQuery        bool
 	UsesJson         bool
+	UsesEnum         bool
+	UsesLength       bool
 }
 
 type fieldView struct {
@@ -209,6 +211,9 @@ type opView struct {
 	Params            []paramView
 	HasQuery          bool
 	QueryLines        []string
+	BodyLines         []string
+	UsesEnum          bool
+	UsesLength        bool
 	ClientQueryLines  []string
 	Body              string
 	Response          string
@@ -437,8 +442,13 @@ func buildView(spec *Spec, opts Options) view {
 
 	used := map[string]bool{}
 
+	fieldsByType := map[string][]Field{}
+	for _, t := range spec.Types {
+		fieldsByType[t.Name] = t.Fields
+	}
+
 	for _, c := range spec.Controllers {
-		cv := buildControllerView(c, portsByName)
+		cv := buildControllerView(c, portsByName, fieldsByType)
 		v.Controllers = append(v.Controllers, cv)
 		v.Routes = append(v.Routes, cv.Ops...)
 		v.Clients = append(v.Clients, buildClientView(c, cv, opts.Cell))
@@ -486,6 +496,8 @@ func buildView(spec *Spec, opts Options) view {
 			v.UsesQuery = true
 		}
 
+		v.UsesEnum = v.UsesEnum || r.UsesEnum
+		v.UsesLength = v.UsesLength || r.UsesLength
 		v.HasStream = v.HasStream || r.Stream
 	}
 
@@ -778,7 +790,7 @@ func buildHandPortView(h HandPort) handPortView {
 	return hv
 }
 
-func buildControllerView(c Controller, portsByName map[string]portView) controllerView {
+func buildControllerView(c Controller, portsByName map[string]portView, fieldsByType map[string][]Field) controllerView {
 	cv := controllerView{Name: c.Name, Snake: c.Snake, Pascal: c.Pascal}
 
 	for _, p := range c.Ports {
@@ -786,7 +798,7 @@ func buildControllerView(c Controller, portsByName map[string]portView) controll
 	}
 
 	for _, op := range c.Operations {
-		cv.Ops = append(cv.Ops, buildOpView(op, c, portsByName))
+		cv.Ops = append(cv.Ops, buildOpView(op, c, portsByName, fieldsByType[op.Body]))
 		cv.Auth = cv.Auth || op.Auth
 	}
 
@@ -847,7 +859,7 @@ func buildClientView(c Controller, cv controllerView, cell string) clientView {
 	return client
 }
 
-func buildOpView(op Operation, c Controller, portsByName map[string]portView) opView {
+func buildOpView(op Operation, c Controller, portsByName map[string]portView, bodyFields []Field) opView {
 	ov := opView{
 		ID:                op.ID,
 		Ident:             op.Ident,
@@ -939,6 +951,7 @@ func buildOpView(op Operation, c Controller, portsByName map[string]portView) op
 		clientArgs = append(clientArgs, "body: "+op.Body)
 		extractors = append(extractors, "Json(body): Json<"+op.Body+"Wire>")
 		controllerCall = append(controllerCall, "body.into()")
+		ov.BodyLines, ov.UsesEnum, ov.UsesLength = bodyLines(bodyFields, ov.InvalidStatusExpr)
 	}
 
 	ov.TraitArgs = strings.Join(traitArgs, ", ")
@@ -999,6 +1012,62 @@ func queryLine(q QueryParam, invalid string) string {
 	default:
 		return fmt.Sprintf("let %s = optional_integer(&query, %s, %s)?;", q.Ident, name, invalid)
 	}
+}
+
+func bodyLines(fields []Field, invalid string) ([]string, bool, bool) {
+	lines := []string{}
+	usesEnum := false
+	usesLength := false
+
+	for _, f := range fields {
+		name := strconv.Quote(f.Name)
+		calls := []func(value string) string{}
+
+		if len(f.Enum) > 0 {
+			usesEnum = true
+
+			values := make([]string, 0, len(f.Enum))
+			for _, value := range f.Enum {
+				values = append(values, `"`+rustLiteral(value)+`"`)
+			}
+
+			allowed := "&[" + strings.Join(values, ", ") + "]"
+
+			calls = append(calls, func(value string) string {
+				return "one_of(" + name + ", " + value + ", " + allowed + ", " + invalid + ")?;"
+			})
+		}
+
+		if f.MinLength != nil || f.MaxLength != nil {
+			usesLength = true
+
+			floor := 0
+			if f.MinLength != nil {
+				floor = *f.MinLength
+			}
+
+			ceiling := "None"
+			if f.MaxLength != nil {
+				ceiling = fmt.Sprintf("Some(%d)", *f.MaxLength)
+			}
+
+			calls = append(calls, func(value string) string {
+				return fmt.Sprintf("length_within(%s, %s, %d, %s, %s)?;", name, value, floor, ceiling, invalid)
+			})
+		}
+
+		for _, call := range calls {
+			if f.Optional {
+				lines = append(lines, "if let Some(value) = &body."+f.Ident+" { "+call("value")+" }")
+
+				continue
+			}
+
+			lines = append(lines, call("&body."+f.Ident))
+		}
+	}
+
+	return lines, usesEnum, usesLength
 }
 
 func clientQueryLines(query []QueryParam) []string {

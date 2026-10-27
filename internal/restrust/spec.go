@@ -42,6 +42,9 @@ type schema struct {
 	Required   []string          `json:"required"`
 	Properties map[string]schema `json:"properties"`
 	Items      *schema           `json:"items"`
+	Enum       []json.RawMessage `json:"enum"`
+	MinLength  *int              `json:"minLength"`
+	MaxLength  *int              `json:"maxLength"`
 }
 
 type typeName string
@@ -150,11 +153,14 @@ type operation struct {
 }
 
 type Field struct {
-	Name     string
-	Ident    string
-	Renamed  bool
-	Optional bool
-	Type     fieldType
+	Name      string
+	Ident     string
+	Renamed   bool
+	Optional  bool
+	Type      fieldType
+	Enum      []string
+	MinLength *int
+	MaxLength *int
 }
 
 type fieldType struct {
@@ -657,18 +663,71 @@ func parseFields(typeName string, s schema, schemas map[string]schema) ([]Field,
 			return nil, fmt.Errorf("reading property %q of schema %q: %w", name, typeName, err)
 		}
 
+		enum, err := parseBounds(s.Properties[name], ft)
+		if err != nil {
+			return nil, fmt.Errorf("reading property %q of schema %q: %w", name, typeName, err)
+		}
+
 		ident := rustname.RustIdent(name)
 
 		fields = append(fields, Field{
-			Name:     name,
-			Ident:    ident,
-			Renamed:  ident != name,
-			Optional: !required[name],
-			Type:     ft,
+			Name:      name,
+			Ident:     ident,
+			Renamed:   ident != name,
+			Optional:  !required[name],
+			Type:      ft,
+			Enum:      enum,
+			MinLength: s.Properties[name].MinLength,
+			MaxLength: s.Properties[name].MaxLength,
 		})
 	}
 
 	return fields, nil
+}
+
+func parseBounds(s schema, ft fieldType) ([]string, error) {
+	if s.Enum != nil && ft.Kind != "string" {
+		return nil, fmt.Errorf("enum is declared on a property of type %s, the engine checks an enum on a string property only", ft.Kind)
+	}
+
+	if s.Enum != nil && len(s.Enum) == 0 {
+		return nil, fmt.Errorf("enum is an empty list, an enum lists at least one value a request may carry")
+	}
+
+	enum := make([]string, 0, len(s.Enum))
+
+	for _, raw := range s.Enum {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("enum value %s is not a string, every enum value of a string property is a string", raw)
+		}
+
+		enum = append(enum, value)
+	}
+
+	for _, bound := range []struct {
+		keyword string
+		value   *int
+	}{{"minLength", s.MinLength}, {"maxLength", s.MaxLength}} {
+		if bound.value == nil {
+			continue
+		}
+
+		if ft.Kind != "string" {
+			return nil, fmt.Errorf("%s is declared on a property of type %s, a length bounds a string property only", bound.keyword, ft.Kind)
+		}
+
+		if *bound.value < 0 {
+			return nil, fmt.Errorf("%s is %d, a length counts characters and is never below zero", bound.keyword, *bound.value)
+		}
+
+	}
+
+	if s.MinLength != nil && s.MaxLength != nil && *s.MinLength > *s.MaxLength {
+		return nil, fmt.Errorf("minLength %d is above maxLength %d, no value fits", *s.MinLength, *s.MaxLength)
+	}
+
+	return enum, nil
 }
 
 func parseFieldType(s schema, schemas map[string]schema) (fieldType, error) {
@@ -1283,6 +1342,11 @@ func parseParams(where, path string, op operation) ([]Param, []QueryParam, error
 			return nil, nil, fmt.Errorf("reading %s: %s parameter %q must be a string or an integer, got %q", where, p.In, p.Name, kind)
 		}
 
+		if keyword := boundKeyword(p.Schema); keyword != "" {
+			return nil, nil, fmt.Errorf("reading %s: %s parameter %q declares %s, the engine checks enum, minLength and maxLength on a request body property only", where, p.In, p.Name, keyword)
+		}
+
+
 		if err := checkName(p.In+" parameter", p.Name); err != nil {
 			return nil, nil, fmt.Errorf("reading %s: %w", where, err)
 		}
@@ -1325,6 +1389,19 @@ func parseParams(where, path string, op operation) ([]Param, []QueryParam, error
 	}
 
 	return params, query, nil
+}
+
+func boundKeyword(s schema) string {
+	switch {
+	case s.Enum != nil:
+		return "enum"
+	case s.MinLength != nil:
+		return "minLength"
+	case s.MaxLength != nil:
+		return "maxLength"
+	default:
+		return ""
+	}
 }
 
 func parseBody(where string, op operation, schemas map[string]schema) (string, error) {

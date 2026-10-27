@@ -154,6 +154,93 @@ func TestAQueryParameterOfTheWrongJsonTypeIsRefused(t *testing.T) {
 	refusedVectors(t, queriedSpec, vectors, `query parameter "limit" must be a JSON integer`)
 }
 
+const boundedSpec = `
+openapi: 3.1.0
+info:
+  title: Bounds API
+  version: 1.0.0
+paths:
+  /sign-in:
+    post:
+      operationId: signIn
+      x-controller: account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignInRequest"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Signed"
+        "422":
+          description: Refused
+components:
+  schemas:
+    SignInRequest:
+      type: object
+      required: [provider, nickname]
+      properties:
+        provider:
+          type: string
+          enum: [google]
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 6
+    Signed:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+`
+
+func TestACaseWhoseBodyBreaksADeclaredBoundArmsTheControllerWithNeverBecauseTheDriverRefusesFirst(t *testing.T) {
+	vectors := `{"cases": [
+		{"case": "apple", "operation": "signIn", "input": {"provider": "apple", "nickname": "Songe"}, "expectedStatus": 422, "expectedErrorSubstring": "provider"},
+		{"case": "seven", "operation": "signIn", "input": {"provider": "google", "nickname": "Songeur"}, "expectedStatus": 422, "expectedErrorSubstring": "nickname"},
+		{"case": "six_letters_of_seven_bytes", "operation": "signIn", "input": {"provider": "google", "nickname": "Rêveur"}, "controllerReply": {"provider": "google"}, "expectedStatus": 200}
+	]}`
+
+	content := generatedVectors(t, boundedSpec, vectors)
+
+	for _, name := range []string{"apple", "seven"} {
+		start := strings.Index(content, "async fn "+name+"()")
+		if start < 0 {
+			t.Fatalf("no test %s was emitted:\n%s", name, content)
+		}
+
+		body := content[start:]
+		if end := strings.Index(body[1:], "async fn "); end >= 0 {
+			body = body[:end+1]
+		}
+
+		if !strings.Contains(body, "account_controller.expect_sign_in().never();") {
+			t.Fatalf("the test %s still arms the controller:\n%s", name, body)
+		}
+	}
+
+	if !strings.Contains(content, ".times(1)") {
+		t.Fatalf("the case inside its bounds no longer arms the controller:\n%s", content)
+	}
+}
+
+func TestABodyBoundBreakOnASuccessCaseIsRefused(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "apple", "nickname": "Songe"}, "controllerReply": {"provider": "apple"}, "expectedStatus": 200}]}`
+
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": input breaks the declared bound of the body property "provider", and the driver refuses before the controller answers`)
+}
+
+func TestABodyBoundBreakExpectingAStatusOtherThanTheInvalidStatusIsRefused(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 409, "expectedErrorSubstring": "nickname"}]}`
+
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": input breaks the declared bound of the body property "nickname", so the driver answers 422, not 409`)
+}
+
 func TestEveryNewTaxonomyStatusArmsItsOwnControllerError(t *testing.T) {
 	cases := []struct {
 		name   string

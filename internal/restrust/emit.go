@@ -1796,6 +1796,45 @@ fn parse_integer(name: &str, raw: &str, invalid: StatusCode) -> Result<i64, Reje
     })
 }
 {{ end }}
+{{- if .UsesEnum }}
+fn one_of(name: &str, value: &str, allowed: &[&str], invalid: StatusCode) -> Result<(), Rejection> {
+    if allowed.contains(&value) {
+        return Ok(());
+    }
+
+    Err(reject(
+        invalid,
+        "validation",
+        format!("validating {name:?}: {value:?} is not one of {}", allowed.join(", ")),
+    ))
+}
+{{ end }}
+{{- if .UsesLength }}
+fn length_within(
+    name: &str,
+    value: &str,
+    floor: usize,
+    ceiling: Option<usize>,
+    invalid: StatusCode,
+) -> Result<(), Rejection> {
+    let length = value.chars().count();
+
+    if length >= floor && ceiling.is_none_or(|top| length <= top) {
+        return Ok(());
+    }
+
+    let bounds = match ceiling {
+        Some(top) => format!("{floor} to {top}"),
+        None => format!("at least {floor}"),
+    };
+
+    Err(reject(
+        invalid,
+        "validation",
+        format!("validating {name:?}: the value holds {length} characters and the property takes {bounds}"),
+    ))
+}
+{{ end }}
 pub struct HttpDriverConfig {
     pub addr: String,
 }
@@ -2020,6 +2059,9 @@ async fn {{ .Ident }}({{ .Extractors }}) -> {{ .HandlerReturn }} {
     let subject = authenticate(&state, &headers)?;
 {{- end }}
 {{- range .QueryLines }}
+    {{ . }}
+{{- end }}
+{{- range .BodyLines }}
     {{ . }}
 {{- end }}
 {{- if .Stream }}

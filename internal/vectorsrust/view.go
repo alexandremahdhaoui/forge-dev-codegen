@@ -19,9 +19,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
@@ -208,6 +210,11 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 	controllerByName := map[string]restrust.Controller{}
 	usedTypes := map[string]bool{}
 
+	fieldsByType := map[string][]restrust.Field{}
+	for _, t := range spec.Types {
+		fieldsByType[t.Name] = t.Fields
+	}
+
 	for _, c := range spec.Controllers {
 		controllerByName[c.Name] = c
 
@@ -240,7 +247,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 
 		owner := controllerByName[op.Controller]
 
-		tv, err := buildTest(c, op, owner)
+		tv, err := buildTest(c, op, owner, fieldsByType[op.Body])
 		if err != nil {
 			return view{}, err
 		}
@@ -302,6 +309,7 @@ const (
 	armKindTaxonomy
 	armKindUnauthenticated
 	armKindMissingQuery
+	armKindBrokenBound
 )
 
 const unauthenticatedName = "Unauthenticated"
@@ -312,7 +320,7 @@ type arm struct {
 	id     string
 }
 
-func chooseArm(c VectorCase, op restrust.Operation, missingQuery []string) (arm, error) {
+func chooseArm(c VectorCase, op restrust.Operation, missingQuery, brokenBounds []string) (arm, error) {
 	isOK := len(c.ControllerReply) > 0
 	is2xx := c.ExpectedStatus >= 200 && c.ExpectedStatus < 300
 
@@ -334,6 +342,18 @@ func chooseArm(c VectorCase, op restrust.Operation, missingQuery []string) (arm,
 		}
 
 		return arm{kind: armKindMissingQuery}, nil
+	}
+
+	if len(brokenBounds) > 0 {
+		if isOK {
+			return arm{}, fmt.Errorf("reading vector %q: input breaks the declared bound of the body property %s, and the driver refuses before the controller answers", c.Case, strings.Join(brokenBounds, ", "))
+		}
+
+		if c.ExpectedStatus != op.InvalidStatus {
+			return arm{}, fmt.Errorf("reading vector %q: input breaks the declared bound of the body property %s, so the driver answers %d, not %d", c.Case, strings.Join(brokenBounds, ", "), op.InvalidStatus, c.ExpectedStatus)
+		}
+
+		return arm{kind: armKindBrokenBound}, nil
 	}
 
 	if isOK {
@@ -435,7 +455,7 @@ func checkBearer(c VectorCase, op restrust.Operation) error {
 	return nil
 }
 
-func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (testView, error) {
+func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller, bodyFields []restrust.Field) (testView, error) {
 	sig := buildOpSignature(op)
 
 	if err := checkBearer(c, op); err != nil {
@@ -447,19 +467,24 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (
 		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
+	brokenBounds, err := brokenBodyBounds(bodyFields, c.Input)
+	if err != nil {
+		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
+	}
+
 	uri, hasBody, bodyLiteral, err := buildRequest(op, c.Input)
 	if err != nil {
 		return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 	}
 
-	chosen, err := chooseArm(c, op, missingQuery)
+	chosen, err := chooseArm(c, op, missingQuery, brokenBounds)
 	if err != nil {
 		return testView{}, err
 	}
 
 	withPredicates := []string{}
 
-	if chosen.kind != armKindMissingQuery {
+	if chosen.kind != armKindMissingQuery && chosen.kind != armKindBrokenBound {
 		withPredicates, err = buildWithPredicates(op, c)
 		if err != nil {
 			return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
@@ -478,7 +503,7 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller) (
 		ArmExpectMethod:      "expect_" + sig.Ident,
 		ArmClosureParams:     sig.ClosureParams(),
 		ArmReturning:         returning,
-		ControllerNever:      chosen.kind == armKindUnauthenticated || chosen.kind == armKindMissingQuery,
+		ControllerNever:      chosen.kind == armKindUnauthenticated || chosen.kind == armKindMissingQuery || chosen.kind == armKindBrokenBound,
 		HasWith:              len(withPredicates) > 0,
 		WithPredicates:       strings.Join(withPredicates, ", "),
 		Method:               op.Method,
@@ -629,6 +654,47 @@ func missingRequiredQuery(op restrust.Operation, input json.RawMessage) ([]strin
 	return missing, nil
 }
 
+func brokenBodyBounds(fields []restrust.Field, input json.RawMessage) ([]string, error) {
+	inputMap, err := parseInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	broken := []string{}
+
+	for _, f := range fields {
+		raw, named := inputMap[f.Name]
+		if !named {
+			continue
+		}
+
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+
+		if breaksBound(f, value) {
+			broken = append(broken, strconv.Quote(f.Name))
+		}
+	}
+
+	return broken, nil
+}
+
+func breaksBound(f restrust.Field, value string) bool {
+	length := utf8.RuneCountInString(value)
+
+	if len(f.Enum) > 0 && !slices.Contains(f.Enum, value) {
+		return true
+	}
+
+	if f.MinLength != nil && length < *f.MinLength {
+		return true
+	}
+
+	return f.MaxLength != nil && length > *f.MaxLength
+}
+
 func buildQuery(op restrust.Operation, inputMap map[string]json.RawMessage) (string, error) {
 	pairs := []string{}
 
@@ -741,7 +807,7 @@ func buildReturning(a arm, c VectorCase, op restrust.Operation, owner restrust.C
 		}
 
 		return "Ok(" + decoded + ")", nil
-	case armKindUnauthenticated, armKindMissingQuery:
+	case armKindUnauthenticated, armKindMissingQuery, armKindBrokenBound:
 		return "", nil
 	case armKindTaxonomy:
 		return "Err(" + a.member.Literal(owner.Pascal+"ControllerError", a.id, taxonomy.VectorFiller) + ")", nil

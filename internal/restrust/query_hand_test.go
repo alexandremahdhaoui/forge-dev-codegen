@@ -1031,6 +1031,40 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	}
 }
 
+func clockRefusal(t *testing.T, declaration string) string {
+	t.Helper()
+
+	broken := strings.Replace(queriedSpec, clockDeclaration, declaration, 1)
+	if broken == queriedSpec {
+		t.Fatal("the clock declaration was never found, the fixture moved")
+	}
+
+	_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+	if err == nil {
+		t.Fatal("the broken clock declaration was accepted")
+	}
+
+	return err.Error()
+}
+
+func TestAClockNamingNoInstantIsRefusedSayingAClockDeclarationNamesTheTwoSchemasItSpeaks(t *testing.T) {
+	got := clockRefusal(t, "        - kind: clock\n          name: GreetingClock\n          span: Span\n          adapters: [memory]")
+
+	want := `reading GET /greetings: clock port "GreetingClock" names no instant, a clock declaration names the two schemas it speaks`
+	if got != want {
+		t.Fatalf("want the refusal\n%s\ngot\n%s", want, got)
+	}
+}
+
+func TestAClockInstantCarryingThreePropertiesIsRefusedSayingAClockReadsAndWritesOneNumber(t *testing.T) {
+	got := clockRefusal(t, "        - kind: clock\n          name: GreetingClock\n          instant: Greeting\n          span: Span\n          adapters: [memory]")
+
+	want := `reading GET /greetings: clock port "GreetingClock" names instant "Greeting", which declares 3 properties, a clock reads and writes one number so its instant carries one property and the engine takes that property's name from the schema`
+	if got != want {
+		t.Fatalf("want the refusal\n%s\ngot\n%s", want, got)
+	}
+}
+
 const optionalSchemas = `    MaybeAddress:
       type: object
       properties:

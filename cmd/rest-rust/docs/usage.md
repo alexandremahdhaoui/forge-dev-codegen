@@ -113,6 +113,19 @@ parameters:
       type: string
 ```
 
+A top level property of a request body may declare `enum`, `minLength`
+and `maxLength`. The handler checks each declared bound after it reads
+the query and before it calls the controller. A value outside an `enum`
+or outside its length answers the operation's invalid status with the
+type `validation` and a message naming the property and the allowed
+values or bounds. A length counts characters, never bytes. An optional
+property is checked only when the body carries it. The engine refuses
+by name an `enum` or a length on a property that is not a string, an
+`enum` value that is not a string, an empty `enum`, a negative length, a
+`minLength` above the `maxLength`, and any of the three on a path or
+query parameter. `pattern` is not checked. A driver whose bodies declare
+no bound carries no bound helper.
+
 ## Declared ports
 
 `x-ports` takes a port name or a declaration. A name is the store port
