@@ -664,6 +664,43 @@ func TestASecretGateAdapterComparesTheDeclaredFieldAndIsProvidedByTheCell(t *tes
 	}
 }
 
+func TestTheSecretGateAdapterMarksItsSecretFieldSecretAndRequiredWithNoDefaultInTheCellManifest(t *testing.T) {
+	opts := sessionOptions()
+	opts.Gate = secretGate()
+
+	files, err := udprust.Generate([]byte(sessionProto), opts)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var manifest string
+	for _, f := range files {
+		if f.Path == cellmanifest.FileName {
+			manifest = f.Content
+		}
+	}
+
+	m, err := cellmanifest.Parse([]byte(manifest))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "hello_datagram_session_gate_secret" {
+			continue
+		}
+
+		field, declared := adapter.Config["secret"]
+		if !declared || !field.Secret || !field.Required || field.Default != nil {
+			t.Fatalf("the secret gate declares secret as %+v, want it marked secret and required with no default", field)
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provided the secret gate: %+v", m.Provides.Adapters)
+}
+
 func TestAGateDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	empty := []string{}
 	unknown := []string{"oauth"}

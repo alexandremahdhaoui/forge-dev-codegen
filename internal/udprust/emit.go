@@ -452,6 +452,8 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 		Config: map[string]cellmanifest.ConfigField{
 			"secret": {
 				Type:        cellmanifest.FieldTypeString,
+				Required:    true,
+				Secret:      true,
 				Description: "The one " + v.GateSecretField + " the " + v.ServiceSnake + " session gate admits",
 			},
 		},
