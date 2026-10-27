@@ -1,7 +1,7 @@
 # rest-rust
 
-A forge-dev generator that turns one OpenAPI document into the rust rest
-cell of a service. It fills one cell, a module directory under `src`,
+rest-rust is a forge-dev generator that turns one OpenAPI document into
+the rust rest cell of a service. A cell is a module directory under `src`
 holding the five layers a service crate uses: types, port, controller,
 adapter and driver.
 
@@ -14,8 +14,9 @@ is guarded by a ticket verifier. A GET operation marked
 `in: path` or `in: query` becomes an argument of the controller method
 and of the client method. The paths become the axum router.
 
-This file sits inside the cell, at `src/rest/forge-dev.yaml`. The build
-step that runs it points `src` at the cell.
+The `forge-dev.yaml` below sits inside the cell, at
+`src/rest/forge-dev.yaml`. The build step that runs rest-rust points `src`
+at the cell.
 
 ```yaml
 name: songe-hello
@@ -101,8 +102,8 @@ integer that will not parse both answer the operation's invalid status,
 parameter. The controller never runs.
 
 The client builds the query into the url itself, percent encoding every
-name and value, and leaves out an optional parameter that is `None`. It
-needs no reqwest feature beyond `json`.
+name and value, and leaves out an optional parameter that is `None`. The
+client needs no reqwest feature beyond `json`.
 
 ```yaml
 parameters:
@@ -296,7 +297,7 @@ mocks from it. A ninth member is one edit in one file.
 ## The adapters
 
 `<Store>SqliteStore::new` takes `<Store>SqliteStoreConfig`, whose only
-field is `path`. It opens the file, creates the table and the audit
+field is `path`. `new` opens the file, creates the table and the audit
 table, and answers the port trait. A single store schema names its
 adapter `sqlite` in the manifest. Two or more name theirs
 `<store>_sqlite`, so a merge across cells never collides.
@@ -357,8 +358,8 @@ The table name and the key column are quoted identifiers in the schema
 and in every statement the adapter runs, so a key named after a SQL
 keyword still reads and writes.
 
-The sqlite adapter writes no row of its own. A new file opens empty.
-testenv-sqlite seeds the databases a test runs against.
+The sqlite adapter writes no row, so a new sqlite file opens empty.
+testenv-sqlite seeds every database a test runs against.
 
 ## What the crate needs
 

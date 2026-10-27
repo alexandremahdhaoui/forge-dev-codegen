@@ -1,7 +1,8 @@
 # chart-gen
 
-Emits a Helm chart for one crate. It reads the config schema hexagonal-rust
-writes and the cell manifests, so nothing about the chart is spelled by hand.
+chart-gen emits a Helm chart for one crate. chart-gen reads the config
+schema hexagonal-rust writes and the cell manifests, so nothing about the
+chart is spelled by hand.
 
 The chart is a cell at `<crate>/chart` with its own `forge-dev.yaml`.
 
@@ -15,12 +16,12 @@ openapi:
 ```
 
 From the crate root it reads `forge-dev.yaml` for the name, the version, the
-description, `layout.cells` and `wiring.specPath`. It reads the wiring file
-for the binary. It reads `src/<cell>/zz_generated_cell.yaml` for every listed
-cell. A missing root `forge-dev.yaml`, a missing manifest or a listed cell
+description, `layout.cells` and `wiring.specPath`. chart-gen reads the
+wiring file for the binary and `src/<cell>/zz_generated_cell.yaml` for every
+listed cell. A missing root `forge-dev.yaml`, a missing manifest or a listed cell
 with none is refused by name.
 
-It emits, relative to the cell.
+chart-gen emits these files, relative to the cell.
 
 | File | Holds |
 |---|---|
@@ -42,8 +43,9 @@ A container port and a service port read the text after the last colon of
 composes the key from the driver name and the field `addr`, so the chart and
 the config schema spell it one way. A driver whose key the schema lacks is
 refused by name. A port that is not an integer above zero fails the render
-naming the key. So does a loopback host, `127.0.0.0/8`, `localhost` or
-`[::1]`, since nothing outside the pod reaches it.
+naming the key. A loopback host, `127.0.0.0/8`, `localhost` or `[::1]`,
+fails the render naming the key too, since nothing outside the pod reaches
+a loopback host.
 
 A port renders only when `.Values.driver_<driver>` is on, in the Service and
 in the container alike, and the render never reads the addr of a driver that
