@@ -160,7 +160,7 @@ func cellFiles(t *testing.T, cell string) []emitted {
 
 	switch cell {
 	case "rest":
-		files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello", Vectors: []byte(`{"cases":[]}`)})
+		files, err := restrust.Generate([]byte(helloSpec), restrust.Options{Service: "songe-hello"})
 		if err != nil {
 			t.Fatalf("generating the rest cell: %v", err)
 		}

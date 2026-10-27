@@ -242,7 +242,7 @@ func TestTheGeneratedVectorsCarryTheBearerAndReadTheStreamAgainstTheGuardedDrive
 		t.Skip("cargo is not on PATH")
 	}
 
-	restFiles, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello", Vectors: []byte(`{"cases":[]}`)})
+	restFiles, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating the rest cell: %v", err)
 	}

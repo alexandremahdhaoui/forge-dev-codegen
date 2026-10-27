@@ -247,7 +247,7 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 		t.Skip("cargo is not on PATH")
 	}
 
-	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello", Vectors: []byte(`{"cases":[]}`)})
+	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating the rest cell: %v", err)
 	}

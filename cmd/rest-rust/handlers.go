@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 )
@@ -34,16 +32,10 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting for %q: rest-rust generates rust only", input.Language)
 			}
 
-			vectors, err := readVectors(input)
-			if err != nil {
-				return nil, err
-			}
-
 			files, err := restrust.Generate([]byte(input.OpenapiSpec), restrust.Options{
 				Service: input.Name,
 				Cell:    layoutString(input.Layout, "cell"),
 				Side:    layoutString(input.Layout, "side"),
-				Vectors: vectors,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the rest cell of %q: %w", input.Name, err)
@@ -57,20 +49,6 @@ func NewHandlers() Handlers {
 			return &GenerateOutput{Files: out, Manifest: true}, nil
 		},
 	}
-}
-
-func readVectors(input GenerateInput) ([]byte, error) {
-	rel := layoutString(input.Layout, "vectors")
-	if rel == "" {
-		return nil, nil
-	}
-
-	doc, err := os.ReadFile(filepath.Join(input.SrcDir, rel))
-	if err != nil {
-		return nil, fmt.Errorf("reading the vectors document layout.vectors names, %s, of %q: %w", rel, input.Name, err)
-	}
-
-	return doc, nil
 }
 
 func layoutString(layout map[string]interface{}, key string) string {
