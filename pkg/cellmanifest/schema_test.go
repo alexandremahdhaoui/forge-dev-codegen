@@ -122,6 +122,14 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 				"        retries:\n          type: integer\n" +
 				"        strict:\n          type: boolean\n",
 		},
+		{
+			name:         "a config field marked secret true validates against the schema",
+			manifestYAML: secretFieldManifest("true"),
+		},
+		{
+			name:         "a config field marked secret false validates against the schema",
+			manifestYAML: secretFieldManifest("false"),
+		},
 	}
 
 	for _, tc := range cases {
@@ -135,6 +143,13 @@ func TestTheSchemaAcceptsAManifestTheContractAllows(t *testing.T) {
 	}
 }
 
+func secretFieldManifest(secret string) string {
+	return "version: \"1\"\ncell: rest\ngenerator: rest-rust\n" +
+		"provides:\n  adapters:\n    - name: quiet\n      type: QuietStore\n" +
+		"      module: adapter::quiet\n      implements: GreetingStore\n" +
+		"      config:\n        token:\n          type: string\n          secret: " + secret + "\n"
+}
+
 func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 	t.Parallel()
 
@@ -143,7 +158,18 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 	cases := []struct {
 		name         string
 		manifestYAML string
+		named        string
 	}{
+		{
+			name:         "a config field marked secret with the string yes fails the schema naming secret",
+			manifestYAML: secretFieldManifest(`"yes"`),
+			named:        "secret",
+		},
+		{
+			name:         "a config field marked secret with the integer one fails the schema naming secret",
+			manifestYAML: secretFieldManifest("1"),
+			named:        "secret",
+		},
 		{
 			name: "a config field type outside the list fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
@@ -302,8 +328,13 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := resolved.Validate(instanceOf(t, tc.manifestYAML)); err == nil {
+			err := resolved.Validate(instanceOf(t, tc.manifestYAML))
+			if err == nil {
 				t.Fatalf("validating against the schema returned no error")
+			}
+
+			if !strings.Contains(err.Error(), tc.named) {
+				t.Fatalf("got %q, want it to name %q", err.Error(), tc.named)
 			}
 		})
 	}
