@@ -113,11 +113,13 @@ parameters:
       type: string
 ```
 
-The handler trims spaces at both ends of every top level string property
-of a request body. The trim runs before any bound check and before the
+The handler trims every whitespace character at both ends of every top
+level string property of a request body. Spaces, tabs and newlines are
+all trimmed. The trim runs before any bound check and before the
 controller call, so the controller only ever sees the trimmed value. A
-value of only spaces becomes empty. The handler does not walk into a
-nested object or an array, so a string inside one stays as sent.
+value of only whitespace becomes empty. The handler trims only top level
+string properties of a request body. A query value, a path value and a
+string inside a nested object or an array stay as sent.
 
 A top level property of a request body may declare `enum`, `minLength`
 and `maxLength`. The handler checks each declared bound after it reads
