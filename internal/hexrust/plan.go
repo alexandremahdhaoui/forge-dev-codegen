@@ -92,6 +92,7 @@ type specKey struct {
 	Owner       string
 	Type        string
 	Required    bool
+	Secret      bool
 	Default     any
 	Description string
 }
@@ -102,6 +103,7 @@ func declaredKey(key, owner string, declared cellmanifest.ConfigField) specKey {
 		Owner:       owner,
 		Type:        specType(declared.Type),
 		Required:    declared.Required,
+		Secret:      declared.Secret,
 		Default:     declared.Default,
 		Description: declared.Description,
 	}

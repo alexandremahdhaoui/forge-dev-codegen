@@ -504,6 +504,7 @@ func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifes
 		config["secret"] = cellmanifest.ConfigField{
 			Type:        cellmanifest.FieldTypeString,
 			Required:    true,
+			Secret:      true,
 			Description: "The one string the " + h.Snake + " secret verifier accepts",
 		}
 

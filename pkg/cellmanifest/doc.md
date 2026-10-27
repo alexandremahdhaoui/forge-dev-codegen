@@ -36,7 +36,9 @@ The manifest lists what the cell provides and what it needs.
   includes every declared script from the crate root build script.
 
 A config field carries a type among string, integer, boolean and duration, plus
-`required`, `default` and `description`. Names are snake case. Types and traits
+`required`, `secret`, `default` and `description`. A field marked
+`secret: true` holds a secret value, and hexagonal-rust writes the mark into
+the config spec as `x-secret`. Names are snake case. Types and traits
 are Rust idents. Modules are `::` paths and every driver, adapter, controller
 and port names one.
 

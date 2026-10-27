@@ -156,6 +156,7 @@ func secretConfig(shape crateports.Secret) map[string]cellmanifest.ConfigField {
 		"secret": {
 			Type:        cellmanifest.FieldTypeString,
 			Required:    true,
+			Secret:      true,
 			Description: "The one string the " + shape.Snake + " secret adapter accepts",
 		},
 	}
@@ -472,6 +473,7 @@ type specProperty struct {
 	Description string `json:"description,omitempty"`
 	Env         string `json:"x-env,omitempty"`
 	Flag        string `json:"x-flag,omitempty"`
+	Secret      bool   `json:"x-secret,omitempty"`
 }
 
 type specSchema struct {
@@ -525,6 +527,7 @@ func ConfigSpec(p plan) (string, error) {
 			Description: describe(key, p.Binary),
 			Env:         EnvName(p.Binary, key.Key),
 			Flag:        FlagName(key.Key),
+			Secret:      key.Secret,
 		}
 
 		if key.Default != nil {

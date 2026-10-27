@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -650,6 +651,72 @@ drivers:
 	want := []string{"quiet_secret", "quiet_token"}
 	if got := specRequired(t, files["zz_generated_config_spec.yaml"]); !reflect.DeepEqual(got, want) {
 		t.Fatalf("required = %q, want %q\n%s", got, want, files["zz_generated_config_spec.yaml"])
+	}
+}
+
+func specSecrets(t *testing.T, spec string) []string {
+	t.Helper()
+
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Secret bool `json:"x-secret"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+
+	if err := yaml.Unmarshal([]byte(spec), &doc); err != nil {
+		t.Fatalf("parsing the config spec: %v\n%s", err, spec)
+	}
+
+	secrets := []string{}
+	for key, property := range doc.Components.Schemas["Spec"].Properties {
+		if property.Secret {
+			secrets = append(secrets, key)
+		}
+	}
+
+	sort.Strings(secrets)
+
+	return secrets
+}
+
+func TestOnlyAnAdapterConfigKeyDeclaredSecretCarriesXSecretInTheConfigSpec(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	writeCell(t, root, "ws", cellmanifest.Manifest{
+		Version:   cellmanifest.Version,
+		Cell:      "ws",
+		Generator: "a test",
+		Provides: cellmanifest.Provides{
+			Adapters: []cellmanifest.Adapter{{
+				Name:       "quiet",
+				Type:       "QuietStore",
+				Module:     "ws::adapter::quiet",
+				Implements: "GreetingStore",
+				Config: map[string]cellmanifest.ConfigField{
+					"token":  {Type: cellmanifest.FieldTypeString, Required: true},
+					"secret": {Type: cellmanifest.FieldTypeString, Required: true, Secret: true},
+				},
+			}},
+		},
+	})
+
+	files := generateHello(t, root, `binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: quiet
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`, "grpc", "rest", "udp", "ws")
+
+	want := []string{"quiet_secret"}
+	if got := specSecrets(t, files["zz_generated_config_spec.yaml"]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("x-secret keys = %q, want %q\n%s", got, want, files["zz_generated_config_spec.yaml"])
 	}
 }
 

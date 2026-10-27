@@ -44,6 +44,7 @@
           "enum": ["string", "integer", "boolean", "duration"]
         },
         "required": { "type": "boolean" },
+        "secret": { "type": "boolean" },
         "default": true,
         "description": { "type": "string" }
       }

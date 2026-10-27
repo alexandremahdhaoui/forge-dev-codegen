@@ -84,6 +84,7 @@ type Port struct {
 type ConfigField struct {
 	Type        string `json:"type" yaml:"type"`
 	Required    bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	Secret      bool   `json:"secret,omitempty" yaml:"secret,omitempty"`
 	Default     any    `json:"default,omitempty" yaml:"default,omitempty"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }

@@ -495,6 +495,38 @@ drivers:
 	}
 }
 
+func TestTheCrateRootSecretAdapterMarksOnlyItsSecretXSecretAndNeverItsField(t *testing.T) {
+	root := t.TempDir()
+
+	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, false)
+
+	files, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"rest"},
+		Ports:   guardedCrateRootPorts,
+		Wiring: []byte(`binary: songe-hello-node
+drivers:
+  rest: { enabled: true }
+`),
+	})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var spec string
+	for _, f := range files {
+		if f.Path == hexrust.ConfigSpecFile {
+			spec = f.Content
+		}
+	}
+
+	want := []string{"ticket_verifier_secret_secret"}
+	if got := specSecrets(t, spec); !reflect.DeepEqual(got, want) {
+		t.Fatalf("x-secret keys = %q, want %q\n%s", got, want, spec)
+	}
+}
+
 func TestTheCrateRootSecretAdapterIsNamedAfterItsPortSoItsKeysCarryThePort(t *testing.T) {
 	root := t.TempDir()
 
