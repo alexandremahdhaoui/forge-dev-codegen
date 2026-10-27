@@ -173,6 +173,8 @@ type handPortView struct {
 	Value         string
 	ValueSnake    string
 	ValueField    string
+	JwksURL       string
+	JwksIssuers   string
 	Adapters      []handAdapterView
 	Imports      []importView
 	Methods      []handMethodView
@@ -541,6 +543,15 @@ func rustLiteral(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`)
 }
 
+func rustStringList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, `"`+rustLiteral(value)+`"`)
+	}
+
+	return strings.Join(quoted, ", ")
+}
+
 func adapterName(stores []TypeDef, store TypeDef, kind string) string {
 	if len(stores) == 1 {
 		return kind
@@ -743,6 +754,8 @@ func buildHandPortView(h HandPort) handPortView {
 		Value:        h.Value,
 		ValueSnake:   rustname.Snake(h.Value),
 		ValueField:   h.ValueField,
+		JwksURL:      h.JwksURL,
+		JwksIssuers:  rustStringList(h.JwksIssuers),
 	}
 
 	for _, field := range h.SubjectFields {

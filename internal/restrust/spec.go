@@ -86,7 +86,13 @@ type portRef struct {
 	Span     string
 	Subject  string
 	Value    string
+	Jwks     *jwksBlock
 	Adapters *[]string
+}
+
+type jwksBlock struct {
+	URL     string   `json:"url"`
+	Issuers []string `json:"issuers"`
 }
 
 type portMethod struct {
@@ -111,6 +117,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 		Span     string       `json:"span"`
 		Subject  string       `json:"subject"`
 		Value    string       `json:"value"`
+		Jwks     *jwksBlock   `json:"jwks"`
 		Adapters *[]string    `json:"adapters"`
 	}
 
@@ -126,6 +133,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 	p.Span = declared.Span
 	p.Subject = declared.Subject
 	p.Value = declared.Value
+	p.Jwks = declared.Jwks
 	p.Adapters = declared.Adapters
 
 	return nil
@@ -227,6 +235,8 @@ type HandPort struct {
 	SubjectFields []Field
 	Value         string
 	ValueField    string
+	JwksURL       string
+	JwksIssuers   []string
 	Adapters      []string
 	Methods       []HandMethod
 }
@@ -306,7 +316,10 @@ const (
 
 const StringAdapterSetting = "setting"
 
-const VerifierAdapterSecret = "secret"
+const (
+	VerifierAdapterJwks   = "jwks"
+	VerifierAdapterSecret = "secret"
+)
 
 func PortKinds() []string {
 	return []string{ClockPortKind, StringPortKind, VerifierPortKind}
@@ -321,7 +334,7 @@ func StringAdapterKinds() []string {
 }
 
 func VerifierAdapterKinds() []string {
-	return []string{VerifierAdapterSecret}
+	return []string{VerifierAdapterJwks, VerifierAdapterSecret}
 }
 
 const (
@@ -899,11 +912,17 @@ func parseHandPort(where string, ref portRef, byName map[string]TypeDef, storeNa
 var portKindKeys = map[string][]string{
 	ClockPortKind:    {"instant", "span"},
 	StringPortKind:   {"value"},
-	VerifierPortKind: {"subject"},
+	VerifierPortKind: {"subject", "jwks"},
 }
 
-func (p portRef) kindKeys() map[string]string {
-	return map[string]string{"instant": p.Instant, "span": p.Span, "subject": p.Subject, "value": p.Value}
+func (p portRef) kindKeys() map[string]bool {
+	return map[string]bool{
+		"instant": p.Instant != "",
+		"span":    p.Span != "",
+		"subject": p.Subject != "",
+		"value":   p.Value != "",
+		"jwks":    p.Jwks != nil,
+	}
 }
 
 func refuseAnotherKindsKey(where string, ref portRef) error {
@@ -915,7 +934,7 @@ func refuseAnotherKindsKey(where string, ref portRef) error {
 		}
 
 		for _, key := range portKindKeys[kind] {
-			if declared[key] != "" {
+			if declared[key] {
 				return fmt.Errorf("reading %s: %s port %q declares %s, which belongs to the %s kind, a %s port declares only %s", where, ref.Kind, ref.Name, key, kind, ref.Kind, list(portKindKeys[ref.Kind]))
 			}
 		}
@@ -1020,6 +1039,11 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 		return HandPort{}, err
 	}
 
+	jwks, err := jwksOf(where, ref)
+	if err != nil {
+		return HandPort{}, err
+	}
+
 	if ref.Subject == "" {
 		return HandPort{}, fmt.Errorf("reading %s: verifier port %q names no subject, a verifier declares the schema it answers when it accepts an offered string", where, ref.Name)
 	}
@@ -1045,6 +1069,8 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 		Kind:          VerifierPortKind,
 		Subject:       ref.Subject,
 		SubjectFields: subject.Fields,
+		JwksURL:       jwks.URL,
+		JwksIssuers:   jwks.Issuers,
 		Adapters:      *ref.Adapters,
 		Methods: []HandMethod{
 			{
@@ -1055,6 +1081,28 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 			},
 		},
 	}, nil
+}
+
+func jwksOf(where string, ref portRef) (jwksBlock, error) {
+	listed := holds(*ref.Adapters, VerifierAdapterJwks)
+
+	if !listed && ref.Jwks != nil {
+		return jwksBlock{}, fmt.Errorf("reading %s: verifier port %q declares a jwks block while its adapters do not list jwks, a block no adapter reads is a declaration nobody honours", where, ref.Name)
+	}
+
+	if !listed {
+		return jwksBlock{}, nil
+	}
+
+	if ref.Jwks == nil || ref.Jwks.URL == "" {
+		return jwksBlock{}, fmt.Errorf("reading %s: verifier port %q lists the jwks adapter and names no jwks url, a jwks verifier fetches its key set from the url the spec declares", where, ref.Name)
+	}
+
+	if len(ref.Jwks.Issuers) == 0 {
+		return jwksBlock{}, fmt.Errorf("reading %s: verifier port %q lists the jwks adapter and names no jwks issuers, a jwks verifier accepts a token only from an issuer the spec declares", where, ref.Name)
+	}
+
+	return *ref.Jwks, nil
 }
 
 type oneFieldRule struct {

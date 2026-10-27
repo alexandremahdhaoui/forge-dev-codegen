@@ -708,8 +708,8 @@ func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 		},
 		{
 			name:    "an unknown adapter kind",
-			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]",
-			want:    `adapter kind "jwks", a verifier adapter is one of secret`,
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [okta]",
+			want:    `adapter kind "okta", a verifier adapter is one of jwks, secret`,
 		},
 		{
 			name:    "no adapters",
@@ -735,6 +735,168 @@ func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			name:    "a value that belongs to a string port",
 			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          value: GoogleIdentity\n          adapters: [secret]",
 			want:    `verifier port "GoogleVerifier" declares value, which belongs to the string kind, a verifier port declares only subject`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broken := strings.Replace(specWithAGoogleVerifier(t), verifierDeclaration, tc.replace, 1)
+
+			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+const jwksVerifierDeclaration = "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks, secret]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com, accounts.google.com]"
+
+func specWithAJwksVerifier(t *testing.T) string {
+	t.Helper()
+
+	spec := specWithAGoogleVerifier(t)
+
+	withJwks := strings.Replace(spec, verifierDeclaration, jwksVerifierDeclaration, 1)
+	if withJwks == spec {
+		t.Fatal("the verifier declaration was never replaced, the fixture moved")
+	}
+
+	return withJwks
+}
+
+func TestAJwksVerifierAdapterIsEmittedBesideTheSecretOneBehindOnePort(t *testing.T) {
+	files, err := generatedByPath(t, specWithAJwksVerifier(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	if _, emitted := files["adapter/zz_generated_google_verifier_secret.rs"]; !emitted {
+		t.Error("the secret verifier left when the jwks verifier joined it")
+	}
+
+	jwks, emitted := files["adapter/zz_generated_google_verifier_jwks.rs"]
+	if !emitted {
+		t.Fatalf("the jwks verifier was not emitted, the cell wrote %d files", len(files))
+	}
+
+	for _, want := range []string{
+		`const ISSUERS: &[&str] = &["https://accounts.google.com", "accounts.google.com"];`,
+		"pub struct GoogleVerifierJwksConfig {\n    pub audience: String,\n    pub url: String,\n}",
+		"#[serde(rename = \"subject\")]\n    subject: String,",
+		"#[serde(rename = \"email\")]\n    email: String,",
+		"email_verified: Option<bool>,",
+		"use crate::rest::port::google_verifier::{GoogleVerifier, GoogleVerifierError};",
+		"impl GoogleVerifier for GoogleVerifierJwks {",
+		"tokio::task::block_in_place",
+	} {
+		if !strings.Contains(jwks, want) {
+			t.Errorf("the jwks verifier never carried %q:\n%s", want, jwks)
+		}
+	}
+
+	mod := files["adapter/mod.rs"]
+	for _, want := range []string{"pub mod zz_generated_google_verifier_jwks;", "pub mod zz_generated_google_verifier_secret;"} {
+		if !strings.Contains(mod, want) {
+			t.Errorf("the adapter mod.rs never mounted %q:\n%s", want, mod)
+		}
+	}
+
+	ports := 0
+	for p := range files {
+		if strings.HasPrefix(p, "port/zz_generated_google_verifier") {
+			ports++
+		}
+	}
+
+	if ports != 1 {
+		t.Errorf("the cell wrote %d verifier ports, two adapters stand behind one port", ports)
+	}
+}
+
+func TestAJwksVerifierReachesTheManifestWithItsAudienceAndItsUrlConfigKeys(t *testing.T) {
+	files, err := generatedByPath(t, specWithAJwksVerifier(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "google_verifier_jwks" {
+			continue
+		}
+
+		if adapter.Implements != "GoogleVerifier" || adapter.Type != "GoogleVerifierJwks" || adapter.Module != "rest::adapter::google_verifier_jwks" {
+			t.Errorf("the jwks adapter is declared as %+v", adapter)
+		}
+
+		want := map[string]cellmanifest.ConfigField{
+			"audience": {
+				Type:        cellmanifest.FieldTypeString,
+				Required:    true,
+				Description: "The audience a token must name for the google_verifier jwks verifier to accept it",
+			},
+			"url": {
+				Type:        cellmanifest.FieldTypeString,
+				Default:     "https://www.googleapis.com/oauth2/v3/certs",
+				Description: "The url the google_verifier jwks verifier fetches its published key set from",
+			},
+		}
+
+		if !reflect.DeepEqual(adapter.Config, want) {
+			t.Fatalf("the jwks adapter config is %+v, want %+v", adapter.Config, want)
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provides the jwks adapter: %+v", m.Provides.Adapters)
+}
+
+func TestAJwksDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace string
+		want    string
+	}{
+		{
+			name:    "jwks listed with no jwks block",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]",
+			want:    `verifier port "GoogleVerifier" lists the jwks adapter and names no jwks url`,
+		},
+		{
+			name:    "jwks listed with no url",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]\n          jwks:\n            issuers: [https://accounts.google.com]",
+			want:    `verifier port "GoogleVerifier" lists the jwks adapter and names no jwks url`,
+		},
+		{
+			name:    "jwks listed with no issuers",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs",
+			want:    `verifier port "GoogleVerifier" lists the jwks adapter and names no jwks issuers`,
+		},
+		{
+			name:    "jwks listed with an empty issuers list",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [jwks]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: []",
+			want:    `verifier port "GoogleVerifier" lists the jwks adapter and names no jwks issuers`,
+		},
+		{
+			name:    "a jwks block on a port whose adapters do not list jwks",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: GoogleIdentity\n          adapters: [secret]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com]",
+			want:    `verifier port "GoogleVerifier" declares a jwks block while its adapters do not list jwks`,
+		},
+		{
+			name:    "a jwks block on a string port",
+			replace: "        - kind: string\n          name: GoogleAddress\n          value: GoogleIdentity\n          adapters: [setting]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com]",
+			want:    `string port "GoogleAddress" declares jwks, which belongs to the verifier kind`,
+		},
+		{
+			name:    "a jwks block on a clock port",
+			replace: "        - kind: clock\n          name: GoogleClock\n          instant: Instant\n          span: Span\n          adapters: [memory]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com]",
+			want:    `clock port "GoogleClock" declares jwks, which belongs to the verifier kind`,
 		},
 	}
 

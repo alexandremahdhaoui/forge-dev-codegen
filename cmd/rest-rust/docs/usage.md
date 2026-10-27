@@ -171,7 +171,7 @@ port the engine cannot write is a port that belongs in its own spec.
 
 A declaration carries only the keys of its own kind. A clock declares
 `instant` and `span`. A `string` port declares `value`. A verifier
-declares `subject`. A key of another kind is refused naming the key, the
+declares `subject` and `jwks`. A key of another kind is refused naming the key, the
 port and the kind the key belongs to.
 
 A clock adapter is `memory` or `system`. The memory clock starts at the
@@ -211,9 +211,9 @@ The trait carries one method,
 `fn verify(&self, offered: &str) -> Result<<Subject>, <Name>Error>`.
 `subject` names the schema the verifier answers, and every property of
 that schema is a required string, because an adapter reads each one off
-what it verified rather than deciding it. A verifier adapter is
-`secret`, which accepts one configured string and answers a subject
-built from configuration, one key per property. Every one of those keys
+what it verified rather than deciding it. A verifier adapter is `jwks`
+or `secret`. The `secret` adapter accepts one configured string and
+answers a subject built from configuration, one key per property. Every one of those keys
 has no default. Every one of those keys is required only while the port
 choice names the `secret` adapter, so a node that picks it and leaves a
 key unset refuses to start by name. The cell manifest marks the
@@ -221,6 +221,25 @@ adapter's `secret` key `secret: true` and leaves every subject key
 unmarked, so chart-gen reads only the `secret` key from a Kubernetes
 Secret. The adapter is named
 `<port>_secret`, the rule every hand port adapter follows.
+
+The `jwks` adapter verifies a signed token against a JSON Web Key Set,
+the public keys an issuer such as Google publishes. A port that lists
+`jwks` carries a `jwks` block with a `url` and a list of `issuers`, and
+the engine refuses by name a block with no url, a block with no issuers,
+and a block on a port whose adapters do not list `jwks`. The adapter
+holds two config keys. The `audience` key has no default and is required
+only while the port choice names the `jwks` adapter. The `url` key
+defaults to the declared url so a test can point it at a local key set.
+The adapter reads the key id from the token header and takes the
+algorithm from the matching key, and it refuses a symmetric key because
+anyone can read a published key set. The adapter caches the keys for the
+`max-age` of the response `Cache-Control` header and fetches the set
+again on a miss or past that age, so a key the issuer rotated out stops
+being trusted. A response with no `max-age` is cached for zero seconds.
+A token passes only when its signature, expiry, issuer and audience
+hold, every subject property is present as a claim of the same name,
+and its `email_verified` claim is true. A failure to fetch or read the
+key set answers the `Call` arm and never a refusal.
 
 The subject is a schema of the document like any other, and a verifier
 usually answers something no client ever sends. Declare it anyway and

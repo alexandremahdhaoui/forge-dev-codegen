@@ -522,6 +522,17 @@ func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifes
 				Description: "The " + field.Name + " of the " + h.Subject + " the " + h.Snake + " secret verifier answers on a match",
 			}
 		}
+	case h.Kind == VerifierPortKind && a.Kind == VerifierAdapterJwks:
+		config["audience"] = cellmanifest.ConfigField{
+			Type:        cellmanifest.FieldTypeString,
+			Required:    true,
+			Description: "The audience a token must name for the " + h.Snake + " jwks verifier to accept it",
+		}
+		config["url"] = cellmanifest.ConfigField{
+			Type:        cellmanifest.FieldTypeString,
+			Default:     h.JwksURL,
+			Description: "The url the " + h.Snake + " jwks verifier fetches its published key set from",
+		}
 	}
 
 	return config
@@ -1571,6 +1582,221 @@ impl {{ $p.Name }} for {{ $a.Struct }} {
         }
 
         Ok(self.subject.clone())
+    }
+}
+{{ end -}}
+
+{{- define "verifier_jwks" -}}
+{{ .Header }}
+{{ $p := .Port }}{{ $a := .Adapter }}
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+use jsonwebtoken::errors::ErrorKind;
+use jsonwebtoken::jwk::{AlgorithmParameters, Jwk, JwkSet};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use serde::Deserialize;
+
+use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
+use {{ .CratePath }}types::{{ $p.SubjectSnake }}::{{ $p.Subject }};
+
+const ISSUERS: &[&str] = &[{{ $p.JwksIssuers }}];
+
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+const LEEWAY_SECONDS: u64 = 60;
+
+const REQUIRED_CLAIMS: &[&str] = &["exp", "iss", "aud"];
+
+pub struct {{ $a.ConfigStruct }} {
+    pub audience: String,
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+struct {{ $a.Struct }}Claims {
+{{- range $p.SubjectFields }}
+    #[serde(rename = "{{ .Name }}")]
+    {{ .Ident }}: String,
+{{- end }}
+    email_verified: Option<bool>,
+}
+
+struct CachedKey {
+    jwk: Jwk,
+    expires: Instant,
+}
+
+pub struct {{ $a.Struct }} {
+    audience: String,
+    url: String,
+    client: reqwest::Client,
+    keys: Mutex<HashMap<String, CachedKey>>,
+}
+
+impl {{ $a.Struct }} {
+    pub fn new(config: {{ $a.ConfigStruct }}) -> Self {
+        Self {
+            audience: config.audience,
+            url: config.url,
+            client: reqwest::Client::new(),
+            keys: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn block<T>(&self, future: impl std::future::Future<Output = T>) -> T {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+    }
+
+    fn cache(&self) -> Result<MutexGuard<'_, HashMap<String, CachedKey>>, {{ $p.Error }}> {
+        self.keys.lock().map_err(|_| {{ $p.Error }}::Call {
+            method: "verify".to_string(),
+            source: "locking the key cache: poisoned".into(),
+        })
+    }
+
+    fn cached(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
+        let now = Instant::now();
+
+        Ok(self
+            .cache()?
+            .get(kid)
+            .filter(|cached| now < cached.expires)
+            .map(|cached| cached.jwk.clone()))
+    }
+
+    fn fetched(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
+        let (set, max_age) = self.block(self.fetch())?;
+        let expires = Instant::now() + max_age;
+
+        let fresh: HashMap<String, CachedKey> = set
+            .keys
+            .into_iter()
+            .filter_map(|jwk| {
+                let kid = jwk.common.key_id.clone()?;
+
+                Some((kid, CachedKey { jwk, expires }))
+            })
+            .collect();
+
+        let found = fresh.get(kid).map(|cached| cached.jwk.clone());
+        *self.cache()? = fresh;
+
+        Ok(found)
+    }
+
+    async fn fetch(&self) -> Result<(JwkSet, Duration), {{ $p.Error }}> {
+        let call = |source: reqwest::Error| {{ $p.Error }}::Call {
+            method: "verify".to_string(),
+            source: Box::new(source),
+        };
+
+        let response = self
+            .client
+            .get(&self.url)
+            .timeout(FETCH_TIMEOUT)
+            .send()
+            .await
+            .and_then(|response| response.error_for_status())
+            .map_err(call)?;
+
+        let max_age = max_age(response.headers());
+        let set = response.json::<JwkSet>().await.map_err(call)?;
+
+        Ok((set, max_age))
+    }
+
+    fn key(&self, kid: &str) -> Result<(DecodingKey, Algorithm), {{ $p.Error }}> {
+        let jwk = match self.cached(kid)? {
+            Some(jwk) => jwk,
+            None => self
+                .fetched(kid)?
+                .ok_or_else(|| refused(format!("no published key carries the key id {kid:?}")))?,
+        };
+
+        if let AlgorithmParameters::OctetKey(_) = jwk.algorithm {
+            return Err(refused(format!(
+                "the key {kid:?} is symmetric and anyone can read a published key set"
+            )));
+        }
+
+        let named = jwk
+            .common
+            .key_algorithm
+            .ok_or_else(|| refused(format!("the key {kid:?} names no algorithm")))?;
+
+        let algorithm = Algorithm::try_from(named)
+            .map_err(|_| refused(format!("the key {kid:?} names the algorithm {named} that verifies no token")))?;
+
+        let key = DecodingKey::from_jwk(&jwk)
+            .map_err(|source| refused(format!("reading the key {kid:?}: {source}")))?;
+
+        Ok((key, algorithm))
+    }
+}
+
+fn max_age(headers: &reqwest::header::HeaderMap) -> Duration {
+    let seconds = headers
+        .get_all(reqwest::header::CACHE_CONTROL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .find_map(|directive| directive.trim().strip_prefix("max-age=")?.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    Duration::from_secs(seconds)
+}
+
+fn refused(reason: String) -> {{ $p.Error }} {
+    {{ $p.Error }}::Refused {
+        method: "verify".to_string(),
+        reason,
+    }
+}
+
+fn rejection(kind: &ErrorKind, kid: &str) -> String {
+    match kind {
+        ErrorKind::ExpiredSignature => "the token expired".to_string(),
+        ErrorKind::InvalidAudience => "the token names another audience".to_string(),
+        ErrorKind::InvalidIssuer => "the token names another issuer".to_string(),
+        ErrorKind::InvalidSignature => format!("the token signature does not match the key {kid:?}"),
+        ErrorKind::MissingRequiredClaim(claim) => format!("the token carries no {claim} claim"),
+        ErrorKind::Json(source) => format!("reading the token claims: {source}"),
+        other => format!("verifying the token against the key {kid:?}: {other:?}"),
+    }
+}
+
+impl {{ $p.Name }} for {{ $a.Struct }} {
+    fn verify(&self, offered: &str) -> Result<{{ $p.Subject }}, {{ $p.Error }}> {
+        let header = decode_header(offered)
+            .map_err(|source| refused(format!("reading the token header: {source}")))?;
+
+        let kid = header
+            .kid
+            .ok_or_else(|| refused("the token header names no key id".to_string()))?;
+
+        let (key, algorithm) = self.key(&kid)?;
+
+        let mut validation = Validation::new(algorithm);
+        validation.set_issuer(ISSUERS);
+        validation.set_audience(&[&self.audience]);
+        validation.set_required_spec_claims(REQUIRED_CLAIMS);
+        validation.leeway = LEEWAY_SECONDS;
+
+        let claims = decode::<{{ $a.Struct }}Claims>(offered, &key, &validation)
+            .map_err(|source| refused(rejection(source.kind(), &kid)))?
+            .claims;
+
+        if claims.email_verified != Some(true) {
+            return Err(refused("the token email_verified claim is not true".to_string()));
+        }
+
+        Ok({{ $p.Subject }} {
+{{- range $p.SubjectFields }}
+            {{ .Ident }}: claims.{{ .Ident }},
+{{- end }}
+        })
     }
 }
 {{ end -}}
