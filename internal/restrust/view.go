@@ -16,6 +16,7 @@ package restrust
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -949,9 +950,15 @@ func buildOpView(op Operation, c Controller, portsByName map[string]portView, bo
 	if op.Body != "" {
 		traitArgs = append(traitArgs, "body: "+op.Body)
 		clientArgs = append(clientArgs, "body: "+op.Body)
-		extractors = append(extractors, "Json(body): Json<"+op.Body+"Wire>")
 		controllerCall = append(controllerCall, "body.into()")
 		ov.BodyLines, ov.UsesEnum, ov.UsesLength = bodyLines(bodyFields, ov.InvalidStatusExpr)
+
+		binding := "body"
+		if slices.ContainsFunc(bodyFields, IsTrimmed) {
+			binding = "mut body"
+		}
+
+		extractors = append(extractors, "Json("+binding+"): Json<"+op.Body+"Wire>")
 	}
 
 	ov.TraitArgs = strings.Join(traitArgs, ", ")
@@ -1020,6 +1027,10 @@ func bodyLines(fields []Field, invalid string) ([]string, bool, bool) {
 	usesLength := false
 
 	for _, f := range fields {
+		if IsTrimmed(f) {
+			lines = append(lines, trimLine(f))
+		}
+
 		name := strconv.Quote(f.Name)
 		calls := []func(value string) string{}
 
@@ -1068,6 +1079,20 @@ func bodyLines(fields []Field, invalid string) ([]string, bool, bool) {
 	}
 
 	return lines, usesEnum, usesLength
+}
+
+func IsTrimmed(f Field) bool {
+	return f.Type.Kind == "string"
+}
+
+func trimLine(f Field) string {
+	value := "body." + f.Ident
+
+	if f.Optional {
+		return value + " = " + value + ".map(|value| value.trim().to_string());"
+	}
+
+	return value + " = " + value + ".trim().to_string();"
 }
 
 func clientQueryLines(query []QueryParam) []string {

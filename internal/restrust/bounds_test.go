@@ -177,6 +177,28 @@ func TestAnOptionalBoundedPropertyIsCheckedOnlyWhenTheBodyCarriesIt(t *testing.T
 	checkedBeforeTheController(t, driver, optionalLengthCheck)
 }
 
+func TestEveryStringPropertyOfARequestBodyIsTrimmedBeforeItsBoundsAndBeforeTheControllerRuns(t *testing.T) {
+	driver := boundedDriver(t, boundedSpec)
+
+	checkedBeforeTheController(t, driver, "Json(mut body): Json<SignInRequestWire>")
+
+	for _, pair := range [][2]string{
+		{"body.id_token = body.id_token.trim().to_string();", requiredLengthCheck},
+		{"body.nickname = body.nickname.map(|value| value.trim().to_string());", optionalLengthCheck},
+		{"body.provider = body.provider.trim().to_string();", enumCheck},
+	} {
+		checkedBeforeTheController(t, driver, pair[0])
+
+		if strings.Index(driver, pair[0]) > strings.Index(driver, pair[1]) {
+			t.Fatalf("the driver checks %q before it trims with %q:\n%s", pair[1], pair[0], driver)
+		}
+	}
+
+	if strings.Contains(driver, "body.count =") {
+		t.Fatalf("the driver trims the integer property count:\n%s", driver)
+	}
+}
+
 func TestAnOperationWithNoBoundInItsBodyEmitsNoBoundHelper(t *testing.T) {
 	unbounded := strings.Replace(boundedSpec, boundedDeclarations, unboundedDeclarations, 1)
 	if unbounded == boundedSpec {
@@ -370,6 +392,7 @@ async fn a_value_outside_its_bounds_is_refused_as_validation_and_never_reaches_t
     for (body, property) in [
         (r#"{"provider":"apple","idToken":"token"}"#, "provider"),
         (r#"{"provider":"google","idToken":""}"#, "idToken"),
+        (r#"{"provider":"google","idToken":"   "}"#, "idToken"),
         (r#"{"provider":"google","idToken":"token","nickname":"Al"}"#, "nickname"),
         (r#"{"provider":"google","idToken":"token","nickname":"Songeur"}"#, "nickname"),
     ] {
@@ -385,7 +408,7 @@ async fn a_value_outside_its_bounds_is_refused_as_validation_and_never_reaches_t
 }
 
 #[tokio::test]
-async fn a_value_inside_its_bounds_reaches_the_controller() {
+async fn a_padded_value_inside_its_bounds_reaches_the_controller_trimmed() {
     let reached = Arc::new(AtomicBool::new(false));
     let driver = HttpDriver::new(
         HttpDriverConfig::default(),
@@ -396,7 +419,7 @@ async fn a_value_inside_its_bounds_reaches_the_controller() {
 
     let (status, signed) = sign_in(
         &driver,
-        r#"{"provider":"google","idToken":"t","nickname":"Rêveur"}"#,
+        r#"{"provider":"  google  ","idToken":" t ","nickname":" Rêveur "}"#,
     )
     .await;
 
@@ -454,7 +477,7 @@ func TestTheGeneratedRouterRefusesAValueOutsideItsBoundsAsValidationAndNeverCall
 
 	for _, ran := range []string{
 		"test a_value_outside_its_bounds_is_refused_as_validation_and_never_reaches_the_controller ... ok",
-		"test a_value_inside_its_bounds_reaches_the_controller ... ok",
+		"test a_padded_value_inside_its_bounds_reaches_the_controller_trimmed ... ok",
 	} {
 		if !strings.Contains(string(out), ran) {
 			t.Fatalf("cargo never reported %q:\n%s", ran, out)

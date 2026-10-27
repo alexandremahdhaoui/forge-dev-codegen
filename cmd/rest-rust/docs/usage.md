@@ -113,9 +113,16 @@ parameters:
       type: string
 ```
 
+The handler trims spaces at both ends of every top level string property
+of a request body. The trim runs before any bound check and before the
+controller call, so the controller only ever sees the trimmed value. A
+value of only spaces becomes empty. The handler does not walk into a
+nested object or an array, so a string inside one stays as sent.
+
 A top level property of a request body may declare `enum`, `minLength`
 and `maxLength`. The handler checks each declared bound after it reads
-the query and before it calls the controller. A value outside an `enum`
+the query and before it calls the controller. A bound applies to the
+trimmed value, so `minLength: 1` refuses a value of only spaces. A value outside an `enum`
 or outside its length answers the operation's invalid status with the
 type `validation` and a message naming the property and the allowed
 values or bounds. A length counts characters, never bytes. An optional

@@ -229,6 +229,31 @@ func TestACaseWhoseBodyBreaksADeclaredBoundArmsTheControllerWithNeverBecauseTheD
 	}
 }
 
+func TestAPaddedBodyValueIsExpectedTrimmedAtTheControllerWhileTheRequestCarriesItPadded(t *testing.T) {
+	vectors := `{"cases": [{"case": "padded", "operation": "signIn", "input": {"provider": " google ", "nickname": "  Songe  "}, "controllerReply": {"provider": "google"}, "expectedStatus": 200}]}`
+
+	content := generatedVectors(t, boundedSpec, vectors)
+
+	for _, want := range []string{
+		`serde_json::from_str::<SignInRequest>("{\"nickname\":\"Songe\",\"provider\":\"google\"}")`,
+		`Body::from("{\"provider\":\" google \",\"nickname\":\"  Songe  \"}")`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("the emitted test lacks %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestABodyValueOfOnlySpacesBreaksAMinLengthBecauseTheDriverTrimsItFirst(t *testing.T) {
+	vectors := `{"cases": [{"case": "spaces", "operation": "signIn", "input": {"provider": "google", "nickname": "     "}, "expectedStatus": 422, "expectedErrorSubstring": "nickname"}]}`
+
+	content := generatedVectors(t, boundedSpec, vectors)
+
+	if !strings.Contains(content, "account_controller.expect_sign_in().never();") {
+		t.Fatalf("the emitted test still arms the controller:\n%s", content)
+	}
+}
+
 func TestABodyBoundBreakOnASuccessCaseIsRefused(t *testing.T) {
 	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "apple", "nickname": "Songe"}, "controllerReply": {"provider": "apple"}, "expectedStatus": 200}]}`
 

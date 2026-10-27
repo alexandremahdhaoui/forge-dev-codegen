@@ -485,7 +485,7 @@ func buildTest(c VectorCase, op restrust.Operation, owner restrust.Controller, b
 	withPredicates := []string{}
 
 	if chosen.kind != armKindMissingQuery && chosen.kind != armKindBrokenBound {
-		withPredicates, err = buildWithPredicates(op, c)
+		withPredicates, err = buildWithPredicates(op, c, bodyFields)
 		if err != nil {
 			return testView{}, fmt.Errorf("reading vector %q: %w", c.Case, err)
 		}
@@ -572,7 +572,7 @@ func buildRequest(op restrust.Operation, input json.RawMessage) (uri string, has
 	return uri, true, strconv.Quote(compact), nil
 }
 
-func buildWithPredicates(op restrust.Operation, c VectorCase) ([]string, error) {
+func buildWithPredicates(op restrust.Operation, c VectorCase, bodyFields []restrust.Field) ([]string, error) {
 	input := c.Input
 
 	inputMap, err := parseInput(input)
@@ -609,7 +609,12 @@ func buildWithPredicates(op restrust.Operation, c VectorCase) ([]string, error) 
 	}
 
 	if op.Body != "" {
-		compact, err := compactJSON(input)
+		received, err := trimmedBody(bodyFields, input)
+		if err != nil {
+			return nil, fmt.Errorf("reading input: %w", err)
+		}
+
+		compact, err := compactJSON(received)
 		if err != nil {
 			return nil, fmt.Errorf("reading input: %w", err)
 		}
@@ -673,12 +678,52 @@ func brokenBodyBounds(fields []restrust.Field, input json.RawMessage) ([]string,
 			continue
 		}
 
-		if breaksBound(f, value) {
+		if breaksBound(f, strings.TrimSpace(value)) {
 			broken = append(broken, strconv.Quote(f.Name))
 		}
 	}
 
 	return broken, nil
+}
+
+func trimmedBody(fields []restrust.Field, input json.RawMessage) (json.RawMessage, error) {
+	inputMap, err := parseInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := false
+
+	for _, f := range fields {
+		raw, named := inputMap[f.Name]
+		if !named || !restrust.IsTrimmed(f) {
+			continue
+		}
+
+		var value string
+		if json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == value {
+			continue
+		}
+
+		encoded, err := json.Marshal(strings.TrimSpace(value))
+		if err != nil {
+			return nil, fmt.Errorf("encoding the trimmed %q: %w", f.Name, err)
+		}
+
+		inputMap[f.Name] = encoded
+		trimmed = true
+	}
+
+	if !trimmed {
+		return input, nil
+	}
+
+	encoded, err := json.Marshal(inputMap)
+	if err != nil {
+		return nil, fmt.Errorf("encoding the trimmed body: %w", err)
+	}
+
+	return encoded, nil
 }
 
 func breaksBound(f restrust.Field, value string) bool {
