@@ -169,8 +169,10 @@ exactly one required string property. The trait carries one method,
 `fn get(&self) -> Result<<Value>, <Name>Error>`. The only `string`
 adapter is `setting`, named after what it talks to, a setting of the
 node. The `setting` adapter holds one config key named after that
-property. The key is required with no default and is not secret, so a
-node left without it refuses to start by name. The `get` method answers
+property. The key has no default and is not secret. The key is required
+only while the port choice names the `setting` adapter, so a node that
+picks it and leaves the key unset refuses to start by name. The `get`
+method answers
 a clone of the value the node read at start.
 
 A `verifier` takes an offered string and answers a subject or refuses.
@@ -190,10 +192,12 @@ that schema is a required string, because an adapter reads each one off
 what it verified rather than deciding it. A verifier adapter is
 `secret`, which accepts one configured string and answers a subject
 built from configuration, one key per property. Every one of those keys
-is required with no default, so a node left without one refuses to
-start by name. The cell manifest marks the adapter's `secret` key
-`secret: true` and leaves every subject key unmarked, so chart-gen reads
-only the `secret` key from a Kubernetes Secret. The adapter is named
+has no default. Every one of those keys is required only while the port
+choice names the `secret` adapter, so a node that picks it and leaves a
+key unset refuses to start by name. The cell manifest marks the
+adapter's `secret` key `secret: true` and leaves every subject key
+unmarked, so chart-gen reads only the `secret` key from a Kubernetes
+Secret. The adapter is named
 `<port>_secret`, the rule every hand port adapter follows.
 
 The subject is a schema of the document like any other, and a verifier

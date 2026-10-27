@@ -33,8 +33,9 @@ chart-gen emits these files, relative to the cell.
 A config key marked `x-secret: true` holds a secret value. The env entry
 of a secret key reads it with `valueFrom.secretKeyRef` from the Kubernetes
 Secret that `.Values.secret_name` names, under a Secret key spelled like the
-config key. `secret_name` has no default, and the render fails naming
-`secret_name` while nobody sets it. A secret key gets no `values.yaml` entry
+config key. `secret_name` has no default. The render fails naming
+`secret_name` while nobody sets it and an env entry that reads a secret
+key renders. A secret key gets no `values.yaml` entry
 of its own, and the chart never renders a secret value. A person writes the
 Secret into the cluster once by hand. chart-gen refuses by name a config key
 that carries `x-secret` and a default, because git holds no secret.

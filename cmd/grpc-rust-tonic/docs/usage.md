@@ -71,9 +71,10 @@ The manifest provides the port `<Service>Client` and the adapter
 named after the cell, and no driver and no controller. The config key
 is `<cell>_endpoint`, so the cell `identity_client` reads
 `SONGE_<BINARY>_IDENTITY_CLIENT_ENDPOINT` and two client cells over two
-protos get two endpoint keys. The endpoint has no default and is
-required, so a node started without it refuses by name and never dials
-an address nobody declared. A controller in another cell names the
+protos get two endpoint keys. The endpoint has no default. The endpoint
+is required only while the port choice names the client cell's adapter,
+so a node that picks that adapter and leaves the endpoint unset refuses
+by name and never dials an address nobody declared. A controller in another cell names the
 port in its own declaration, `x-ports` for a rest cell or
 `layout.ports` for a grpc server cell, and hexagonal-rust wires the
 adapter. `layout.ports` on a client cell is refused by name, because a
