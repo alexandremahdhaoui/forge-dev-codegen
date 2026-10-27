@@ -463,7 +463,7 @@ func TestACrateRootPortWithAnEmptyAdaptersListIsRefusedByName(t *testing.T) {
 	secretRefusal(t, map[string][]string{"TicketVerifier": {}}, "the adapters list is empty")
 }
 
-func TestTheCrateRootSecretAdapterRequiresItsSecretAndItsField(t *testing.T) {
+func TestTheCrateRootSecretAdapterRequiresItsSecretAndItsFieldOnlyWhileTheTicketVerifierChoiceNamesIt(t *testing.T) {
 	root := t.TempDir()
 
 	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, false)
@@ -489,9 +489,16 @@ drivers:
 		}
 	}
 
-	want := []string{"ticket_verifier_secret_id", "ticket_verifier_secret_secret"}
-	if got := specRequired(t, spec); !reflect.DeepEqual(got, want) {
-		t.Fatalf("required = %q, want %q\n%s", got, want, spec)
+	if got := specRequired(t, spec); len(got) != 0 {
+		t.Errorf("required = %q, want no key required always\n%s", got, spec)
+	}
+
+	want := map[string]specCondition{
+		"ticket_verifier_secret_id":     {Key: "ticket_verifier", Equals: "ticket_verifier_secret"},
+		"ticket_verifier_secret_secret": {Key: "ticket_verifier", Equals: "ticket_verifier_secret"},
+	}
+	if got := specConditions(t, spec); !reflect.DeepEqual(got, want) {
+		t.Fatalf("x-required-when = %v, want %v\n%s", got, want, spec)
 	}
 }
 

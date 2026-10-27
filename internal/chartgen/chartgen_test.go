@@ -87,11 +87,20 @@ components:
           type: integer
           x-env: SONGE_HELLO_NODE_TICK_INTERVAL_MS
           x-flag: tick-interval-ms
+        ticket_verifier:
+          default: ticket_verifier_secret
+          description: Which TicketVerifier adapter to build, one of ticket_verifier_secret
+          type: string
+          x-env: SONGE_HELLO_NODE_TICKET_VERIFIER
+          x-flag: ticket-verifier
         ticket_verifier_secret_secret:
           description: The one string the ticket_verifier secret adapter accepts
           type: string
           x-env: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET
           x-flag: ticket-verifier-secret-secret
+          x-required-when:
+            equals: ticket_verifier_secret
+            key: ticket_verifier
           x-secret: true
         udp_addr:
           default: 127.0.0.1:0
@@ -259,6 +268,7 @@ func TestValuesHoldOneKeyPerPlainSpecPropertyPlusTheImageRepositoryAndTheSecretN
 		"grpc_addr":                      "127.0.0.1:0",
 		"rest_addr":                      "127.0.0.1:0",
 		"tick_interval_ms":               float64(1000),
+		"ticket_verifier":                "ticket_verifier_secret",
 		"secret_name":                    nil,
 		"udp_addr":                       "127.0.0.1:0",
 		"world_client_endpoint":          nil,
@@ -419,6 +429,7 @@ func TestTheDeploymentEnvNamesEveryPropertyByItsEnvInSortedOrder(t *testing.T) {
 		"- name: SONGE_HELLO_NODE_GRPC_ADDR\n              value: {{ .Values.grpc_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_REST_ADDR\n              value: {{ .Values.rest_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_TICK_INTERVAL_MS\n              value: {{ .Values.tick_interval_ms | quote }}",
+		"- name: SONGE_HELLO_NODE_TICKET_VERIFIER\n              value: {{ .Values.ticket_verifier | quote }}",
 		secretKeyRef,
 		"- name: SONGE_HELLO_NODE_UDP_ADDR\n              value: {{ .Values.udp_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_WORLD_CLIENT_ENDPOINT\n              value: {{ " + endpointRequired + " | quote }}",
@@ -792,5 +803,52 @@ func TestHelmTemplateRendersOneDeploymentAndOneServiceFromTheEmittedChart(t *tes
 
 	if !strings.Contains(rendered, "value: \"1000\"") || !strings.Contains(rendered, "value: \"true\"") {
 		t.Errorf("an integer or a boolean value did not render quoted\n%s", rendered)
+	}
+}
+
+func TestAnEnvEntryThatWaitsOnAChoiceRendersOnlyInsideAHelmIfOnThatChoice(t *testing.T) {
+	deployment := generateHello(t)[chartgen.DeploymentFile]
+
+	want := "            {{- if eq (.Values.ticket_verifier) \"ticket_verifier_secret\" }}\n" +
+		"            " + secretKeyRef + "\n" +
+		"            {{- end }}\n"
+	if !strings.Contains(deployment, want) {
+		t.Errorf("the waiting env entry is not wrapped in an if on its choice\n%s", deployment)
+	}
+
+	if strings.Count(deployment, "{{- if eq (") != 1 {
+		t.Errorf("an env entry that waits on no choice is wrapped in an if\n%s", deployment)
+	}
+}
+
+func TestHelmTemplateRendersNoSecretKeyRefAndNeedsNoSecretNameWhileTheChoiceNamesAnotherAdapter(t *testing.T) {
+	set := strings.Replace(installableValues, "secret_name=songe-hello-secrets,", "", 1) + ",ticket_verifier=ticket_verifier_jwks"
+
+	rendered, err := helmTemplate(t, set)
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, rendered)
+	}
+
+	if strings.Contains(rendered, "secretKeyRef") || strings.Contains(rendered, "SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET") {
+		t.Errorf("the secret env entry rendered while the choice names another adapter\n%s", rendered)
+	}
+
+	if !strings.Contains(rendered, "- name: SONGE_HELLO_NODE_TICKET_VERIFIER\n              value: \"ticket_verifier_jwks\"") {
+		t.Errorf("the choice itself did not render\n%s", rendered)
+	}
+}
+
+func TestAConfigKeyWaitingOnAChoiceTheSpecDoesNotDeclareIsRefusedByName(t *testing.T) {
+	_, err := chartgen.Generate(chartgen.Options{
+		OpenapiSpec: []byte(strings.Replace(configSpec, "            key: ticket_verifier\n", "            key: ticket_checker\n", 1)),
+		SrcDir:      filepath.Join(crate(t, manifests()), "chart"),
+	})
+	if err == nil {
+		t.Fatal("a key waiting on an undeclared choice was accepted")
+	}
+
+	want := `emitting the chart: config key "ticket_verifier_secret_secret" waits on choice "ticket_checker", which the config spec does not declare`
+	if err.Error() != want {
+		t.Errorf("got %q, want %q", err.Error(), want)
 	}
 }

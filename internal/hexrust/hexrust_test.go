@@ -616,7 +616,39 @@ func specRequired(t *testing.T, spec string) []string {
 	return doc.Components.Schemas["Spec"].Required
 }
 
-func TestAnAdapterConfigKeyDeclaredRequiredLandsInTheConfigSpecRequiredList(t *testing.T) {
+type specCondition struct {
+	Key    string `json:"key"`
+	Equals string `json:"equals"`
+}
+
+func specConditions(t *testing.T, spec string) map[string]specCondition {
+	t.Helper()
+
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					RequiredWhen *specCondition `json:"x-required-when"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+
+	if err := yaml.Unmarshal([]byte(spec), &doc); err != nil {
+		t.Fatalf("parsing the config spec: %v\n%s", err, spec)
+	}
+
+	conditions := map[string]specCondition{}
+	for key, property := range doc.Components.Schemas["Spec"].Properties {
+		if property.RequiredWhen != nil {
+			conditions[key] = *property.RequiredWhen
+		}
+	}
+
+	return conditions
+}
+
+func TestARequiredAdapterConfigKeyWaitsOnItsPortChoiceNamingItsOwnAdapterAndStaysOutOfTheRequiredList(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 
 	writeCell(t, root, "ws", cellmanifest.Manifest{
@@ -624,17 +656,28 @@ func TestAnAdapterConfigKeyDeclaredRequiredLandsInTheConfigSpecRequiredList(t *t
 		Cell:      "ws",
 		Generator: "a test",
 		Provides: cellmanifest.Provides{
-			Adapters: []cellmanifest.Adapter{{
-				Name:       "quiet",
-				Type:       "QuietStore",
-				Module:     "ws::adapter::quiet",
-				Implements: "GreetingStore",
-				Config: map[string]cellmanifest.ConfigField{
-					"token":    {Type: cellmanifest.FieldTypeString, Required: true},
-					"secret":   {Type: cellmanifest.FieldTypeString, Required: true},
-					"capacity": {Type: cellmanifest.FieldTypeInteger, Default: 100},
+			Adapters: []cellmanifest.Adapter{
+				{
+					Name:       "quiet",
+					Type:       "QuietStore",
+					Module:     "ws::adapter::quiet",
+					Implements: "GreetingStore",
+					Config: map[string]cellmanifest.ConfigField{
+						"token":    {Type: cellmanifest.FieldTypeString, Required: true},
+						"secret":   {Type: cellmanifest.FieldTypeString, Required: true},
+						"capacity": {Type: cellmanifest.FieldTypeInteger, Default: 100},
+					},
 				},
-			}},
+				{
+					Name:       "loud",
+					Type:       "LoudStore",
+					Module:     "ws::adapter::loud",
+					Implements: "GreetingStore",
+					Config: map[string]cellmanifest.ConfigField{
+						"volume": {Type: cellmanifest.FieldTypeString, Required: true},
+					},
+				},
+			},
 		},
 	})
 
@@ -648,9 +691,19 @@ drivers:
   udp:  { enabled: true }
 `, "grpc", "rest", "udp", "ws")
 
-	want := []string{"quiet_secret", "quiet_token"}
-	if got := specRequired(t, files["zz_generated_config_spec.yaml"]); !reflect.DeepEqual(got, want) {
-		t.Fatalf("required = %q, want %q\n%s", got, want, files["zz_generated_config_spec.yaml"])
+	spec := files["zz_generated_config_spec.yaml"]
+
+	if got := specRequired(t, spec); len(got) != 0 {
+		t.Errorf("required = %q, want no key required always\n%s", got, spec)
+	}
+
+	want := map[string]specCondition{
+		"loud_volume":  {Key: "greeting_store", Equals: "loud"},
+		"quiet_secret": {Key: "greeting_store", Equals: "quiet"},
+		"quiet_token":  {Key: "greeting_store", Equals: "quiet"},
+	}
+	if got := specConditions(t, spec); !reflect.DeepEqual(got, want) {
+		t.Fatalf("x-required-when = %v, want %v\n%s", got, want, spec)
 	}
 }
 

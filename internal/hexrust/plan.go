@@ -87,14 +87,31 @@ type driverPlan struct {
 	PortVars    []string
 }
 
+type requiredWhen struct {
+	Key    string `json:"key"`
+	Equals string `json:"equals"`
+}
+
 type specKey struct {
-	Key         string
-	Owner       string
-	Type        string
-	Required    bool
-	Secret      bool
-	Default     any
-	Description string
+	Key          string
+	Owner        string
+	Type         string
+	Required     bool
+	RequiredWhen *requiredWhen
+	Secret       bool
+	Default      any
+	Description  string
+}
+
+func pickedKey(key specKey, choice, adapter string) specKey {
+	if !key.Required {
+		return key
+	}
+
+	key.Required = false
+	key.RequiredWhen = &requiredWhen{Key: choice, Equals: adapter}
+
+	return key
 }
 
 func declaredKey(key, owner string, declared cellmanifest.ConfigField) specKey {
@@ -635,7 +652,7 @@ func planCandidate(
 			Expr: readExpr(key, declared.Type),
 		})
 
-		p.Keys = append(p.Keys, declaredKey(key, fmt.Sprintf("adapter %q", name), declared))
+		p.Keys = append(p.Keys, pickedKey(declaredKey(key, fmt.Sprintf("adapter %q", name), declared), ConfigKey(trait), name))
 	}
 
 	return cp, nil

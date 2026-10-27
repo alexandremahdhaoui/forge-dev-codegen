@@ -39,6 +39,13 @@ of its own, and the chart never renders a secret value. A person writes the
 Secret into the cluster once by hand. chart-gen refuses by name a config key
 that carries `x-secret` and a default, because git holds no secret.
 
+A config key that carries `x-required-when` waits on a port choice. Its env
+entry renders inside a Helm `if` that compares the choice key to the adapter
+name in `equals`. While the choice names another adapter, the render never
+reads the waiting key, never renders its `secretKeyRef` and needs no
+`secret_name` for it. chart-gen refuses by name a waiting key whose choice
+the config spec does not declare.
+
 A container port and a service port read the text after the last colon of
 `.Values.<driver>_addr` at template time. hexagonal-rust's config key rule
 composes the key from the driver name and the field `addr`, so the chart and

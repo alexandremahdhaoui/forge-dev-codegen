@@ -56,17 +56,22 @@ adapter layer, and the generated `src/adapter/mod.rs` mounts it with one
 also writes its `<Type>Config` struct.
 
 A field carries a type among string, integer, boolean and duration, plus
-`required`, `secret`, `default` and `description`. A required field lands
-in the Spec schema's `required` list and carries no default, so the loader
-configgen-gen writes refuses to start the node by name while the key is
+`required`, `secret`, `default` and `description`. A required driver field
+lands in the Spec schema's `required` list and carries no default, so the
+loader configgen-gen writes refuses to start the node by name while the key
+is unset. A required adapter field stays out of the `required` list and
+carries `x-required-when` with `key` set to its port choice key and `equals`
+set to its adapter name. The loader resolves every choice first and refuses
+to start the node naming the field and the choice only while the choice
+names that adapter. A node that picks another adapter starts with the field
 unset. A field marked `secret` carries `x-secret: true` in the Spec schema,
 so chart-gen reads its value from a Kubernetes Secret and never from values.
 hexagonal-rust refuses by name a field marked `secret` that is not
 `required` or that carries a default.
 
 The crate root secret adapter declares its `secret` field and the field it
-answers, `id` for a TicketVerifier, as required fields, so both fields land
-in the Spec schema `required` list. The crate root secret adapter marks its
+answers, `id` for a TicketVerifier, as required fields, so both fields wait
+on the `ticket_verifier` choice. The crate root secret adapter marks its
 `secret` field and never the field it answers.
 The crate root secret adapter is named `<port>_secret`, the rule every
 hand port adapter follows, so a TicketVerifier reads

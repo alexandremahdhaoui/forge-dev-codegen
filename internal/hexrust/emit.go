@@ -468,12 +468,13 @@ func Generate(opts Options) ([]File, error) {
 }
 
 type specProperty struct {
-	Type        string `json:"type"`
-	Default     *any   `json:"default,omitempty"`
-	Description string `json:"description,omitempty"`
-	Env         string `json:"x-env,omitempty"`
-	Flag        string `json:"x-flag,omitempty"`
-	Secret      bool   `json:"x-secret,omitempty"`
+	Type         string        `json:"type"`
+	Default      *any          `json:"default,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	Env          string        `json:"x-env,omitempty"`
+	Flag         string        `json:"x-flag,omitempty"`
+	Secret       bool          `json:"x-secret,omitempty"`
+	RequiredWhen *requiredWhen `json:"x-required-when,omitempty"`
 }
 
 type specSchema struct {
@@ -523,11 +524,12 @@ func ConfigSpec(p plan) (string, error) {
 		}
 
 		property := specProperty{
-			Type:        key.Type,
-			Description: describe(key, p.Binary),
-			Env:         EnvName(p.Binary, key.Key),
-			Flag:        FlagName(key.Key),
-			Secret:      key.Secret,
+			Type:         key.Type,
+			Description:  describe(key, p.Binary),
+			Env:          EnvName(p.Binary, key.Key),
+			Flag:         FlagName(key.Key),
+			Secret:       key.Secret,
+			RequiredWhen: key.RequiredWhen,
 		}
 
 		if key.Default != nil {

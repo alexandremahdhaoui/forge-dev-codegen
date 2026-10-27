@@ -41,7 +41,10 @@ A config field carries a type among string, integer, boolean and duration, plus
 the config spec as `x-secret`. Validation refuses by name a field marked
 `secret: true` that carries a default, because git holds no secret.
 Validation refuses by name a field marked `secret: true` that is not
-`required`, because no value can stand in for a missing secret. Names
+`required`, because no value can stand in for a missing secret.
+hexagonal-rust writes a required adapter field into the config spec as
+`x-required-when`, naming the port choice key and the adapter name, so the
+field is required only while the choice names its adapter. Names
 are snake case. Types and traits are Rust idents. Modules are `::` paths and
 every driver, adapter, controller and port names one.
 

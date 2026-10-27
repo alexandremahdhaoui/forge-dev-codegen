@@ -53,10 +53,16 @@ type rootConfig struct {
 	} `json:"wiring"`
 }
 
+type requiredWhen struct {
+	Key    string `json:"key"`
+	Equals string `json:"equals"`
+}
+
 type specProperty struct {
-	Default *any   `json:"default,omitempty"`
-	Env     string `json:"x-env,omitempty"`
-	Secret  bool   `json:"x-secret,omitempty"`
+	Default      *any          `json:"default,omitempty"`
+	Env          string        `json:"x-env,omitempty"`
+	Secret       bool          `json:"x-secret,omitempty"`
+	RequiredWhen *requiredWhen `json:"x-required-when,omitempty"`
 }
 
 type specDocument struct {
@@ -79,6 +85,7 @@ type envEntry struct {
 	Name      string
 	Read      string
 	SecretKey string
+	When      string
 }
 
 type portEntry struct {
@@ -254,16 +261,35 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 			return nil, fmt.Errorf("config key %q carries x-secret and a default, a secret has no default because git holds no secret", key)
 		}
 
+		when, err := whenRead(key, properties)
+		if err != nil {
+			return nil, err
+		}
+
 		if properties[key].Secret {
-			env = append(env, envEntry{Name: properties[key].Env, SecretKey: key})
+			env = append(env, envEntry{Name: properties[key].Env, SecretKey: key, When: when})
 
 			continue
 		}
 
-		env = append(env, envEntry{Name: properties[key].Env, Read: valueRead(key, properties[key])})
+		env = append(env, envEntry{Name: properties[key].Env, Read: valueRead(key, properties[key]), When: when})
 	}
 
 	return env, nil
+}
+
+func whenRead(key string, properties map[string]specProperty) (string, error) {
+	condition := properties[key].RequiredWhen
+	if condition == nil {
+		return "", nil
+	}
+
+	choice, declared := properties[condition.Key]
+	if !declared {
+		return "", fmt.Errorf("config key %q waits on choice %q, which the config spec does not declare", key, condition.Key)
+	}
+
+	return fmt.Sprintf("eq (%s) %q", valueRead(condition.Key, choice), condition.Equals), nil
 }
 
 func refuseAKeyChartGenWrites(key string) error {
@@ -414,6 +440,9 @@ spec:
           image: "{{ [[ .Image ]] }}:{{ .Chart.AppVersion }}"
           env:
 [[- range .Env ]]
+[[- if .When ]]
+            {{- if [[ .When ]] }}
+[[- end ]]
             - name: [[ .Name ]]
 [[- if .SecretKey ]]
               valueFrom:
@@ -422,6 +451,9 @@ spec:
                   key: [[ .SecretKey ]]
 [[- else ]]
               value: {{ [[ .Read ]] | quote }}
+[[- end ]]
+[[- if .When ]]
+            {{- end }}
 [[- end ]]
 [[- end ]]
 [[- if .Ports ]]

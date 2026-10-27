@@ -1,9 +1,13 @@
 package hexrust_test
 
 import (
+	"context"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/hexrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
@@ -121,11 +125,8 @@ impl GreetingController for GreetingControllerImpl {
 }
 `
 
-func TestTwoRestCellsShareTheCrateRootPortsAndTheCrateCompiles(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+func standUpTwoRestCellCrate(t *testing.T) (string, string) {
+	t.Helper()
 
 	root := t.TempDir()
 	write := writeUnder(t, root)
@@ -147,19 +148,139 @@ drivers:
 		t.Fatalf("generating: %v", err)
 	}
 
+	spec := ""
+
 	for _, f := range files {
+		if f.Path == hexrust.ConfigSpecFile {
+			spec = f.Content
+		}
+
 		if strings.HasSuffix(f.Path, ".rs") {
 			write(f.Path, f.Content)
 		}
 	}
 
 	write("Cargo.toml", strings.ReplaceAll(guardedCrateManifest, "SONGE_COMMON_DIR", songeCommonDir(t)))
-	write("src/config/zz_generated_config.rs", guardedConfigLoader)
 	write("src/rest/controller/greeting_controller.rs", guardedControllerImpl)
+
+	return root, spec
+}
+
+func TestTwoRestCellsShareTheCrateRootPortsAndTheCrateCompiles(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo is not on PATH")
+	}
+
+	root, _ := standUpTwoRestCellCrate(t)
+	writeUnder(t, root)("src/config/zz_generated_config.rs", guardedConfigLoader)
 
 	out, err := runCargo(t, cargo, root, "check", "--workspace", "--all-targets")
 	if err != nil {
 		skipOnNetwork(t, out, err)
 		t.Fatalf("cargo check: %v\n%s", err, out)
+	}
+}
+
+const configgenGen = "github.com/alexandremahdhaoui/golden-configgen/cmd/configgen-gen"
+
+func generateTheConfigLoader(t *testing.T, spec string) string {
+	t.Helper()
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "hexrust-test", Version: "0.0.0"}, nil)
+
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.Command("go", "run", configgenGen, "--mcp")}, nil)
+	if err != nil {
+		t.Fatalf("starting %s the way forge-dev starts a config generator: %v", configgenGen, err)
+	}
+	defer func() { _ = session.Close() }()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "generate",
+		Arguments: map[string]any{
+			"name":        "songe-hello",
+			"kind":        "hexagonal",
+			"language":    "rust",
+			"packageName": "main",
+			"openapiSpec": spec,
+		},
+	})
+	if err != nil {
+		t.Fatalf("calling generate on %s: %v", configgenGen, err)
+	}
+
+	if result.IsError {
+		t.Fatalf("%s refused the config spec: %v\n%s", configgenGen, result.Content, spec)
+	}
+
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("encoding the answer of %s: %v", configgenGen, err)
+	}
+
+	var answer struct {
+		Files []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+
+	if err := json.Unmarshal(encoded, &answer); err != nil {
+		t.Fatalf("decoding the answer of %s: %v\n%s", configgenGen, err, encoded)
+	}
+
+	if len(answer.Files) != 1 || answer.Files[0].Path != "zz_generated_config.rs" {
+		t.Fatalf("%s answered %s, want the one file zz_generated_config.rs", configgenGen, encoded)
+	}
+
+	return answer.Files[0].Content
+}
+
+const requiredWhenTest = `use songe_hello::config::SongeHelloConfig;
+
+fn flags(ticket_verifier: &str) -> Vec<String> {
+    vec!["--ticket-verifier".to_string(), ticket_verifier.to_string()]
+}
+
+#[test]
+fn the_loader_refuses_a_waiting_key_by_name_while_the_choice_names_its_adapter() {
+    let error = SongeHelloConfig::load(&flags("ticket_verifier_secret")).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "resolving ticket_verifier_secret_id when ticket_verifier is ticket_verifier_secret"
+    );
+}
+
+#[test]
+fn the_loader_loads_with_every_waiting_key_unset_while_the_choice_names_another_adapter() {
+    let config = SongeHelloConfig::load(&flags("ticket_verifier_jwks")).unwrap();
+
+    assert_eq!(config.ticket_verifier, "ticket_verifier_jwks");
+    assert_eq!(config.ticket_verifier_secret_id, "");
+    assert_eq!(config.ticket_verifier_secret_secret, "");
+}
+`
+
+func TestTheGeneratedRustLoaderRefusesAWaitingKeyOnlyWhileItsPortChoiceNamesItsAdapter(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Fatalf("this proof runs cargo and never skips, and cargo is not on PATH: %v", err)
+	}
+
+	root, spec := standUpTwoRestCellCrate(t)
+	write := writeUnder(t, root)
+
+	write("src/config/zz_generated_config.rs", generateTheConfigLoader(t, spec))
+	write("tests/required_when.rs", requiredWhenTest)
+
+	out, err := runCargo(t, cargo, root, "test", "--test", "required_when")
+	if err != nil {
+		t.Fatalf("cargo test: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "test result: ok. 2 passed") {
+		t.Fatalf("cargo test did not run both loader proofs\n%s", out)
 	}
 }
