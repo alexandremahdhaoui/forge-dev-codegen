@@ -42,7 +42,7 @@ components:
           description: The runnable inputs. Unused here.
         openapiSpec:
           type: string
-          description: The config schema hexagonal-rust writes, one Spec property per config key with its default and x-env.
+          description: The config schema hexagonal-rust writes, one Spec property per config key with its default, its x-env and its x-secret.
         checksum:
           type: string
           description: The source checksum forge-dev computed.

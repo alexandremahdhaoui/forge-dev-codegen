@@ -92,12 +92,18 @@ components:
           type: string
           x-env: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET
           x-flag: ticket-verifier-secret-secret
+          x-secret: true
         udp_addr:
           default: 127.0.0.1:0
           description: The host and port the hello_datagram udp driver binds
           type: string
           x-env: SONGE_HELLO_NODE_UDP_ADDR
           x-flag: udp-addr
+        world_client_endpoint:
+          description: The grpc endpoint the world client dials
+          type: string
+          x-env: SONGE_HELLO_NODE_WORLD_CLIENT_ENDPOINT
+          x-flag: world-client-endpoint
       type: object
 info:
   title: songe-hello-node config
@@ -235,7 +241,7 @@ func TestTheChartCarriesTheRootNameAndItsVersionAsBothChartAndAppVersion(t *test
 	}
 }
 
-func TestValuesHoldOneKeyPerSpecPropertyPlusTheImageRepositoryAndNothingElse(t *testing.T) {
+func TestValuesHoldOneKeyPerPlainSpecPropertyPlusTheImageRepositoryAndTheSecretNameAndNothingElse(t *testing.T) {
 	files := generateHello(t)
 
 	var values map[string]any
@@ -253,8 +259,9 @@ func TestValuesHoldOneKeyPerSpecPropertyPlusTheImageRepositoryAndNothingElse(t *
 		"grpc_addr":                      "127.0.0.1:0",
 		"rest_addr":                      "127.0.0.1:0",
 		"tick_interval_ms":               float64(1000),
-		"ticket_verifier_secret_secret":  nil,
+		"secretName":                     nil,
 		"udp_addr":                       "127.0.0.1:0",
+		"world_client_endpoint":          nil,
 	}
 
 	if len(values) != len(want) {
@@ -271,8 +278,9 @@ func TestValuesHoldOneKeyPerSpecPropertyPlusTheImageRepositoryAndNothingElse(t *
 			continue
 		}
 
-		if values[key] != value {
-			t.Errorf("values.%s = %v (%T), want %v (%T)", key, values[key], values[key], value, value)
+		got, present := values[key]
+		if !present || got != value {
+			t.Errorf("values.%s = %v (%T), want %v (%T)", key, got, got, value, value)
 		}
 	}
 
@@ -290,7 +298,15 @@ func keys(m map[string]any) []string {
 	return out
 }
 
-const secretRequired = `required "ticket_verifier_secret_secret has no default, set it in values" .Values.ticket_verifier_secret_secret`
+const endpointRequired = `required "world_client_endpoint has no default, set it in values" .Values.world_client_endpoint`
+
+const secretNameRefusal = "secretName has no default, set it in values"
+
+const secretKeyRef = "- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n" +
+	"              valueFrom:\n" +
+	"                secretKeyRef:\n" +
+	`                  name: {{ required "` + secretNameRefusal + `" .Values.secretName | quote }}` + "\n" +
+	"                  key: ticket_verifier_secret_secret"
 
 func portRead(key string) string {
 	port, host := "$"+key+"_port", "$"+key+"_host"
@@ -313,16 +329,52 @@ func loopbackRefusal(key string) string {
 func TestAPropertyWithNoDefaultIsListedInValuesWithNoValueAndRenderedThroughRequiredNamingTheKey(t *testing.T) {
 	files := generateHello(t)
 
-	if !strings.Contains(files[chartgen.ValuesFile], "\nticket_verifier_secret_secret: null\n") {
+	if !strings.Contains(files[chartgen.ValuesFile], "\nworld_client_endpoint: null\n") {
 		t.Errorf("values.yaml does not list the key with no value\n%s", files[chartgen.ValuesFile])
 	}
 
-	if !strings.Contains(files[chartgen.DeploymentFile], "value: {{ "+secretRequired+" | quote }}") {
+	if !strings.Contains(files[chartgen.DeploymentFile], "value: {{ "+endpointRequired+" | quote }}") {
 		t.Errorf("the deployment does not read the key through required\n%s", files[chartgen.DeploymentFile])
 	}
 
 	if strings.Contains(files[chartgen.DeploymentFile], `required "rest_addr`) {
 		t.Errorf("a key with a default is read through required\n%s", files[chartgen.DeploymentFile])
+	}
+}
+
+func TestAPropertyMarkedXSecretIsReadFromTheNamedSecretAndHasNoValuesEntry(t *testing.T) {
+	files := generateHello(t)
+
+	if !strings.Contains(files[chartgen.DeploymentFile], secretKeyRef) {
+		t.Errorf("the deployment does not read the secret key through secretKeyRef\n%s", files[chartgen.DeploymentFile])
+	}
+
+	if strings.Contains(files[chartgen.DeploymentFile], ".Values.ticket_verifier_secret_secret") {
+		t.Errorf("the deployment reads the secret key from values\n%s", files[chartgen.DeploymentFile])
+	}
+
+	if strings.Contains(files[chartgen.ValuesFile], "ticket_verifier_secret_secret") {
+		t.Errorf("values.yaml carries the secret key\n%s", files[chartgen.ValuesFile])
+	}
+
+	if !strings.Contains(files[chartgen.ValuesFile], "\nsecretName: null\n") {
+		t.Errorf("values.yaml does not list the secret name with no value\n%s", files[chartgen.ValuesFile])
+	}
+}
+
+func TestASpecWithNoXSecretPropertyCarriesNoSecretNameAndNoSecretKeyRef(t *testing.T) {
+	files, err := chartgen.Generate(chartgen.Options{
+		OpenapiSpec: []byte(strings.Replace(configSpec, "          x-secret: true\n", "", 1)),
+		SrcDir:      filepath.Join(crate(t, manifests()), "chart"),
+	})
+	if err != nil {
+		t.Fatalf("emitting the chart: %v", err)
+	}
+
+	for _, f := range files {
+		if strings.Contains(f.Content, chartgen.SecretNameKey) || strings.Contains(f.Content, "secretKeyRef") {
+			t.Errorf("%s names a secret while no property carries x-secret\n%s", f.Path, f.Content)
+		}
 	}
 }
 
@@ -367,8 +419,9 @@ func TestTheDeploymentEnvNamesEveryPropertyByItsEnvInSortedOrder(t *testing.T) {
 		"- name: SONGE_HELLO_NODE_GRPC_ADDR\n              value: {{ .Values.grpc_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_REST_ADDR\n              value: {{ .Values.rest_addr | quote }}",
 		"- name: SONGE_HELLO_NODE_TICK_INTERVAL_MS\n              value: {{ .Values.tick_interval_ms | quote }}",
-		"- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n              value: {{ " + secretRequired + " | quote }}",
+		secretKeyRef,
 		"- name: SONGE_HELLO_NODE_UDP_ADDR\n              value: {{ .Values.udp_addr | quote }}",
+		"- name: SONGE_HELLO_NODE_WORLD_CLIENT_ENDPOINT\n              value: {{ " + endpointRequired + " | quote }}",
 	}
 
 	last := -1
@@ -567,7 +620,7 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-const installableValues = "ticket_verifier_secret_secret=s3cret,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070"
+const installableValues = "secretName=songe-hello-secrets,world_client_endpoint=http://world:9090,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070"
 
 func helmTemplate(t *testing.T, set string) (string, error) {
 	t.Helper()
@@ -590,13 +643,44 @@ func helmTemplate(t *testing.T, set string) (string, error) {
 }
 
 func TestHelmTemplateRefusesARenderWithAValueNobodySetNamingTheKey(t *testing.T) {
-	out, err := helmTemplate(t, "rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070")
+	out, err := helmTemplate(t, "secretName=songe-hello-secrets,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070")
 	if err == nil {
-		t.Fatalf("helm template rendered with ticket_verifier_secret_secret set by nobody\n%s", out)
+		t.Fatalf("helm template rendered with world_client_endpoint set by nobody\n%s", out)
 	}
 
-	if !strings.Contains(out, "ticket_verifier_secret_secret has no default, set it in values") {
+	if !strings.Contains(out, "world_client_endpoint has no default, set it in values") {
 		t.Errorf("the refusal does not name the key\n%s", out)
+	}
+}
+
+func TestHelmTemplateRefusesARenderWithNoSecretNameNamingTheKey(t *testing.T) {
+	out, err := helmTemplate(t, strings.Replace(installableValues, "secretName=songe-hello-secrets,", "", 1))
+	if err == nil {
+		t.Fatalf("helm template rendered with secretName set by nobody\n%s", out)
+	}
+
+	if !strings.Contains(out, secretNameRefusal) {
+		t.Errorf("the refusal does not name secretName\n%s", out)
+	}
+}
+
+func TestHelmTemplateReadsTheSecretFieldFromTheNamedSecretAndNeverRendersASecretValue(t *testing.T) {
+	rendered, err := helmTemplate(t, installableValues+",ticket_verifier_secret_secret=s3cret")
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, rendered)
+	}
+
+	want := "- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n" +
+		"              valueFrom:\n" +
+		"                secretKeyRef:\n" +
+		"                  name: \"songe-hello-secrets\"\n" +
+		"                  key: ticket_verifier_secret_secret\n"
+	if !strings.Contains(rendered, want) {
+		t.Errorf("the secret field is not read through secretKeyRef from the named Secret\n%s", rendered)
+	}
+
+	if strings.Contains(rendered, "s3cret") {
+		t.Errorf("a secret value set in values reached the render\n%s", rendered)
 	}
 }
 
@@ -642,7 +726,7 @@ func TestHelmTemplateRendersNoPortOfADisabledDriverAndNeverReadsItsAddr(t *testi
 }
 
 func TestHelmTemplateRendersNoServiceWhenEveryListeningDriverIsDisabled(t *testing.T) {
-	rendered, err := helmTemplate(t, "ticket_verifier_secret_secret=s3cret,driver_rest=false,driver_grpc=false,driver_udp=false")
+	rendered, err := helmTemplate(t, "secretName=songe-hello-secrets,world_client_endpoint=http://world:9090,driver_rest=false,driver_grpc=false,driver_udp=false")
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, rendered)
 	}

@@ -24,6 +24,7 @@ const (
 	ValuesFile     = "values.yaml"
 	DeploymentFile = "templates/zz_generated_deployment.yaml"
 	ServiceFile    = "templates/zz_generated_service.yaml"
+	SecretNameKey  = "secretName"
 )
 
 type Options struct {
@@ -51,6 +52,7 @@ type rootConfig struct {
 type specProperty struct {
 	Default *any   `json:"default,omitempty"`
 	Env     string `json:"x-env,omitempty"`
+	Secret  bool   `json:"x-secret,omitempty"`
 }
 
 type specDocument struct {
@@ -70,8 +72,9 @@ type chartMetadata struct {
 }
 
 type envEntry struct {
-	Name string
-	Read string
+	Name      string
+	Read      string
+	SecretKey string
 }
 
 type portEntry struct {
@@ -82,9 +85,10 @@ type portEntry struct {
 }
 
 type templateData struct {
-	Container string
-	Env       []envEntry
-	Ports     []portEntry
+	Container  string
+	SecretName string
+	Env        []envEntry
+	Ports      []portEntry
 }
 
 func Generate(opts Options) ([]File, error) {
@@ -141,7 +145,12 @@ func Generate(opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the chart: %w", err)
 	}
 
-	data := templateData{Container: wiring.Binary, Env: env, Ports: ports}
+	data := templateData{
+		Container:  wiring.Binary,
+		SecretName: valueRead(SecretNameKey, specProperty{}),
+		Env:        env,
+		Ports:      ports,
+	}
 
 	deployment, err := render("deployment", data)
 	if err != nil {
@@ -229,6 +238,12 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 	for _, key := range keys {
 		if properties[key].Env == "" {
 			return nil, fmt.Errorf("config key %q carries no x-env, the loader reads it by that name", key)
+		}
+
+		if properties[key].Secret {
+			env = append(env, envEntry{Name: properties[key].Env, SecretKey: key})
+
+			continue
 		}
 
 		env = append(env, envEntry{Name: properties[key].Env, Read: valueRead(key, properties[key])})
@@ -320,6 +335,12 @@ func valuesYAML(binary string, keys []string, properties map[string]specProperty
 
 	values := make(map[string]any, len(keys))
 	for _, key := range keys {
+		if properties[key].Secret {
+			values[SecretNameKey] = nil
+
+			continue
+		}
+
 		values[key] = defaultValue(properties[key])
 	}
 
@@ -372,7 +393,14 @@ spec:
           env:
 [[- range .Env ]]
             - name: [[ .Name ]]
+[[- if .SecretKey ]]
+              valueFrom:
+                secretKeyRef:
+                  name: {{ [[ $.SecretName ]] | quote }}
+                  key: [[ .SecretKey ]]
+[[- else ]]
               value: {{ [[ .Read ]] | quote }}
+[[- end ]]
 [[- end ]]
 [[- if .Ports ]]
           ports:
