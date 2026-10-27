@@ -720,7 +720,6 @@ func parseBounds(s schema, ft fieldType) ([]string, error) {
 		if *bound.value < 0 {
 			return nil, fmt.Errorf("%s is %d, a length counts characters and is never below zero", bound.keyword, *bound.value)
 		}
-
 	}
 
 	if s.MinLength != nil && s.MaxLength != nil && *s.MinLength > *s.MaxLength {
@@ -1345,7 +1344,6 @@ func parseParams(where, path string, op operation) ([]Param, []QueryParam, error
 		if keyword := boundKeyword(p.Schema); keyword != "" {
 			return nil, nil, fmt.Errorf("reading %s: %s parameter %q declares %s, the engine checks enum, minLength and maxLength on a request body property only", where, p.In, p.Name, keyword)
 		}
-
 
 		if err := checkName(p.In+" parameter", p.Name); err != nil {
 			return nil, nil, fmt.Errorf("reading %s: %w", where, err)

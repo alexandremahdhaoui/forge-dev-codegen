@@ -189,8 +189,11 @@ func TestEveryStringPropertyOfARequestBodyIsTrimmedBeforeItsBoundsAndBeforeTheCo
 	} {
 		checkedBeforeTheController(t, driver, pair[0])
 
-		if strings.Index(driver, pair[0]) > strings.Index(driver, pair[1]) {
-			t.Fatalf("the driver checks %q before it trims with %q:\n%s", pair[1], pair[0], driver)
+		trimAt := strings.Index(driver, pair[0])
+		checkAt := strings.Index(driver, pair[1])
+
+		if checkAt < 0 || trimAt > checkAt {
+			t.Fatalf("the driver does not trim with %q before it checks with %q:\n%s", pair[0], pair[1], driver)
 		}
 	}
 
