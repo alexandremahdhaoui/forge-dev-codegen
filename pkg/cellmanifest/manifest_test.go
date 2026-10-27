@@ -293,6 +293,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 		Default: "open",
 	}
 
+	secretFieldNotRequired := exampleManifest()
+	secretFieldNotRequired.Provides.Drivers[0].Config["token"] = cellmanifest.ConfigField{
+		Type:   cellmanifest.FieldTypeString,
+		Secret: true,
+	}
+
 	absoluteBuildScript := exampleManifest()
 	absoluteBuildScript.BuildScript = "/zz_generated_build.rs"
 
@@ -522,6 +528,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			manifest: secretFieldWithADefault,
 			message: `config field "token" of driver "grpc" in cell "grpc" is marked secret and carries a default, ` +
 				`a secret has no default because git holds no secret`,
+		},
+		{
+			name:     "a config field marked secret that is not required is refused",
+			manifest: secretFieldNotRequired,
+			message: `config field "token" of driver "grpc" in cell "grpc" is marked secret and is not required, ` +
+				`a secret is required because git holds no secret to fall back on`,
 		},
 	}
 

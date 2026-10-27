@@ -549,6 +549,13 @@ func validateConfig(owner string, config map[string]ConfigField) error {
 				name, owner,
 			)
 		}
+
+		if config[name].Secret && !config[name].Required {
+			return fmt.Errorf(
+				"config field %q of %s is marked secret and is not required, a secret is required because git holds no secret to fall back on",
+				name, owner,
+			)
+		}
 	}
 
 	return nil

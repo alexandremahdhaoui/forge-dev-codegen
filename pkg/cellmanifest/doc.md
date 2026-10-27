@@ -39,7 +39,9 @@ A config field carries a type among string, integer, boolean and duration, plus
 `required`, `secret`, `default` and `description`. A field marked
 `secret: true` holds a secret value, and hexagonal-rust writes the mark into
 the config spec as `x-secret`. Validation refuses by name a field marked
-`secret: true` that carries a default, because git holds no secret. Names
+`secret: true` that carries a default, because git holds no secret.
+Validation refuses by name a field marked `secret: true` that is not
+`required`, because no value can stand in for a missing secret. Names
 are snake case. Types and traits are Rust idents. Modules are `::` paths and
 every driver, adapter, controller and port names one.
 

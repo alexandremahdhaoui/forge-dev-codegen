@@ -762,6 +762,48 @@ drivers:
 	}
 }
 
+func TestACellManifestDeclaringASecretConfigFieldThatIsNotRequiredIsRefusedNamingTheField(t *testing.T) {
+	root := standUpCells(t, "grpc", "rest", "udp")
+
+	write := writeUnder(t, root)
+	write(filepath.Join("src", "ws", hexrust.CellConfigFile), "name: songe-hello\nkind: ws\n")
+	write(filepath.Join("src", "ws", cellmanifest.FileName), `version: "1"
+cell: ws
+generator: a test
+provides:
+  adapters:
+    - name: quiet
+      type: QuietStore
+      module: ws::adapter::quiet
+      implements: GreetingStore
+      config:
+        secret: { type: string, secret: true }
+`)
+
+	_, err := hexrust.Generate(hexrust.Options{
+		Service: "songe-hello",
+		SrcDir:  root,
+		Cells:   []string{"grpc", "rest", "udp", "ws"},
+		Wiring: []byte(`binary: songe-hello-node
+ports:
+  GreetingStore:
+    default: quiet
+drivers:
+  rest: { enabled: true }
+  grpc: { enabled: true }
+  udp:  { enabled: true }
+`),
+	})
+	if err == nil {
+		t.Fatal("a secret config field that is not required was accepted")
+	}
+
+	want := `config field "secret" of adapter "quiet" in cell "ws" is marked secret and is not required`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("got %q, want it to contain %q", err.Error(), want)
+	}
+}
+
 func TestTwoOwnersSpellingOneConfigKeyAreRefusedNamingBoth(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 
