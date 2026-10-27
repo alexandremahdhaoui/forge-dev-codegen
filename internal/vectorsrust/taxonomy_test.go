@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/vectorsrust"
 )
 
@@ -264,6 +265,41 @@ func TestABodyBoundBreakExpectingAStatusOtherThanTheInvalidStatusIsRefused(t *te
 	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 409, "expectedErrorSubstring": "nickname"}]}`
 
 	refusedVectors(t, boundedSpec, vectors, `reading vector "a": input breaks the declared bound of the body property "nickname", so the driver answers 422, not 409`)
+}
+
+func TestANamedErrorOnACaseWhoseBodyBreaksABoundIsRefusedBecauseTheControllerNeverRuns(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 422, "expectedError": "Invalid", "expectedErrorSubstring": "nickname"}]}`
+
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": expectedError "Invalid" names an error the controller answers, and input breaks the declared bound of the body property "nickname", so the driver refuses before the controller runs and the case names no expectedError`)
+}
+
+func TestANamedErrorOnACaseMissingARequiredQueryParameterIsRefusedBecauseTheControllerNeverRuns(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "listGreetings", "input": {"limit": 10}, "expectedStatus": 422, "expectedError": "Invalid", "expectedErrorSubstring": "name"}]}`
+
+	refusedVectors(t, queriedSpec, vectors, `reading vector "a": expectedError "Invalid" names an error the controller answers, and input names no value for the required query parameter "name", so the driver refuses before the controller runs and the case names no expectedError`)
+}
+
+func TestANamedErrorOutsideTheTaxonomyIsRefusedWithTheTaxonomyListEvenWhenTheDriverRefusesFirst(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 422, "expectedError": "Validation", "expectedErrorSubstring": "nickname"}]}`
+
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": expectedError "Validation" names no member a controller answers, the members are `+strings.Join(taxonomy.DetailedVariantNames(), ", ")+" and Unauthenticated")
+}
+
+func TestACaseWithoutATicketSubjectIsRefusedByTheVerifierBeforeTheDriverReadsItsBody(t *testing.T) {
+	guarded := strings.Replace(boundedSpec, "      x-controller: account\n", "      x-controller: account\n      x-auth: bearer\n", 1)
+	if guarded == boundedSpec {
+		t.Fatal("the x-controller line was never found, the fixture moved")
+	}
+
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 401, "expectedError": "Unauthenticated", "expectedErrorSubstring": "bearer"}]}`
+
+	content := generatedVectors(t, guarded, vectors)
+
+	for _, want := range []string{"account_controller.expect_sign_in().never();", "ticket_verifier.expect_verify().never();"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("the emitted test lacks %q:\n%s", want, content)
+		}
+	}
 }
 
 func TestEveryNewTaxonomyStatusArmsItsOwnControllerError(t *testing.T) {

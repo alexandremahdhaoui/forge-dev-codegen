@@ -332,7 +332,19 @@ func chooseArm(c VectorCase, op restrust.Operation, missingQuery, brokenBounds [
 		return arm{}, fmt.Errorf("reading vector %q: expectedStatus is %d but no controllerReply is present, a 2xx status needs a success case", c.Case, c.ExpectedStatus)
 	}
 
+	if err := checkExpectedErrorName(c); err != nil {
+		return arm{}, err
+	}
+
+	if op.Auth && c.Subject == "" {
+		missingQuery, brokenBounds = nil, nil
+	}
+
 	if len(missingQuery) > 0 {
+		if err := refuseANamedErrorTheDriverNeverAnswers(c, "input names no value for the required query parameter "+strings.Join(missingQuery, ", ")); err != nil {
+			return arm{}, err
+		}
+
 		if isOK {
 			return arm{}, fmt.Errorf("reading vector %q: input names no value for the required query parameter %s, and the driver refuses before the controller answers", c.Case, strings.Join(missingQuery, ", "))
 		}
@@ -345,6 +357,10 @@ func chooseArm(c VectorCase, op restrust.Operation, missingQuery, brokenBounds [
 	}
 
 	if len(brokenBounds) > 0 {
+		if err := refuseANamedErrorTheDriverNeverAnswers(c, "input breaks the declared bound of the body property "+strings.Join(brokenBounds, ", ")); err != nil {
+			return arm{}, err
+		}
+
 		if isOK {
 			return arm{}, fmt.Errorf("reading vector %q: input breaks the declared bound of the body property %s, and the driver refuses before the controller answers", c.Case, strings.Join(brokenBounds, ", "))
 		}
@@ -408,6 +424,25 @@ func restStatusOf(m taxonomy.Member, invalidStatus int) int {
 	return m.RestStatus
 }
 
+func checkExpectedErrorName(c VectorCase) error {
+	if c.ExpectedError == "" || c.ExpectedError == unauthenticatedName || slices.Contains(taxonomy.DetailedVariantNames(), c.ExpectedError) {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"reading vector %q: expectedError %q names no member a controller answers, the members are %s and %s",
+		c.Case, c.ExpectedError, strings.Join(taxonomy.DetailedVariantNames(), ", "), unauthenticatedName,
+	)
+}
+
+func refuseANamedErrorTheDriverNeverAnswers(c VectorCase, refusal string) error {
+	if c.ExpectedError == "" {
+		return nil
+	}
+
+	return fmt.Errorf("reading vector %q: expectedError %q names an error the controller answers, and %s, so the driver refuses before the controller runs and the case names no expectedError", c.Case, c.ExpectedError, refusal)
+}
+
 func namedArm(c VectorCase, op restrust.Operation) (arm, error) {
 	if c.ExpectedError == unauthenticatedName {
 		if !op.Auth {
@@ -421,13 +456,7 @@ func namedArm(c VectorCase, op restrust.Operation) (arm, error) {
 		return arm{kind: armKindUnauthenticated, id: c.ExpectedErrorSubstring}, nil
 	}
 
-	member, ok := taxonomy.ByVariant(c.ExpectedError)
-	if !ok || member.Variant == "Runtime" {
-		return arm{}, fmt.Errorf(
-			"reading vector %q: expectedError %q names no member a controller answers, the members are %s and %s",
-			c.Case, c.ExpectedError, strings.Join(taxonomy.DetailedVariantNames(), ", "), unauthenticatedName,
-		)
-	}
+	member, _ := taxonomy.ByVariant(c.ExpectedError)
 
 	if want := restStatusOf(member, op.InvalidStatus); want != c.ExpectedStatus {
 		return arm{}, fmt.Errorf(
