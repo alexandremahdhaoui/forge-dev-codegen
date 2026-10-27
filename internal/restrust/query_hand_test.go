@@ -878,6 +878,11 @@ func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			want:    `names value "Instant", whose one property "epochMs" is of type integer, a string port reads one config string so that property is a required string`,
 		},
 		{
+			name:    "a string property that is not required",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: MaybeAddress\n          adapters: [config]",
+			want:    `reading GET /greetings: string port "CombatAddress" names value "MaybeAddress", whose one property "address" is optional and of type string, a string port reads one config string so that property is a required string`,
+		},
+		{
 			name:    "no adapters",
 			replace: "        - kind: string\n          name: CombatAddress\n          value: Address",
 			want:    `string port "CombatAddress" names no adapters`,
@@ -906,7 +911,7 @@ func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broken := strings.Replace(specWithACombatAddress(t), stringDeclaration, tc.replace, 1)
+			broken := strings.Replace(withOptionalSchemas(t, specWithACombatAddress(t)), stringDeclaration, tc.replace, 1)
 
 			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -963,6 +968,11 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			want:    `whose one property "text" is of type string, a clock counts in whole units so that property is a required integer`,
 		},
 		{
+			name:    "an integer property that is not required",
+			replace: "        - kind: clock\n          name: GreetingClock\n          instant: MaybeInstant\n          span: Span\n          adapters: [memory]",
+			want:    `reading GET /greetings: clock port "GreetingClock" names instant "MaybeInstant", whose one property "epochMs" is optional and of type integer, a clock counts in whole units so that property is a required integer`,
+		},
+		{
 			name:    "methods a clock never declares",
 			replace: "        - kind: clock\n          name: GreetingClock\n          instant: Instant\n          span: Span\n          adapters: [memory]\n          methods:\n            - name: now\n              reply: Instant",
 			want:    "declares methods, a clock answers now and elapsed",
@@ -976,7 +986,7 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broken := strings.Replace(queriedSpec, clockDeclaration, tc.replace, 1)
+			broken := strings.Replace(withOptionalSchemas(t, queriedSpec), clockDeclaration, tc.replace, 1)
 
 			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -984,6 +994,29 @@ func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+const optionalSchemas = `    MaybeAddress:
+      type: object
+      properties:
+        address:
+          type: string
+    MaybeInstant:
+      type: object
+      properties:
+        epochMs:
+          type: integer
+`
+
+func withOptionalSchemas(t *testing.T, spec string) string {
+	t.Helper()
+
+	withSchemas := strings.Replace(spec, "    Label:", optionalSchemas+"    Label:", 1)
+	if withSchemas == spec {
+		t.Fatal("the Label schema was never found, the fixture moved")
+	}
+
+	return withSchemas
 }
 
 func TestAnXPortsDeclarationOfAnyKindButTheDeclaredOnesIsRefusedByName(t *testing.T) {
