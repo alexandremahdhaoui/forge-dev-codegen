@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -25,7 +26,10 @@ const (
 	DeploymentFile = "templates/zz_generated_deployment.yaml"
 	ServiceFile    = "templates/zz_generated_service.yaml"
 	SecretNameKey  = "secret_name"
+	ImageKey       = "image"
 )
+
+var keysChartGenWrites = []string{ImageKey, SecretNameKey}
 
 type Options struct {
 	OpenapiSpec []byte
@@ -86,6 +90,7 @@ type portEntry struct {
 
 type templateData struct {
 	Container  string
+	Image      string
 	SecretName string
 	Env        []envEntry
 	Ports      []portEntry
@@ -147,6 +152,7 @@ func Generate(opts Options) ([]File, error) {
 
 	data := templateData{
 		Container:  wiring.Binary,
+		Image:      ".Values." + ImageKey + ".repository",
 		SecretName: valueRead(SecretNameKey, specProperty{}),
 		Env:        env,
 		Ports:      ports,
@@ -236,6 +242,10 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 	env := make([]envEntry, 0, len(keys))
 
 	for _, key := range keys {
+		if err := refuseAKeyChartGenWrites(key); err != nil {
+			return nil, err
+		}
+
 		if properties[key].Env == "" {
 			return nil, fmt.Errorf("config key %q carries no x-env, the loader reads it by that name", key)
 		}
@@ -254,6 +264,14 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 	}
 
 	return env, nil
+}
+
+func refuseAKeyChartGenWrites(key string) error {
+	if slices.Contains(keysChartGenWrites, key) {
+		return fmt.Errorf("config key %q clashes with the values key chart-gen writes itself, rename the config key", key)
+	}
+
+	return nil
 }
 
 func portEntries(manifests []cellmanifest.Manifest, properties map[string]specProperty) ([]portEntry, error) {
@@ -332,7 +350,7 @@ func chartYAML(root rootConfig) (string, error) {
 }
 
 func valuesYAML(binary string, keys []string, properties map[string]specProperty) (string, error) {
-	image, err := yaml.Marshal(map[string]any{"image": map[string]any{"repository": binary}})
+	image, err := yaml.Marshal(map[string]any{ImageKey: map[string]any{"repository": binary}})
 	if err != nil {
 		return "", fmt.Errorf("marshalling %s: %w", ValuesFile, err)
 	}
@@ -393,7 +411,7 @@ spec:
     spec:
       containers:
         - name: [[ .Container ]]
-          image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+          image: "{{ [[ .Image ]] }}:{{ .Chart.AppVersion }}"
           env:
 [[- range .Env ]]
             - name: [[ .Name ]]

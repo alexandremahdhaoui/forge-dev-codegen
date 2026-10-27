@@ -561,6 +561,27 @@ func TestAPropertyMarkedXSecretThatCarriesADefaultIsRefusedByName(t *testing.T) 
 	}
 }
 
+func TestAConfigKeySpelledLikeAValuesKeyChartGenWritesIsRefusedByName(t *testing.T) {
+	for _, key := range []string{chartgen.ImageKey, chartgen.SecretNameKey} {
+		t.Run(key, func(t *testing.T) {
+			clashing := "        " + key + ":\n          type: string\n          x-env: SONGE_HELLO_NODE_CLASH\n"
+
+			_, err := chartgen.Generate(chartgen.Options{
+				OpenapiSpec: []byte(strings.Replace(configSpec, "        udp_addr:\n", clashing+"        udp_addr:\n", 1)),
+				SrcDir:      filepath.Join(crate(t, manifests()), "chart"),
+			})
+			if err == nil {
+				t.Fatalf("a config key named %q was accepted", key)
+			}
+
+			want := `config key "` + key + `" clashes with the values key chart-gen writes itself`
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("got %q, want it to contain %q", err.Error(), want)
+			}
+		})
+	}
+}
+
 func TestADriverWhoseEnabledKeyIsMissingFromTheSpecIsRefusedByName(t *testing.T) {
 	_, err := chartgen.Generate(chartgen.Options{
 		OpenapiSpec: []byte(strings.Replace(configSpec, "        driver_udp:", "        udp_enabled:", 1)),
