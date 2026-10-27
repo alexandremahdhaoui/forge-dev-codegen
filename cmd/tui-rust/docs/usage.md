@@ -124,8 +124,9 @@ adapters and hands them to the driver's `new` after its controller.
 TuiDriver::new(config, controller, screen, keyboard)
 ```
 
-The controller holds no port. Its struct is empty and `new` takes no
-argument. The user never touches the terminal.
+The controller holds no port. Its struct is empty and `new` takes an
+empty `<Controller>ControllerPorts`, the one shape every controller
+constructor takes. The user never touches the terminal.
 
 `bind` refuses a `tick_ms` below 1 naming the key, prints
 `TUI <width>x<height>` while the shell still owns the screen, then calls

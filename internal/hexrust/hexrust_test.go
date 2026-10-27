@@ -471,6 +471,24 @@ func TestTheCrateRootAdapterLayerCarriesNoShellForACellProvidedAdapter(t *testin
 	}
 }
 
+func TestMainFillsEveryControllerPortsStructByFieldNameWhetherTheControllerHoldsAPortOrNone(t *testing.T) {
+	main := generateHello(t, standUpCells(t, "grpc", "rest", "udp"), helloWiring)["src/bin/zz_generated_songe_hello_node.rs"]
+
+	for _, want := range []string{
+		"use songe_hello::grpc::controller::{HelloController, HelloControllerImpl, HelloControllerPorts};",
+		"Arc::new(HelloControllerImpl::new(HelloControllerPorts {\n        }));",
+		"Arc::new(GreetingControllerImpl::new(GreetingControllerPorts {\n            greeting_store: greeting_store.clone(),\n        }));",
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main lacks %q\n%s", want, main)
+		}
+	}
+
+	if strings.Count(main, "ControllerImpl::new(") != strings.Count(main, "ControllerPorts {\n") {
+		t.Errorf("a controller is built without its ports struct\n%s", main)
+	}
+}
+
 func TestMainMatchesEachPortBuildsEachControllerAndGuardsEachDriver(t *testing.T) {
 	root := standUpCells(t, "grpc", "rest", "udp")
 	files := generateHello(t, root, helloWiring)
@@ -490,7 +508,7 @@ func TestMainMatchesEachPortBuildsEachControllerAndGuardsEachDriver(t *testing.T
 		"other => bail!(",
 		`"building GreetingStore: {other:?} names no adapter, the adapters are sqlite"`,
 		"let greeting_controller: Arc<dyn GreetingController + Send + Sync> =",
-		"Arc::new(GreetingControllerImpl::new(greeting_store.clone()));",
+		"Arc::new(GreetingControllerImpl::new(GreetingControllerPorts {\n            greeting_store: greeting_store.clone(),\n        }));",
 		"if config.driver_rest {",
 		"if config.driver_grpc {",
 		"if config.driver_udp {",

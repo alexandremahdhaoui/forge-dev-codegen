@@ -304,7 +304,9 @@ func TestAControllerMethodTakesTheRequestAndTheSessionContext(t *testing.T) {
 		"pub trait HelloDatagramController: Send + Sync {",
 		"request: Echo,\n        context: &Context,\n    ) -> Result<Echo, HelloDatagramControllerError>;",
 		"request: Note,\n        context: &Context,\n    ) -> Result<Nothing, HelloDatagramControllerError>;",
-		"pub struct HelloDatagramControllerImpl;",
+		"pub struct HelloDatagramControllerPorts {\n}",
+		"pub struct HelloDatagramControllerImpl {\n}",
+		"pub fn new(ports: HelloDatagramControllerPorts) -> Self {\n        let HelloDatagramControllerPorts { } = ports;\n\n        Self { }\n    }",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Fatalf("the controller never carried %q:\n%s", want, controller)

@@ -128,7 +128,7 @@ impl AddressController for AddressControllerImpl {
 }
 `
 
-func TestARestControllerHoldingEightPortsPassesClippyDenyingWarningsBecauseItsConstructorCarriesTheTooManyArgumentsAllow(t *testing.T) {
+func TestARestControllerHoldingEightPortsPassesClippyDenyingWarningsWithNoAllowBecauseItsConstructorTakesOnePortsStruct(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")
@@ -140,6 +140,15 @@ func TestARestControllerHoldingEightPortsPassesClippyDenyingWarningsBecauseItsCo
 	}
 
 	root := writeAddressCrate(t, spec, eightPortControllerImpl)
+
+	controller, err := os.ReadFile(filepath.Join(root, "src", "rest", "controller", "zz_generated_address_controller.rs"))
+	if err != nil {
+		t.Fatalf("reading the generated controller: %v", err)
+	}
+
+	if strings.Contains(string(controller), "allow(clippy") {
+		t.Fatalf("the generated controller carries a clippy allow:\n%s", controller)
+	}
 
 	runCargo(t, cargo, root, "clippy", "--all-targets", "--", "-D", "warnings")
 }

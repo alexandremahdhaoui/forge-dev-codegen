@@ -1139,6 +1139,21 @@ func TestALookupColumnIsAnEnumSoNeitherStoreAnswersADefaultForAColumnItCannotRea
 	}
 }
 
+func TestARestControllerConstructorTakesOneGeneratedPortsStructHoldingEveryPortByName(t *testing.T) {
+	files := queriedFiles(t)
+
+	wantIn(t, files, "controller/zz_generated_greeting_controller.rs",
+		"pub struct GreetingControllerPorts {\n    pub greeting_clock: Arc<dyn GreetingClock + Send + Sync>,\n    pub greeting_store: Arc<dyn GreetingStore + Send + Sync>,\n}",
+		"impl GreetingControllerImpl {\n    pub fn new(ports: GreetingControllerPorts) -> Self {\n        let GreetingControllerPorts { greeting_clock, greeting_store } = ports;\n\n        Self { greeting_clock, greeting_store }\n    }\n}",
+	)
+
+	wantIn(t, files, "controller/mod.rs", "GreetingControllerImpl, GreetingControllerPorts}")
+
+	if strings.Contains(files["controller/zz_generated_greeting_controller.rs"], "too_many_arguments") {
+		t.Errorf("the controller still carries a too many arguments allow:\n%s", files["controller/zz_generated_greeting_controller.rs"])
+	}
+}
+
 func TestABareNameNoOperationDeclaresIsAForeignPortTheCellRequiresAndWritesNoneOf(t *testing.T) {
 	foreign := strings.Replace(queriedSpec, "      x-ports: [GreetingStore, GreetingClock]", "      x-ports: [GreetingStore, AuthzClient]", 1)
 
@@ -1150,7 +1165,8 @@ func TestABareNameNoOperationDeclaresIsAForeignPortTheCellRequiresAndWritesNoneO
 	wantIn(t, byPath, "controller/zz_generated_greeting_controller.rs",
 		"use crate::port::authz_client::{AuthzClient, AuthzClientError};",
 		"pub(crate) authz_client: Arc<dyn AuthzClient + Send + Sync>,",
-		"pub fn new(authz_client: Arc<dyn AuthzClient + Send + Sync>, greeting_clock: Arc<dyn GreetingClock + Send + Sync>, greeting_store: Arc<dyn GreetingStore + Send + Sync>) -> Self {",
+		"pub struct GreetingControllerPorts {\n    pub authz_client: Arc<dyn AuthzClient + Send + Sync>,\n    pub greeting_clock: Arc<dyn GreetingClock + Send + Sync>,\n    pub greeting_store: Arc<dyn GreetingStore + Send + Sync>,\n}",
+		"pub fn new(ports: GreetingControllerPorts) -> Self {\n        let GreetingControllerPorts { authz_client, greeting_clock, greeting_store } = ports;",
 	)
 
 	if _, written := byPath["port/zz_generated_authz_client.rs"]; written {

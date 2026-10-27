@@ -159,15 +159,16 @@ func TestTheControllerTraitHasOneMethodPerInputAndItsStructHoldsNoPort(t *testin
 		"fn on_key(&self, frame: &Frame, key: Key) -> Result<Step, BoardControllerError>;",
 		"fn on_line(&self, frame: &Frame, line: &str) -> Result<Step, BoardControllerError>;",
 		"fn on_tick(&self, frame: &Frame) -> Result<Frame, BoardControllerError>;",
-		"#[derive(Default)]\npub struct BoardControllerImpl {}",
-		"pub fn new() -> Self {\n        Self {}\n    }",
+		"pub struct BoardControllerPorts {}",
+		"pub struct BoardControllerImpl {}",
+		"pub fn new(ports: BoardControllerPorts) -> Self {\n        let BoardControllerPorts {} = ports;\n\n        Self {}\n    }",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Fatalf("the controller never carried %q:\n%s", want, controller)
 		}
 	}
 
-	for _, banned := range []string{"Ports", "Screen", "Keyboard", "Arc<"} {
+	for _, banned := range []string{"Screen", "Keyboard", "Arc<"} {
 		if strings.Contains(controller, banned) {
 			t.Fatalf("the controller still carries %q, the driver owns the terminal ports:\n%s", banned, controller)
 		}
@@ -319,8 +320,8 @@ func TestEveryLayerAndTheCellCarryAGeneratedModFile(t *testing.T) {
 		t.Fatalf("the controller mod file never mounts the user impl file:\n%s", files["controller/mod.rs"].Content)
 	}
 
-	if !strings.Contains(files["controller/mod.rs"].Content, "pub use zz_generated_board_controller::{\n    BoardController, BoardControllerError, BoardControllerImpl,\n};") {
-		t.Fatalf("the controller mod file never exports the trait, the error and the impl:\n%s", files["controller/mod.rs"].Content)
+	if !strings.Contains(files["controller/mod.rs"].Content, "pub use zz_generated_board_controller::{\n    BoardController, BoardControllerError, BoardControllerImpl, BoardControllerPorts,\n};") {
+		t.Fatalf("the controller mod file never exports the trait, the error, the impl and the ports struct:\n%s", files["controller/mod.rs"].Content)
 	}
 
 	for _, layer := range []string{"adapter", "driver"} {

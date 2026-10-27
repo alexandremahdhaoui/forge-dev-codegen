@@ -293,6 +293,7 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 				c.Pascal + "Controller",
 				c.Pascal + "ControllerError",
 				c.Pascal + "ControllerImpl",
+				c.Pascal + "ControllerPorts",
 			},
 		})
 		userMods["controller"] = append(userMods["controller"], c.Snake+"_controller")
@@ -809,6 +810,12 @@ pub trait {{ $c.Pascal }}Controller: Send + Sync {
 {{- end }}
 }
 
+pub struct {{ $c.Pascal }}ControllerPorts {
+{{- range $c.Ports }}
+    pub {{ .PortSnake }}: Arc<dyn {{ .Port }} + Send + Sync>,
+{{- end }}
+}
+
 {{ if $c.Ports }}#[allow(dead_code)]
 {{ end }}pub struct {{ $c.Pascal }}ControllerImpl {
 {{- range $c.Ports }}
@@ -817,8 +824,9 @@ pub trait {{ $c.Pascal }}Controller: Send + Sync {
 }
 
 impl {{ $c.Pascal }}ControllerImpl {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new({{ range $i, $p := $c.Ports }}{{ if $i }}, {{ end }}{{ $p.PortSnake }}: Arc<dyn {{ $p.Port }} + Send + Sync>{{ end }}) -> Self {
+    pub fn new(ports: {{ $c.Pascal }}ControllerPorts) -> Self {
+        let {{ $c.Pascal }}ControllerPorts {{ "{" }}{{ range $i, $p := $c.Ports }}{{ if $i }},{{ end }} {{ $p.PortSnake }}{{ end }} {{ "}" }} = ports;
+
         Self {{ "{" }}{{ range $i, $p := $c.Ports }}{{ if $i }},{{ end }} {{ $p.PortSnake }}{{ end }} {{ "}" }}
     }
 }

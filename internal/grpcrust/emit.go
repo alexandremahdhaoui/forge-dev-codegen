@@ -185,7 +185,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 			mount("driver", modEntry{Module: "zz_generated_" + v.DriverModule, Alias: v.DriverModule})
 			mount("controller", modEntry{
 				Module:  "zz_generated_" + v.ControllerSnake + "_controller",
-				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl"},
+				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl", v.ControllerTrait + "Ports"},
 			})
 			userMods["controller"] = append(userMods["controller"], v.ControllerSnake+"_controller")
 			addServerToManifest(&manifest, v)
@@ -402,43 +402,26 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
 {{- end }}
 }
 
-{{ if .Ports }}
-#[allow(dead_code)]
-pub struct {{ .ControllerTrait }}Impl {
+pub struct {{ .ControllerTrait }}Ports {
+{{- range .Ports }}
+    pub {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,
+{{- end }}
+}
+
+{{ if .Ports }}#[allow(dead_code)]
+{{ end }}pub struct {{ .ControllerTrait }}Impl {
 {{- range .Ports }}
     pub(crate) {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,
 {{- end }}
 }
 
 impl {{ .ControllerTrait }}Impl {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-{{- range .Ports }}
-        {{ .Field }}: Arc<dyn {{ .Name }} + Send + Sync>,
-{{- end }}
-    ) -> Self {
-        Self {
-{{- range .Ports }}
-            {{ .Field }},
-{{- end }}
-        }
-    }
-}
-{{- else }}
-pub struct {{ .ControllerTrait }}Impl;
+    pub fn new(ports: {{ .ControllerTrait }}Ports) -> Self {
+        let {{ .ControllerTrait }}Ports {{ "{" }}{{ range $i, $p := .Ports }}{{ if $i }},{{ end }} {{ $p.Field }}{{ end }} {{ "}" }} = ports;
 
-impl {{ .ControllerTrait }}Impl {
-    pub fn new() -> Self {
-        Self
+        Self {{ "{" }}{{ range $i, $p := .Ports }}{{ if $i }},{{ end }} {{ $p.Field }}{{ end }} {{ "}" }}
     }
 }
-
-impl Default for {{ .ControllerTrait }}Impl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-{{- end }}
 {{ end -}}
 
 {{- define "adapter" -}}

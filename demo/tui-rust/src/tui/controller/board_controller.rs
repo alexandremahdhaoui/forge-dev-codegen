@@ -71,6 +71,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::tui::controller::BoardControllerPorts;
     use crate::tui::driver::tui_driver::{
         TuiDriver, TuiDriverConfig, TuiDriverError, HEIGHT, WIDTH,
     };
@@ -80,7 +81,7 @@ mod tests {
     use crate::tui::types::key::Input;
 
     fn controller() -> BoardControllerImpl {
-        BoardControllerImpl::new()
+        BoardControllerImpl::new(BoardControllerPorts {})
     }
 
     fn driver(config: TuiDriverConfig, screen: MockScreen, keyboard: MockKeyboard) -> TuiDriver {

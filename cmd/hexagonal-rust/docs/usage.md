@@ -138,7 +138,8 @@ candidate it knows.
 ## Main
 
 Main loads the config, matches each port choice into one boxed adapter,
-builds each controller with its ports in declaration order, and starts
+builds each controller from its `<Trait>Ports` struct filled by field
+name, one field per port named after the port in snake case, and starts
 each driver its flag enables. A driver is built with its config and the
 controllers it requires, bound, announced and spawned. Main refuses to
 run with every driver disabled and then joins the ones it started.

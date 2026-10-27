@@ -76,7 +76,9 @@ and the controller imports it from `crate::port::<snake>`, the one path
 the crate root re-exports every port to.
 
 Either way the controller struct gains one boxed field after the
-broadcast port, `new` takes it, and wiring.yaml names its adapter. State
+broadcast port. `new` takes one `<Service>ControllerPorts` struct holding
+the same fields under the same names, and wiring.yaml names its adapter.
+A controller holding no port takes an empty ports struct. State
 a controller keeps across calls lives behind such a port, never in a
 static.
 

@@ -81,7 +81,9 @@ use songe_hello::udp::adapter::hello_datagram_udp_peer_table::{
     HelloDatagramUdpPeerTable, HelloDatagramUdpPeerTableConfig,
 };
 use songe_hello::udp::controller::hello_datagram_codec as codec;
-use songe_hello::udp::controller::{HelloDatagramController, HelloDatagramControllerImpl};
+use songe_hello::udp::controller::{
+    HelloDatagramController, HelloDatagramControllerImpl, HelloDatagramControllerPorts,
+};
 use songe_hello::udp::driver::hello_datagram_tick_driver::{
     HelloDatagramTickDriver, HelloDatagramTickDriverConfig, HelloDatagramTickDriverError,
 };
@@ -147,10 +149,10 @@ fn peer_table(max_sessions: i64) -> Arc<HelloDatagramUdpPeerTable> {
 fn controller(peer_table: Arc<HelloDatagramUdpPeerTable>) -> Arc<dyn HelloDatagramController + Send + Sync> {
     let broadcast = HelloDatagramUdpBroadcast::new(HelloDatagramUdpBroadcastConfig {}, peer_table);
 
-    Arc::new(HelloDatagramControllerImpl::new(
-        Arc::new(broadcast),
-        Arc::new(SevenTicks),
-    ))
+    Arc::new(HelloDatagramControllerImpl::new(HelloDatagramControllerPorts {
+        hello_datagram_broadcast: Arc::new(broadcast),
+        tick_counter: Arc::new(SevenTicks),
+    }))
 }
 
 async fn stand_up(max_sessions: i64) -> Stack {

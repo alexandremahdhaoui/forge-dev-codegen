@@ -242,7 +242,7 @@ func TestAnAdapterConsumingAPortGetsItAfterItsConfigAndThatPortIsBuiltFirst(t *t
 		"use songe_hello::port::ticket_verifier::TicketVerifier;",
 		"let mut rest_driver = HttpDriver::new(",
 		"greeting_controller.clone(),\n            ticket_verifier.clone(),\n        );",
-		"Arc::new(GreetingControllerImpl::new(greeting_event_subscribe.clone(), greeting_store.clone()));",
+		"Arc::new(GreetingControllerImpl::new(GreetingControllerPorts {\n            greeting_event_subscribe: greeting_event_subscribe.clone(),\n            greeting_store: greeting_store.clone(),\n        }));",
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main lacks %q\n%s", want, main)

@@ -17,11 +17,14 @@ pub trait BoardController: Send + Sync {
     fn on_tick(&self, frame: &Frame) -> Result<Frame, BoardControllerError>;
 }
 
-#[derive(Default)]
+pub struct BoardControllerPorts {}
+
 pub struct BoardControllerImpl {}
 
 impl BoardControllerImpl {
-    pub fn new() -> Self {
+    pub fn new(ports: BoardControllerPorts) -> Self {
+        let BoardControllerPorts {} = ports;
+
         Self {}
     }
 }

@@ -97,14 +97,15 @@ Every entry is the name of a port **another cell provides**.
 grpc-rust-tonic writes no port of its own, so an entry declaring a
 `kind` or `adapters` is refused by name.
 
-The controller struct gains one boxed field per port, `new` takes them
-in declaration order, and the file imports each trait from
+The controller struct gains one boxed field per port. `new` takes one
+`<Service>ControllerPorts` struct holding a boxed field per port, named
+after the port in snake case, and the file imports each trait from
 `crate::port::<snake>`, the one path the crate root re-exports every
 port to. The manifest names the ports on the controller and lists them
 under `requires.ports`, so the skeleton refuses when no cell provides
 one and `wiring.yaml` picks the adapter.
 
-A cell naming no port still gets a unit struct that derives `Default`.
+A cell naming no port gets an empty ports struct that `new` still takes.
 A struct holding ports carries `#[allow(dead_code)]`, so a body that has
 not reached one of its ports yet still builds. The compiler still
 refuses a missing method, a wrong signature or a type that does not line

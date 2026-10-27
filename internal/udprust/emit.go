@@ -226,7 +226,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		mount("types", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_messages", Alias: v.ServiceSnake + "_messages"})
 		mount("controller", modEntry{
 			Module:  "zz_generated_" + v.ControllerSnake + "_controller",
-			Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl"},
+			Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerTrait + "Impl", v.ControllerTrait + "Ports"},
 		})
 		mount("controller", modEntry{Module: "zz_generated_" + v.ServiceSnake + "_codec", Alias: v.ServiceSnake + "_codec"})
 		userMods["controller"] = append(userMods["controller"], v.ControllerSnake+"_controller")
@@ -305,14 +305,15 @@ func addServiceToManifest(m *cellmanifest.Manifest, v serviceView) {
 	controllerPorts := []string{}
 	driverPorts := []string{}
 
+	for _, held := range v.HeldPorts() {
+		controllerPorts = append(controllerPorts, held.Name)
+	}
+
 	if v.Session {
-		controllerPorts = []string{v.BroadcastTrait}
 		driverPorts = []string{v.GateTrait, v.PeerTableTrait}
 	}
 
 	for _, port := range v.Ports {
-		controllerPorts = append(controllerPorts, port.Name)
-
 		if !port.Generated {
 			m.Requires.Ports = append(m.Requires.Ports, port.Name)
 
@@ -791,7 +792,7 @@ pub trait {{ .ClientTrait }}: Send + Sync {
 
 {{- define "controller" -}}
 {{ .Header }}
-{{ if or .Session .Ports }}
+{{ if .HeldPorts }}
 use std::sync::Arc;
 {{ end }}
 {{- if .Session }}
@@ -832,51 +833,26 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
     fn on_tick(&self) -> Result<(), {{ .ControllerError }}>;
 {{- end }}
 }
-{{ if or .Session .Ports }}
-pub struct {{ .ControllerTrait }}Impl {
-{{- if .Session }}
-    pub(crate) {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
+
+pub struct {{ .ControllerTrait }}Ports {
+{{- range .HeldPorts }}
+    pub {{ .Snake }}: Arc<dyn {{ .Name }} + Send + Sync>,
 {{- end }}
-{{- range .Ports }}
+}
+
+pub struct {{ .ControllerTrait }}Impl {
+{{- range .HeldPorts }}
     pub(crate) {{ .Snake }}: Arc<dyn {{ .Name }} + Send + Sync>,
 {{- end }}
 }
 
 impl {{ .ControllerTrait }}Impl {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-{{- if .Session }}
-        {{ .BroadcastSnake }}: Arc<dyn {{ .BroadcastTrait }} + Send + Sync>,
-{{- end }}
-{{- range .Ports }}
-        {{ .Snake }}: Arc<dyn {{ .Name }} + Send + Sync>,
-{{- end }}
-    ) -> Self {
-        Self {
-{{- if .Session }}
-            {{ .BroadcastSnake }},
-{{- end }}
-{{- range .Ports }}
-            {{ .Snake }},
-{{- end }}
-        }
-    }
-}
-{{- else }}
-pub struct {{ .ControllerTrait }}Impl;
+    pub fn new(ports: {{ .ControllerTrait }}Ports) -> Self {
+        let {{ .ControllerTrait }}Ports {{ "{" }}{{ range $i, $p := .HeldPorts }}{{ if $i }},{{ end }} {{ $p.Snake }}{{ end }} {{ "}" }} = ports;
 
-impl {{ .ControllerTrait }}Impl {
-    pub fn new() -> Self {
-        Self
+        Self {{ "{" }}{{ range $i, $p := .HeldPorts }}{{ if $i }},{{ end }} {{ $p.Snake }}{{ end }} {{ "}" }}
     }
 }
-
-impl Default for {{ .ControllerTrait }}Impl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-{{- end }}
 {{ end -}}
 
 {{- define "codec" -}}

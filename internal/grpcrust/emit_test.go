@@ -80,7 +80,7 @@ func TestAGrpcControllerHoldsEveryPortItsCellNamesAsABoxedFieldAndTheManifestReq
 	}
 }
 
-func TestAGrpcControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgumentsAllow(t *testing.T) {
+func TestAGrpcControllerConstructorTakesOneGeneratedPortsStructHoldingEveryPortByName(t *testing.T) {
 	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{
 		Service: "songe-hello",
 		Cell:    "grpc",
@@ -95,9 +95,17 @@ func TestAGrpcControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgu
 			continue
 		}
 
-		want := "impl HelloControllerImpl {\n    #[allow(clippy::too_many_arguments)]\n    pub fn new(\n        ticket_store:"
-		if !strings.Contains(f.Content, want) {
-			t.Fatalf("the controller constructor never carried the too many arguments allow:\n%s", f.Content)
+		for _, want := range []string{
+			"pub struct HelloControllerPorts {\n    pub ticket_store: Arc<dyn TicketStore + Send + Sync>,\n    pub greeting_clock: Arc<dyn GreetingClock + Send + Sync>,\n}",
+			"impl HelloControllerImpl {\n    pub fn new(ports: HelloControllerPorts) -> Self {\n        let HelloControllerPorts { ticket_store, greeting_clock } = ports;\n\n        Self { ticket_store, greeting_clock }\n    }\n}",
+		} {
+			if !strings.Contains(f.Content, want) {
+				t.Errorf("the controller never carried %q:\n%s", want, f.Content)
+			}
+		}
+
+		if strings.Contains(f.Content, "too_many_arguments") {
+			t.Errorf("the controller still carries a too many arguments allow:\n%s", f.Content)
 		}
 
 		return
@@ -106,7 +114,7 @@ func TestAGrpcControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgu
 	t.Fatal("the cell never wrote the controller")
 }
 
-func TestAGrpcCellNamingNoPortStillWritesAUnitControllerThatDerivesDefault(t *testing.T) {
+func TestAGrpcCellNamingNoPortWritesAnEmptyPortsStructThatItsConstructorTakes(t *testing.T) {
 	files, err := grpcrust.Generate([]byte(helloProto), grpcrust.Options{Service: "songe-hello"})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
@@ -117,7 +125,11 @@ func TestAGrpcCellNamingNoPortStillWritesAUnitControllerThatDerivesDefault(t *te
 			continue
 		}
 
-		for _, want := range []string{"pub struct HelloControllerImpl;", "impl Default for HelloControllerImpl"} {
+		for _, want := range []string{
+			"pub struct HelloControllerPorts {\n}",
+			"pub struct HelloControllerImpl {\n}",
+			"pub fn new(ports: HelloControllerPorts) -> Self {\n        let HelloControllerPorts { } = ports;\n\n        Self { }\n    }",
+		} {
 			if !strings.Contains(f.Content, want) {
 				t.Errorf("the port free controller never carried %q:\n%s", want, f.Content)
 			}
@@ -230,7 +242,7 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 			want: []string{
 				"pub mod zz_generated_hello_controller;",
 				"mod hello_controller;",
-				"pub use zz_generated_hello_controller::{HelloController, HelloControllerError, HelloControllerImpl};",
+				"pub use zz_generated_hello_controller::{HelloController, HelloControllerError, HelloControllerImpl, HelloControllerPorts};",
 			},
 		},
 		{
@@ -321,8 +333,8 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 				"    fn ping(&self, request: PingRequest) -> Result<PingReply, HelloControllerError>;",
 				"pub enum HelloControllerError {",
 				`    #[error("running {operation:?}: not implemented")]`,
-				"pub struct HelloControllerImpl;",
-				"    pub fn new() -> Self {",
+				"pub struct HelloControllerImpl {\n}",
+				"    pub fn new(ports: HelloControllerPorts) -> Self {",
 			},
 		},
 		{

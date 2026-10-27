@@ -69,11 +69,12 @@ type fieldPlan struct {
 }
 
 type controllerPlan struct {
-	Trait    string
-	Impl     string
-	Var      string
-	Ports    []string
-	PortVars []string
+	Trait     string
+	Impl      string
+	PortsType string
+	Var       string
+	Ports     []string
+	PortVars  []string
 }
 
 type driverPlan struct {
@@ -388,17 +389,18 @@ func planControllers(p *plan, merged cellmanifest.Merged, wiring Wiring, imports
 		entry := merged.Controllers[trait]
 
 		cp := controllerPlan{
-			Trait: trait,
-			Impl:  entry.Controller.Impl,
-			Var:   rustname.Snake(trait),
-			Ports: entry.Controller.Ports,
+			Trait:     trait,
+			Impl:      entry.Controller.Impl,
+			PortsType: trait + "Ports",
+			Var:       rustname.Snake(trait),
+			Ports:     entry.Controller.Ports,
 		}
 
 		for _, port := range entry.Controller.Ports {
 			cp.PortVars = append(cp.PortVars, rustname.Snake(port))
 		}
 
-		imports[p.Crate+"::"+entry.Controller.Module+"::{"+trait+", "+entry.Controller.Impl+"}"] = true
+		imports[p.Crate+"::"+entry.Controller.Module+"::{"+trait+", "+entry.Controller.Impl+", "+cp.PortsType+"}"] = true
 
 		p.Controllers = append(p.Controllers, cp)
 	}

@@ -102,6 +102,15 @@ type portView struct {
 	MemoryModule       string
 }
 
+func (v serviceView) HeldPorts() []portView {
+	held := []portView{}
+	if v.Session {
+		held = append(held, portView{Name: v.BroadcastTrait, Snake: v.BroadcastSnake})
+	}
+
+	return append(held, v.Ports...)
+}
+
 type serviceView struct {
 	Header           string
 	Ports            []portView

@@ -120,7 +120,7 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 		"controller": {
 			{
 				Module:  "zz_generated_" + v.ControllerModule,
-				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerImpl},
+				Exports: []string{v.ControllerTrait, v.ControllerError, v.ControllerImpl, v.ControllerTrait + "Ports"},
 			},
 		},
 		"driver": {
@@ -469,11 +469,14 @@ pub trait {{ .ControllerTrait }}: Send + Sync {
     fn on_tick(&self, frame: &Frame) -> Result<Frame, {{ .ControllerError }}>;
 }
 
-#[derive(Default)]
+pub struct {{ .ControllerTrait }}Ports {}
+
 pub struct {{ .ControllerImpl }} {}
 
 impl {{ .ControllerImpl }} {
-    pub fn new() -> Self {
+    pub fn new(ports: {{ .ControllerTrait }}Ports) -> Self {
+        let {{ .ControllerTrait }}Ports {} = ports;
+
         Self {}
     }
 }

@@ -268,12 +268,20 @@ func TestAFullPeerTableRefusesByNamingMaxSessionsAndNeverAnswersABareFalse(t *te
 	}
 }
 
-func TestAUdpControllerConstructorTakingOneArgumentPerPortCarriesTheTooManyArgumentsAllow(t *testing.T) {
+func TestAUdpControllerConstructorTakesOneGeneratedPortsStructHoldingTheBroadcastByName(t *testing.T) {
 	controller := generateSession(t)["controller/zz_generated_hello_datagram_controller.rs"].Content
 
-	want := "impl HelloDatagramControllerImpl {\n    #[allow(clippy::too_many_arguments)]\n    pub fn new(\n        hello_datagram_broadcast:"
-	if !strings.Contains(controller, want) {
-		t.Fatalf("the controller constructor never carried the too many arguments allow:\n%s", controller)
+	for _, want := range []string{
+		"pub struct HelloDatagramControllerPorts {\n    pub hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n}",
+		"impl HelloDatagramControllerImpl {\n    pub fn new(ports: HelloDatagramControllerPorts) -> Self {\n        let HelloDatagramControllerPorts { hello_datagram_broadcast } = ports;\n\n        Self { hello_datagram_broadcast }\n    }\n}",
+	} {
+		if !strings.Contains(controller, want) {
+			t.Errorf("the controller lacks %q\n%s", want, controller)
+		}
+	}
+
+	if strings.Contains(controller, "too_many_arguments") {
+		t.Errorf("the controller still carries a too many arguments allow:\n%s", controller)
 	}
 }
 
@@ -292,7 +300,7 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 	for _, want := range []string{
 		"fn on_tick(&self) -> Result<(), HelloDatagramControllerError>;",
 		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,",
-		"pub fn new(\n        hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n    ) -> Self {",
+		"pub fn new(ports: HelloDatagramControllerPorts) -> Self {",
 		"Broadcast {\n        kind: String,\n        #[source]\n        source: HelloDatagramBroadcastError,\n    },",
 	} {
 		if !strings.Contains(controller, want) {
@@ -457,7 +465,8 @@ func TestACounterPortKindIsEmittedAsATraitHeldByTheControllerWithItsMemoryAdapte
 	for _, want := range []string{
 		"use crate::udp::port::tick_counter::TickCounter;",
 		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n    pub(crate) tick_counter: Arc<dyn TickCounter + Send + Sync>,",
-		"hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n        tick_counter: Arc<dyn TickCounter + Send + Sync>,\n    ) -> Self {",
+		"pub struct HelloDatagramControllerPorts {\n    pub hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,\n    pub tick_counter: Arc<dyn TickCounter + Send + Sync>,\n}",
+		"let HelloDatagramControllerPorts { hello_datagram_broadcast, tick_counter } = ports;",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Errorf("the controller lacks %q\n%s", want, controller)

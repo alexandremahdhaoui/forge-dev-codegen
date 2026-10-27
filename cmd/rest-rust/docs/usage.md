@@ -204,8 +204,9 @@ verifying is the operation that declares the port.
 The engine writes `port/zz_generated_<snake>.rs` holding
 `<Name>Error` with a `Refused` and a `Call` arm and the trait under
 `mockall::automock`, so the user never writes a port trait. The
-controller struct gains one boxed field, `new` takes it in port name
-order, and the controller error enum gains one arm wrapping
+controller struct gains one boxed field. `new` takes one
+`<Controller>ControllerPorts` struct holding the same field under the
+same name, and the controller error enum gains one arm wrapping
 `<Name>Error`. The manifest declares the port and the adapters its kind
 emits, so `wiring.yaml` picks one.
 

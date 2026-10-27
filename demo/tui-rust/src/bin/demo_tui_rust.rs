@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use demo_tui_rust::tui::adapter::crossterm_keyboard::{CrosstermKeyboard, CrosstermKeyboardConfig};
 use demo_tui_rust::tui::adapter::crossterm_screen::{CrosstermScreen, CrosstermScreenConfig};
-use demo_tui_rust::tui::controller::{BoardController, BoardControllerImpl};
+use demo_tui_rust::tui::controller::{BoardController, BoardControllerImpl, BoardControllerPorts};
 use demo_tui_rust::tui::driver::tui_driver::{
     error_chain, TuiDriver, TuiDriverConfig, TuiDriverError,
 };
@@ -16,7 +16,7 @@ async fn main() {
 }
 
 async fn run() -> Result<(), TuiDriverError> {
-    let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(BoardControllerImpl::new());
+    let controller: Arc<dyn BoardController + Send + Sync> = Arc::new(BoardControllerImpl::new(BoardControllerPorts {}));
 
     let mut driver = TuiDriver::new(
         TuiDriverConfig::default(),

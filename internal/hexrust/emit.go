@@ -670,7 +670,11 @@ async fn run() -> anyhow::Result<()> {
 {{ end }}
 {{- range .Controllers }}
     let {{ .Var }}: Arc<dyn {{ .Trait }} + Send + Sync> =
-        Arc::new({{ .Impl }}::new({{ range $i, $p := .PortVars }}{{ if $i }}, {{ end }}{{ $p }}.clone(){{ end }}));
+        Arc::new({{ .Impl }}::new({{ .PortsType }} {
+{{- range .PortVars }}
+            {{ . }}: {{ . }}.clone(),
+{{- end }}
+        }));
 {{ end }}
     let mut handles = Vec::new();
 {{ range .Drivers }}
