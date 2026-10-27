@@ -500,7 +500,7 @@ func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifes
 			Default:     0,
 			Description: "The moment the " + h.Snake + " memory clock starts at, read as the " + h.Instant + " the port answers",
 		}
-	case h.Kind == StringPortKind && a.Kind == StringAdapterConfig:
+	case h.Kind == StringPortKind && a.Kind == StringAdapterSetting:
 		config[h.ValueField] = cellmanifest.ConfigField{
 			Type:        cellmanifest.FieldTypeString,
 			Required:    true,
@@ -1489,7 +1489,7 @@ impl {{ $p.Name }} for {{ $a.Struct }} {
 }
 {{ end -}}
 
-{{- define "string_config" -}}
+{{- define "string_setting" -}}
 {{ .Header }}
 {{ $p := .Port }}{{ $a := .Adapter }}
 use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};

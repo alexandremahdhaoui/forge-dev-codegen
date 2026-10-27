@@ -750,7 +750,7 @@ func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	}
 }
 
-const stringDeclaration = "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]"
+const stringDeclaration = "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [setting]"
 
 const addressSchema = `    Address:
       type: object
@@ -791,16 +791,16 @@ func TestAStringPortIsDeclaredOnAnOperationAndTheEngineWritesItsTraitItsAdapterA
 		"fn get(&self) -> Result<Address, CombatAddressError>;",
 	)
 
-	wantIn(t, files, "adapter/zz_generated_combat_address_config.rs",
+	wantIn(t, files, "adapter/zz_generated_combat_address_setting.rs",
 		"use crate::rest::types::address::Address;",
-		"pub struct CombatAddressConfigConfig {\n    pub address: String,\n}",
-		"pub struct CombatAddressConfig {\n    value: Address,\n}",
+		"pub struct CombatAddressSettingConfig {\n    pub address: String,\n}",
+		"pub struct CombatAddressSetting {\n    value: Address,\n}",
 		"value: Address {\n                address: config.address,\n            },",
-		"impl CombatAddress for CombatAddressConfig {",
+		"impl CombatAddress for CombatAddressSetting {",
 		"fn get(&self) -> Result<Address, CombatAddressError> {\n        Ok(self.value.clone())\n    }",
 	)
 
-	wantIn(t, files, "adapter/mod.rs", "pub mod zz_generated_combat_address_config;")
+	wantIn(t, files, "adapter/mod.rs", "pub mod zz_generated_combat_address_setting;")
 }
 
 func TestAStringPortReachesTheManifestAsAPortAnAdapterWithOneRequiredConfigKeyAndAControllerField(t *testing.T) {
@@ -825,7 +825,7 @@ func TestAStringPortReachesTheManifestAsAPortAnAdapterWithOneRequiredConfigKeyAn
 
 	for _, required := range m.Requires.Ports {
 		if required == "CombatAddress" {
-			t.Error("the cell provides the config adapter and still requires the port")
+			t.Error("the cell provides the setting adapter and still requires the port")
 		}
 	}
 
@@ -835,12 +835,12 @@ func TestAStringPortReachesTheManifestAsAPortAnAdapterWithOneRequiredConfigKeyAn
 	}
 
 	for _, adapter := range m.Provides.Adapters {
-		if adapter.Name != "combat_address_config" {
+		if adapter.Name != "combat_address_setting" {
 			continue
 		}
 
 		if adapter.Implements != "CombatAddress" {
-			t.Errorf("the config adapter implements %q", adapter.Implements)
+			t.Errorf("the setting adapter implements %q", adapter.Implements)
 		}
 
 		want := map[string]cellmanifest.ConfigField{
@@ -852,13 +852,13 @@ func TestAStringPortReachesTheManifestAsAPortAnAdapterWithOneRequiredConfigKeyAn
 		}
 
 		if !reflect.DeepEqual(adapter.Config, want) {
-			t.Errorf("the config adapter config = %+v, want one required string key with no default that is not secret", adapter.Config)
+			t.Errorf("the setting adapter config = %+v, want one required string key with no default that is not secret", adapter.Config)
 		}
 
 		return
 	}
 
-	t.Fatalf("the manifest never provides the config adapter: %+v", m.Provides.Adapters)
+	t.Fatalf("the manifest never provides the setting adapter: %+v", m.Provides.Adapters)
 }
 
 func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
@@ -869,27 +869,27 @@ func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	}{
 		{
 			name:    "no value",
-			replace: "        - kind: string\n          name: CombatAddress\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          adapters: [setting]",
 			want:    `string port "CombatAddress" names no value, a string declaration names the one schema it answers`,
 		},
 		{
 			name:    "a value that is no schema",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Place\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Place\n          adapters: [setting]",
 			want:    `string port "CombatAddress" names value "Place", which is not a schema of components.schemas`,
 		},
 		{
 			name:    "two properties",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: GreetingPage\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: GreetingPage\n          adapters: [setting]",
 			want:    `names value "GreetingPage", which declares 2 properties, a string port answers one string so its value carries one property`,
 		},
 		{
 			name:    "a property that is not a required string",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Instant\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Instant\n          adapters: [setting]",
 			want:    `names value "Instant", whose one property "epochMs" is of type integer, a string port reads one config string so that property is a required string`,
 		},
 		{
 			name:    "a string property that is not required",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: MaybeAddress\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: MaybeAddress\n          adapters: [setting]",
 			want:    `reading GET /greetings: string port "CombatAddress" names value "MaybeAddress", whose one property "address" is optional and of type string, a string port reads one config string so that property is a required string`,
 		},
 		{
@@ -905,31 +905,31 @@ func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 		{
 			name:    "an unknown adapter kind",
 			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [env]",
-			want:    `adapter kind "env", a string adapter is one of config`,
+			want:    `adapter kind "env", a string adapter is one of setting`,
 		},
 		{
 			name:    "declared methods",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]\n          methods:\n            - name: get\n              reply: Address",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [setting]\n          methods:\n            - name: get\n              reply: Address",
 			want:    "declares methods, a string answers get and the engine writes them",
 		},
 		{
 			name:    "the name of a store port",
-			replace: "        - kind: string\n          name: GreetingStore\n          value: Address\n          adapters: [config]",
+			replace: "        - kind: string\n          name: GreetingStore\n          value: Address\n          adapters: [setting]",
 			want:    "takes the name of a store or subscribe port",
 		},
 		{
 			name:    "an instant that belongs to a clock port",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          instant: Instant\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          instant: Instant\n          adapters: [setting]",
 			want:    `reading GET /greetings: string port "CombatAddress" declares instant, which belongs to the clock kind, a string port declares only value`,
 		},
 		{
 			name:    "a span that belongs to a clock port",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          span: Span\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          span: Span\n          adapters: [setting]",
 			want:    `reading GET /greetings: string port "CombatAddress" declares span, which belongs to the clock kind, a string port declares only value`,
 		},
 		{
 			name:    "a subject that belongs to a verifier port",
-			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          subject: Address\n          adapters: [config]",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          subject: Address\n          adapters: [setting]",
 			want:    `reading GET /greetings: string port "CombatAddress" declares subject, which belongs to the verifier kind, a string port declares only value`,
 		},
 	}

@@ -24,7 +24,7 @@ paths:
         - kind: string
           name: CombatAddress
           value: Address
-          adapters: [config]
+          adapters: [setting]
       responses:
         "200":
           description: The combat address
@@ -80,15 +80,15 @@ impl AddressController for AddressControllerImpl {
 }
 `
 
-const combatAddressTest = `use songe_world::rest::adapter::combat_address_config::{
-    CombatAddressConfig, CombatAddressConfigConfig,
+const combatAddressTest = `use songe_world::rest::adapter::combat_address_setting::{
+    CombatAddressSetting, CombatAddressSettingConfig,
 };
 use songe_world::rest::port::combat_address::CombatAddress;
 use songe_world::rest::types::address::Address;
 
 #[test]
-fn the_config_adapter_answers_the_address_its_configuration_named_on_every_call() {
-    let adapter = CombatAddressConfig::new(CombatAddressConfigConfig {
+fn the_setting_adapter_answers_the_address_its_configuration_named_on_every_call() {
+    let adapter = CombatAddressSetting::new(CombatAddressSettingConfig {
         address: "combat.songe.test:7000".to_string(),
     });
     let named = Address {
@@ -105,10 +105,10 @@ var eightPortNames = []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Fox
 func eightPortSpec() string {
 	declarations := ""
 	for _, name := range eightPortNames {
-		declarations += "        - kind: string\n          name: " + name + "Address\n          value: Address\n          adapters: [config]\n"
+		declarations += "        - kind: string\n          name: " + name + "Address\n          value: Address\n          adapters: [setting]\n"
 	}
 
-	return strings.Replace(combatAddressSpec, "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]\n", declarations, 1)
+	return strings.Replace(combatAddressSpec, "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [setting]\n", declarations, 1)
 }
 
 const eightPortControllerImpl = `use crate::rest::controller::{
@@ -183,7 +183,7 @@ func writeAddressCrate(t *testing.T, spec, controllerImpl string) string {
 	return root
 }
 
-func TestTheConfigStringAdapterAnswersTheValueItsConfigurationNamed(t *testing.T) {
+func TestTheSettingStringAdapterAnswersTheValueItsConfigurationNamed(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
 		t.Skip("cargo is not on PATH")

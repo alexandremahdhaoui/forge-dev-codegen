@@ -298,7 +298,7 @@ const (
 	ClockAdapterSystem = "system"
 )
 
-const StringAdapterConfig = "config"
+const StringAdapterSetting = "setting"
 
 const VerifierAdapterSecret = "secret"
 
@@ -311,7 +311,7 @@ func ClockAdapterKinds() []string {
 }
 
 func StringAdapterKinds() []string {
-	return []string{StringAdapterConfig}
+	return []string{StringAdapterSetting}
 }
 
 func VerifierAdapterKinds() []string {

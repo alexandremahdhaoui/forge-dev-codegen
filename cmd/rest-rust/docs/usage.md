@@ -167,7 +167,8 @@ A `string` port answers one string the node reads from configuration.
 The declaration names its schema under `value`, and that schema carries
 exactly one required string property. The trait carries one method,
 `fn get(&self) -> Result<<Value>, <Name>Error>`. The only `string`
-adapter is `config`, which holds one config key named after that
+adapter is `setting`, named after what it talks to, a setting of the
+node. The `setting` adapter holds one config key named after that
 property. The key is required with no default and is not secret, so a
 node left without it refuses to start by name. The `get` method answers
 a clone of the value the node read at start.
