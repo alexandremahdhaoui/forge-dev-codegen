@@ -282,6 +282,12 @@ test:
   - name: lint
     runner: forge://go-lint
 
+  - name: gofmt
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["-c", "! gofmt -l . | grep ."]
+
   - name: unit
     runner: forge://go-test
 

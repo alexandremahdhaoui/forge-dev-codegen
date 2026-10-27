@@ -179,4 +179,3 @@ impl ` + shape.Trait + ` for ` + shape.Struct + ` {
 }
 `
 }
-

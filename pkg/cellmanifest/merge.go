@@ -61,10 +61,10 @@ type AdapterEntry struct {
 
 func Merge(manifests []Manifest) (Merged, error) {
 	merged := Merged{
-		Cells:       make([]string, 0, len(manifests)),
-		Drivers:     map[string]DriverEntry{},
-		Controllers: map[string]ControllerEntry{},
-		Ports:       map[string]PortEntry{},
+		Cells:        make([]string, 0, len(manifests)),
+		Drivers:      map[string]DriverEntry{},
+		Controllers:  map[string]ControllerEntry{},
+		Ports:        map[string]PortEntry{},
 		Adapters:     []AdapterEntry{},
 		BuildScripts: []BuildScript{},
 	}

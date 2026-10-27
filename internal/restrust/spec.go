@@ -140,10 +140,10 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 }
 
 type operation struct {
-	OperationID string    `json:"operationId"`
-	Summary     string    `json:"summary"`
-	Controller  string    `json:"x-controller"`
-	Ports       []portRef `json:"x-ports"`
+	OperationID string          `json:"operationId"`
+	Summary     string          `json:"summary"`
+	Controller  string          `json:"x-controller"`
+	Ports       []portRef       `json:"x-ports"`
 	Auth        string          `json:"x-auth"`
 	Stream      json.RawMessage `json:"x-stream"`
 	Parameters  []struct {
@@ -242,18 +242,18 @@ type HandPort struct {
 }
 
 type Operation struct {
-	ID            string
-	Ident         string
-	Summary       string
-	Method        string
-	MethodLower   string
-	Path          string
-	Params        []Param
-	Query         []QueryParam
-	Body          string
-	Response      string
-	Status        int
-	InvalidStatus int
+	ID             string
+	Ident          string
+	Summary        string
+	Method         string
+	MethodLower    string
+	Path           string
+	Params         []Param
+	Query          []QueryParam
+	Body           string
+	Response       string
+	Status         int
+	InvalidStatus  int
 	Controller     string
 	Ports          []string
 	Auth           bool
@@ -368,7 +368,6 @@ func checkName(what, name string) error {
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
-
 
 func Parse(doc []byte) (*Spec, error) {
 	var parsed document
@@ -496,7 +495,7 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 	}
 
 	var declared struct {
-		Key      string `json:"key"`
+		Key     string `json:"key"`
 		Lookups *[]struct {
 			By      json.RawMessage `json:"by"`
 			Answers string          `json:"answers"`
@@ -1263,18 +1262,18 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 	}
 
 	return Operation{
-		ID:            op.OperationID,
-		Ident:         rustname.Snake(op.OperationID),
-		Summary:       op.Summary,
-		Method:        strings.ToUpper(method),
-		MethodLower:   method,
-		Path:          path,
-		Params:        params,
-		Query:         query,
-		Body:          body,
-		Response:      response,
-		Status:        status,
-		InvalidStatus: invalidStatus(op),
+		ID:             op.OperationID,
+		Ident:          rustname.Snake(op.OperationID),
+		Summary:        op.Summary,
+		Method:         strings.ToUpper(method),
+		MethodLower:    method,
+		Path:           path,
+		Params:         params,
+		Query:          query,
+		Body:           body,
+		Response:       response,
+		Status:         status,
+		InvalidStatus:  invalidStatus(op),
 		Controller:     op.Controller,
 		Ports:          ports,
 		Auth:           auth,

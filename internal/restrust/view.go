@@ -27,33 +27,33 @@ import (
 )
 
 type view struct {
-	Header           string
-	Service          string
-	Cell             string
-	CratePath        string
-	ModulePrefix     string
-	DriverName       string
-	DefaultAddress   string
-	DefaultBaseURL   string
-	Server           bool
-	Client           bool
-	Auth             bool
-	HasStream        bool
-	Types            []typeView
-	Stores           []storeView
-	UsedStores       []storeView
-	Events           []eventView
-	HandPorts        []handPortView
-	ForeignPorts     []string
-	Controllers      []controllerView
-	Clients          []clientView
-	Routes           []opView
-	WireImports      []string
-	UsesPath         bool
-	UsesQuery        bool
-	UsesJson         bool
-	UsesEnum         bool
-	UsesLength       bool
+	Header         string
+	Service        string
+	Cell           string
+	CratePath      string
+	ModulePrefix   string
+	DriverName     string
+	DefaultAddress string
+	DefaultBaseURL string
+	Server         bool
+	Client         bool
+	Auth           bool
+	HasStream      bool
+	Types          []typeView
+	Stores         []storeView
+	UsedStores     []storeView
+	Events         []eventView
+	HandPorts      []handPortView
+	ForeignPorts   []string
+	Controllers    []controllerView
+	Clients        []clientView
+	Routes         []opView
+	WireImports    []string
+	UsesPath       bool
+	UsesQuery      bool
+	UsesJson       bool
+	UsesEnum       bool
+	UsesLength     bool
 }
 
 type fieldView struct {
@@ -74,15 +74,15 @@ type typeView struct {
 }
 
 type lookupView struct {
-	ByJoined     string
-	Method       string
-	Page         bool
-	Args         string
-	Pairs        string
-	ValueExpr    string
-	MemoryMatch  string
-	Values       string
-	Index        string
+	ByJoined    string
+	Method      string
+	Page        bool
+	Args        string
+	Pairs       string
+	ValueExpr   string
+	MemoryMatch string
+	Values      string
+	Index       string
 }
 
 type columnView struct {
@@ -128,17 +128,17 @@ type storeView struct {
 }
 
 type eventView struct {
-	Name              string
-	Snake             string
-	Port              string
-	PortSnake         string
-	From              string
-	FromSnake         string
-	HasMemory         bool
-	MemoryStruct      string
+	Name               string
+	Snake              string
+	Port               string
+	PortSnake          string
+	From               string
+	FromSnake          string
+	HasMemory          bool
+	MemoryStruct       string
 	MemoryConfigStruct string
-	MemoryAdapterName string
-	MemoryModule      string
+	MemoryAdapterName  string
+	MemoryModule       string
 }
 
 type portView struct {
@@ -156,17 +156,17 @@ type handMethodView struct {
 }
 
 type handPortView struct {
-	Name         string
-	Snake        string
-	PortSnake    string
-	Error        string
-	Kind         string
-	Instant      string
-	InstantSnake string
-	InstantField string
-	Span         string
-	SpanSnake    string
-	SpanField    string
+	Name          string
+	Snake         string
+	PortSnake     string
+	Error         string
+	Kind          string
+	Instant       string
+	InstantSnake  string
+	InstantField  string
+	Span          string
+	SpanSnake     string
+	SpanField     string
 	Subject       string
 	SubjectSnake  string
 	SubjectFields []subjectFieldView
@@ -176,8 +176,8 @@ type handPortView struct {
 	JwksURL       string
 	JwksIssuers   string
 	Adapters      []handAdapterView
-	Imports      []importView
-	Methods      []handMethodView
+	Imports       []importView
+	Methods       []handMethodView
 }
 
 type subjectFieldView struct {
@@ -250,17 +250,17 @@ type controllerView struct {
 }
 
 type clientView struct {
-	Snake       string
-	Pascal      string
-	Trait       string
-	Error       string
-	Struct      string
-	Config      string
-	Module      string
-	PortModule  string
-	AdapterName string
-	Ops         []opView
-	TypeImports []importView
+	Snake        string
+	Pascal       string
+	Trait        string
+	Error        string
+	Struct       string
+	Config       string
+	Module       string
+	PortModule   string
+	AdapterName  string
+	Ops          []opView
+	TypeImports  []importView
 	Auth         bool
 	HasStream    bool
 	HasQuery     bool
@@ -274,17 +274,17 @@ func buildView(spec *Spec, opts Options) view {
 	modulePrefix := opts.Cell + "::"
 
 	v := view{
-		Header:           header,
-		Service:          opts.Service,
-		Cell:             opts.Cell,
-		CratePath:        cratePath,
-		ModulePrefix:     modulePrefix,
-		DriverName:       opts.Cell,
-		DefaultAddress:   DefaultAddress,
-		DefaultBaseURL:   DefaultBaseURL,
-		Server:           opts.Side != SideClient,
-		Client:           opts.Side != SideServer,
-		Auth:             spec.Auth,
+		Header:         header,
+		Service:        opts.Service,
+		Cell:           opts.Cell,
+		CratePath:      cratePath,
+		ModulePrefix:   modulePrefix,
+		DriverName:     opts.Cell,
+		DefaultAddress: DefaultAddress,
+		DefaultBaseURL: DefaultBaseURL,
+		Server:         opts.Side != SideClient,
+		Client:         opts.Side != SideServer,
+		Auth:           spec.Auth,
 	}
 
 	for _, t := range spec.Types {
@@ -356,15 +356,15 @@ func buildView(spec *Spec, opts Options) view {
 			}
 
 			sv.Lookups = append(sv.Lookups, lookupView{
-				ByJoined:     strings.Join(l.By, ", "),
-				Method:       lookupMethod(l),
-				Page:         l.Answers == LookupPage,
-				Args:         lookupArgs(l),
-				Pairs:        lookupPairs(s.Name, l),
-				ValueExpr:    lookupValueExpr(l),
-				MemoryMatch:  lookupMemoryMatch(l),
-				Values:       lookupValues(l),
-				Index:        storeddl.Index(s.Snake, l.By),
+				ByJoined:    strings.Join(l.By, ", "),
+				Method:      lookupMethod(l),
+				Page:        l.Answers == LookupPage,
+				Args:        lookupArgs(l),
+				Pairs:       lookupPairs(s.Name, l),
+				ValueExpr:   lookupValueExpr(l),
+				MemoryMatch: lookupMemoryMatch(l),
+				Values:      lookupValues(l),
+				Index:       storeddl.Index(s.Snake, l.By),
 			})
 		}
 
@@ -848,15 +848,15 @@ func buildClientView(c Controller, cv controllerView, cell string) clientView {
 	adapterName := cell + "_" + c.Snake + "_client"
 
 	client := clientView{
-		Snake:       c.Snake,
-		Pascal:      c.Pascal,
-		Trait:       c.Pascal + "Client",
-		Error:       c.Pascal + "ClientError",
-		Struct:      c.Pascal + "RestClient",
-		Config:      c.Pascal + "RestClientConfig",
-		Module:      c.Snake + "_rest_client",
-		PortModule:  c.Snake + "_client",
-		AdapterName: adapterName,
+		Snake:        c.Snake,
+		Pascal:       c.Pascal,
+		Trait:        c.Pascal + "Client",
+		Error:        c.Pascal + "ClientError",
+		Struct:       c.Pascal + "RestClient",
+		Config:       c.Pascal + "RestClientConfig",
+		Module:       c.Snake + "_rest_client",
+		PortModule:   c.Snake + "_client",
+		AdapterName:  adapterName,
 		Ops:          cv.Ops,
 		TypeImports:  cv.TypeImports,
 		WireRuntime:  taxonomy.WireRuntime(),
