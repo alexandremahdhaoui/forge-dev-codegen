@@ -236,14 +236,14 @@ core response, a `std::sync::mpsc::Receiver<Event>` for a stream, or
 `RateLimiting`, each with the operation and the message the server sent.
 A transport failure and an unknown error type are `Runtime`.
 
-`<Name>RestClient` calls through reqwest. Its config carries `base_url`.
-When one of its operations carries `x-auth` it consumes the `TokenSource`
-port and sends the token it answers as a bearer on those operations. A
-`TokenSource` failure is an `Authentication` error. Without `x-auth` its
-`new` takes the config alone. The methods are synchronous and block
-inside the tokio runtime, so a controller with plain methods can call
-them. A stream method spawns a task that reads the `data:` frames into
-the receiver it answers and logs a transport failure with its chain
+`<Name>RestClient` calls through reqwest. `<Name>RestClient` reads `base_url`
+from its config. When one of its operations carries `x-auth` it consumes
+the `TokenSource` port and sends the token it answers as a bearer on those
+operations. A `TokenSource` failure is an `Authentication` error. Without
+`x-auth` its `new` takes the config alone. The methods are synchronous and
+block inside the tokio runtime, so a controller with plain methods can
+call them. A stream method spawns a task that reads the `data:` frames
+into the receiver it answers and logs a transport failure with its chain
 before the receiver ends.
 
 The manifest lists `<Name>Client` under `ports` and the adapter under

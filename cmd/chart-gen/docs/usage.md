@@ -15,11 +15,11 @@ openapi:
   specPath: ../zz_generated_config_spec.yaml
 ```
 
-From the crate root it reads `forge-dev.yaml` for the name, the version, the
-description, `layout.cells` and `wiring.specPath`. chart-gen reads the
+chart-gen reads the crate root `forge-dev.yaml` for the name, the version,
+the description, `layout.cells` and `wiring.specPath`. chart-gen reads the
 wiring file for the binary and `src/<cell>/zz_generated_cell.yaml` for every
-listed cell. A missing root `forge-dev.yaml`, a missing manifest or a listed cell
-with none is refused by name.
+listed cell. A missing root `forge-dev.yaml`, a missing manifest or a listed
+cell with none is refused by name.
 
 chart-gen emits these files, relative to the cell.
 

@@ -62,9 +62,10 @@ configgen-gen writes refuses to start the node by name while the key is
 unset. A field marked `secret` carries `x-secret: true` in the Spec schema,
 so chart-gen reads its value from a Kubernetes Secret and never from values.
 
-The crate root secret adapter declares its `secret` and the field it
-answers, `id` for a TicketVerifier, required the same way. The crate root
-secret adapter marks its `secret` field and never the field it answers.
+The crate root secret adapter declares its `secret` field and the field it
+answers, `id` for a TicketVerifier, as required fields, so both fields land
+in the Spec schema `required` list. The crate root secret adapter marks its
+`secret` field and never the field it answers.
 The crate root secret adapter is named `<port>_secret`, the rule every
 hand port adapter follows, so a TicketVerifier reads
 `ticket_verifier_secret_secret` and `ticket_verifier_secret_id` and two
