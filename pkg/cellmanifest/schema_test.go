@@ -176,132 +176,158 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n" +
 				"      implements: HelloClient\n      config:\n        addr: { type: float }\n",
+			named: `/$defs/configField/properties/type: enum: float does not equal any of`,
 		},
 		{
 			name: "a driver with protocol http fails the schema",
 			manifestYAML: "version: \"1\"\ncell: rest\ngenerator: rest-rust\n" +
 				"provides:\n  drivers:\n    - name: rest\n      type: HttpDriver\n" +
 				"      module: rest::driver::http_driver\n      protocol: http\n      requires: [GreetingController]\n",
+			named: `/$defs/driver/properties/protocol: enum: http does not equal any of`,
 		},
 		{
 			name:         "a manifest with no cell name fails the schema",
 			manifestYAML: "version: \"1\"\ngenerator: grpc-rust-tonic\n",
+			named:        `required: missing properties: ["cell"]`,
 		},
 		{
 			name:         "a manifest with no version fails the schema",
 			manifestYAML: "cell: grpc\ngenerator: grpc-rust-tonic\n",
+			named:        `required: missing properties: ["version"]`,
 		},
 		{
 			name:         "a version other than one fails the schema",
 			manifestYAML: "version: \"2\"\ncell: grpc\ngenerator: grpc-rust-tonic\n",
+			named:        `/properties/version: const: 2 does not equal 1`,
 		},
 		{
 			name:         "a build script that leaves the cell fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nbuildScript: ../zz_generated_build.rs\n",
+			named:        `/$defs/buildScript: pattern: "../zz_generated_build.rs" does not match`,
 		},
 		{
 			name:         "a build script whose name is not generated fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nbuildScript: build.rs\n",
+			named:        `/$defs/buildScript: pattern: "build.rs" does not match`,
 		},
 		{
 			name:         "a cell name that is not snake case fails the schema",
 			manifestYAML: "version: \"1\"\ncell: GrpcCell\ngenerator: grpc-rust-tonic\n",
+			named:        `/properties/cell: validating /$defs/snakeName: pattern: "GrpcCell"`,
 		},
 		{
 			name: "a driver that requires no controller trait fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
 				"      module: grpc::driver::hello_grpc_driver\n      requires: []\n",
+			named: `/$defs/driver/properties/requires/allOf/1: minItems: array length 0 is less than 1`,
 		},
 		{
 			name: "an adapter that implements no port fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n",
+			named: `/$defs/adapter: required: missing properties: ["implements"]`,
 		},
 		{
 			name: "a driver with no module fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
 				"      requires: [HelloController]\n",
+			named: `/$defs/driver: required: missing properties: ["module"]`,
 		},
 		{
 			name: "an adapter with no module fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      implements: HelloClient\n",
+			named: `/$defs/adapter: required: missing properties: ["module"]`,
 		},
 		{
 			name: "a controller with no module fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  controllers:\n    - trait: HelloController\n      impl: HelloControllerImpl\n",
+			named: `/$defs/controller: required: missing properties: ["module"]`,
 		},
 		{
 			name: "a port with no module fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  ports:\n    - trait: GreetingStore\n",
+			named: `/$defs/port: required: missing properties: ["module"]`,
 		},
 		{
 			name: "a module that is not a double colon path fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  ports:\n    - trait: GreetingStore\n      module: rest/port/greeting_store\n",
+			named: `/$defs/port/properties/module: validating /$defs/modulePath: pattern: "rest/port/greeting_store"`,
 		},
 		{
 			name:         "an unknown top level key fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\nprovide: {}\n",
+			named:        `unexpected additional properties ["provide"]`,
 		},
 		{
 			name: "a driver name that is not snake case fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  drivers:\n    - name: GrpcDriver\n      type: HelloGrpcDriver\n" +
 				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n",
+			named: `/$defs/driver/properties/name: validating /$defs/snakeName: pattern: "GrpcDriver"`,
 		},
 		{
 			name: "a controller trait a driver requires that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  drivers:\n    - name: grpc\n      type: HelloGrpcDriver\n" +
 				"      module: grpc::driver::hello_grpc_driver\n      requires: [hello-controller]\n",
+			named: `/$defs/driver/properties/requires/allOf/0: validating /$defs/traitList: ` +
+				`validating /$defs/traitList/items: validating /$defs/rustIdent: pattern: "hello-controller"`,
 		},
 		{
 			name: "an adapter name that is not snake case fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: HelloGrpcClient\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n",
+			named: `/$defs/adapter/properties/name: validating /$defs/snakeName: pattern: "HelloGrpcClient"`,
 		},
 		{
 			name: "a port an adapter implements that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n      implements: hello-client\n",
+			named: `/$defs/adapter/properties/implements: validating /$defs/rustIdent: pattern: "hello-client"`,
 		},
 		{
 			name: "a driver type that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  drivers:\n    - name: grpc\n      type: hello-grpc-driver\n" +
 				"      module: grpc::driver::hello_grpc_driver\n      requires: [HelloController]\n",
+			named: `/$defs/driver/properties/type: validating /$defs/rustIdent: pattern: "hello-grpc-driver"`,
 		},
 		{
 			name: "an adapter type that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: hello-grpc-client\n" +
 				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n",
+			named: `/$defs/adapter/properties/type: validating /$defs/rustIdent: pattern: "hello-grpc-client"`,
 		},
 		{
 			name: "a controller impl that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  controllers:\n    - trait: HelloController\n" +
 				"      impl: hello-controller-impl\n      module: grpc::controller::hello_controller\n",
+			named: `/$defs/controller/properties/impl: validating /$defs/rustIdent: pattern: "hello-controller-impl"`,
 		},
 		{
 			name: "a port trait that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  ports:\n    - trait: greeting-store\n      module: rest::port::greeting_store\n",
+			named: `/$defs/port/properties/trait: validating /$defs/rustIdent: pattern: "greeting-store"`,
 		},
 		{
 			name: "a controller trait that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"provides:\n  controllers:\n    - trait: hello-controller\n" +
 				"      impl: HelloControllerImpl\n      module: grpc::controller::hello_controller\n",
+			named: `/$defs/controller/properties/trait: validating /$defs/rustIdent: pattern: "hello-controller"`,
 		},
 		{
 			name: "a port a controller consumes that is not a Rust ident fails the schema",
@@ -309,11 +335,15 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 				"provides:\n  controllers:\n    - trait: HelloController\n" +
 				"      impl: HelloControllerImpl\n      module: grpc::controller::hello_controller\n" +
 				"      ports: [greeting-store]\n",
+			named: `/$defs/controller/properties/ports: validating /$defs/traitList: ` +
+				`validating /$defs/traitList/items: validating /$defs/rustIdent: pattern: "greeting-store"`,
 		},
 		{
 			name: "a port a cell requires that is not a Rust ident fails the schema",
 			manifestYAML: "version: \"1\"\ncell: grpc\ngenerator: grpc-rust-tonic\n" +
 				"requires:\n  ports: [greeting-store]\n",
+			named: `/$defs/requires/properties/ports: validating /$defs/traitList: ` +
+				`validating /$defs/traitList/items: validating /$defs/rustIdent: pattern: "greeting-store"`,
 		},
 		{
 			name: "a config field name that is not snake case fails the schema",
@@ -321,6 +351,7 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 				"provides:\n  adapters:\n    - name: hello_grpc_client\n      type: HelloGrpcClient\n" +
 				"      module: grpc::adapter::hello_grpc_client\n      implements: HelloClient\n" +
 				"      config:\n        Addr: { type: string }\n",
+			named: `/$defs/config/propertyNames: validating /$defs/snakeName: pattern: "Addr"`,
 		},
 	}
 
@@ -331,6 +362,10 @@ func TestTheSchemaRefusesAManifestTheContractForbids(t *testing.T) {
 			err := resolved.Validate(instanceOf(t, tc.manifestYAML))
 			if err == nil {
 				t.Fatalf("validating against the schema returned no error")
+			}
+
+			if tc.named == "" {
+				t.Fatalf("the case names no text the refusal must carry, the schema returned %q", err.Error())
 			}
 
 			if !strings.Contains(err.Error(), tc.named) {
