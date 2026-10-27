@@ -134,6 +134,7 @@ const helloCases = `{
       "operation": "createGreeting",
       "input": { "name": "" },
       "expectedStatus": 422,
+      "expectedError": "Invalid",
       "expectedErrorSubstring": "name"
     },
     {
@@ -431,6 +432,7 @@ const errorOnlyCases = `{
       "operation": "createGreeting",
       "input": { "name": "" },
       "expectedStatus": 422,
+      "expectedError": "Invalid",
       "expectedErrorSubstring": "name"
     }
   ]

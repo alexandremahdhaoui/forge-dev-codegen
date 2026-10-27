@@ -380,6 +380,13 @@ func chooseArm(c VectorCase, op restrust.Operation, missingQuery, brokenBounds [
 		return arm{kind: armKindOK}, nil
 	}
 
+	if c.ExpectedError == "" && c.ExpectedStatus == op.InvalidStatus {
+		return arm{}, fmt.Errorf(
+			"reading vector %q: expectedStatus %d names no expectedError, and input misses no required query parameter and breaks no declared body bound, so the driver hands it to the controller, name the controller refusal in expectedError, which is %s for %d on %q",
+			c.Case, c.ExpectedStatus, taxonomy.Invalid().Variant, op.InvalidStatus, op.ID,
+		)
+	}
+
 	if c.ExpectedError != "" {
 		return namedArm(c, op)
 	}

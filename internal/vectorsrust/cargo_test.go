@@ -204,6 +204,7 @@ const cargoRestCases = `    {
       "operation": "createGreeting",
       "input": { "name": "" },
       "expectedStatus": 400,
+      "expectedError": "Invalid",
       "expectedErrorSubstring": "name"
     },
     {

@@ -302,6 +302,12 @@ func TestACaseWithoutATicketSubjectIsRefusedByTheVerifierBeforeTheDriverReadsIts
 	}
 }
 
+func TestAnInvalidStatusCaseWithNoExpectedErrorWhoseInputBreaksNoBoundIsRefusedByName(t *testing.T) {
+	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Songe"}, "expectedStatus": 422, "expectedErrorSubstring": "nickname"}]}`
+
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": expectedStatus 422 names no expectedError, and input misses no required query parameter and breaks no declared body bound, so the driver hands it to the controller, name the controller refusal in expectedError, which is Invalid for 422 on "signIn"`)
+}
+
 func TestEveryNewTaxonomyStatusArmsItsOwnControllerError(t *testing.T) {
 	cases := []struct {
 		name   string
