@@ -495,7 +495,7 @@ drivers:
 	}
 }
 
-func TestTheCrateRootSecretAdapterMarksOnlyItsSecretXSecretAndNeverItsField(t *testing.T) {
+func TestTheCrateRootSecretAdapterMarksItsSecretXSecretAndLeavesItsIdFieldUnmarked(t *testing.T) {
 	root := t.TempDir()
 
 	writeRestCell(t, root, "rest", guardedHelloSpec, restrust.SideServer, false)
