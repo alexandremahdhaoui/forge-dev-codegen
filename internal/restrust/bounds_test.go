@@ -237,6 +237,12 @@ func TestABoundDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			want:    `reading property "provider" of schema "SignInRequest": enum value 7 is not a string, every enum value of a string property is a string`,
 		},
 		{
+			name:    "a null enum value",
+			find:    "          enum: [google]\n",
+			replace: "          enum: [google, null]\n",
+			want:    `reading property "provider" of schema "SignInRequest": enum value null is not a string, every enum value of a string property is a string`,
+		},
+		{
 			name:    "an empty enum",
 			find:    "          enum: [google]\n",
 			replace: "          enum: []\n",

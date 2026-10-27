@@ -697,8 +697,13 @@ func parseBounds(s schema, ft fieldType) ([]string, error) {
 	enum := make([]string, 0, len(s.Enum))
 
 	for _, raw := range s.Enum {
-		var value string
-		if err := json.Unmarshal(raw, &value); err != nil {
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, fmt.Errorf("reading enum value %s: %w", raw, err)
+		}
+
+		value, isString := decoded.(string)
+		if !isString {
 			return nil, fmt.Errorf("enum value %s is not a string, every enum value of a string property is a string", raw)
 		}
 
