@@ -24,7 +24,7 @@ const (
 	ValuesFile     = "values.yaml"
 	DeploymentFile = "templates/zz_generated_deployment.yaml"
 	ServiceFile    = "templates/zz_generated_service.yaml"
-	SecretNameKey  = "secretName"
+	SecretNameKey  = "secret_name"
 )
 
 type Options struct {

@@ -26,14 +26,14 @@ chart-gen emits these files, relative to the cell.
 | File | Holds |
 |---|---|
 | `Chart.yaml` | the root name and description, the root version as both `version` and `appVersion` |
-| `values.yaml` | `image.repository` set to the binary, then one key per config key with no `x-secret` with its default, plus `secretName` when a key carries `x-secret` |
+| `values.yaml` | `image.repository` set to the binary, then one key per config key with no `x-secret` with its default, plus `secret_name` when a key carries `x-secret` |
 | `templates/zz_generated_deployment.yaml` | one Deployment, one replica, one env entry per config key named by its `x-env`, one container port per enabled driver with a protocol |
 
 A config key marked `x-secret: true` holds a secret value. The env entry
 of a secret key reads it with `valueFrom.secretKeyRef` from the Kubernetes
-Secret that `.Values.secretName` names, under a Secret key spelled like the
-config key. `secretName` has no default, and the render fails naming
-`secretName` while nobody sets it. A secret key gets no `values.yaml` entry
+Secret that `.Values.secret_name` names, under a Secret key spelled like the
+config key. `secret_name` has no default, and the render fails naming
+`secret_name` while nobody sets it. A secret key gets no `values.yaml` entry
 of its own, and the chart never renders a secret value. A person writes the
 Secret into the cluster once by hand. chart-gen refuses by name a config key
 that carries `x-secret` and a default, because git holds no secret.

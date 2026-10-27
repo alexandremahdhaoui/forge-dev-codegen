@@ -259,7 +259,7 @@ func TestValuesHoldOneKeyPerPlainSpecPropertyPlusTheImageRepositoryAndTheSecretN
 		"grpc_addr":                      "127.0.0.1:0",
 		"rest_addr":                      "127.0.0.1:0",
 		"tick_interval_ms":               float64(1000),
-		"secretName":                     nil,
+		"secret_name":                    nil,
 		"udp_addr":                       "127.0.0.1:0",
 		"world_client_endpoint":          nil,
 	}
@@ -300,12 +300,12 @@ func keys(m map[string]any) []string {
 
 const endpointRequired = `required "world_client_endpoint has no default, set it in values" .Values.world_client_endpoint`
 
-const secretNameRefusal = "secretName has no default, set it in values"
+const secretNameRefusal = "secret_name has no default, set it in values"
 
 const secretKeyRef = "- name: SONGE_HELLO_NODE_TICKET_VERIFIER_SECRET_SECRET\n" +
 	"              valueFrom:\n" +
 	"                secretKeyRef:\n" +
-	`                  name: {{ required "` + secretNameRefusal + `" .Values.secretName | quote }}` + "\n" +
+	`                  name: {{ required "` + secretNameRefusal + `" .Values.secret_name | quote }}` + "\n" +
 	"                  key: ticket_verifier_secret_secret"
 
 func portRead(key string) string {
@@ -357,7 +357,7 @@ func TestAPropertyMarkedXSecretIsReadFromTheNamedSecretAndHasNoValuesEntry(t *te
 		t.Errorf("values.yaml carries the secret key\n%s", files[chartgen.ValuesFile])
 	}
 
-	if !strings.Contains(files[chartgen.ValuesFile], "\nsecretName: null\n") {
+	if !strings.Contains(files[chartgen.ValuesFile], "\nsecret_name: null\n") {
 		t.Errorf("values.yaml does not list the secret name with no value\n%s", files[chartgen.ValuesFile])
 	}
 }
@@ -635,7 +635,7 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-const installableValues = "secretName=songe-hello-secrets,world_client_endpoint=http://world:9090,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070"
+const installableValues = "secret_name=songe-hello-secrets,world_client_endpoint=http://world:9090,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070"
 
 func helmTemplate(t *testing.T, set string) (string, error) {
 	t.Helper()
@@ -658,7 +658,7 @@ func helmTemplate(t *testing.T, set string) (string, error) {
 }
 
 func TestHelmTemplateRefusesARenderWithAValueNobodySetNamingTheKey(t *testing.T) {
-	out, err := helmTemplate(t, "secretName=songe-hello-secrets,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070")
+	out, err := helmTemplate(t, "secret_name=songe-hello-secrets,rest_addr=0.0.0.0:8080,grpc_addr=0.0.0.0:9090,udp_addr=0.0.0.0:7070")
 	if err == nil {
 		t.Fatalf("helm template rendered with world_client_endpoint set by nobody\n%s", out)
 	}
@@ -669,13 +669,13 @@ func TestHelmTemplateRefusesARenderWithAValueNobodySetNamingTheKey(t *testing.T)
 }
 
 func TestHelmTemplateRefusesARenderWithNoSecretNameNamingTheKey(t *testing.T) {
-	out, err := helmTemplate(t, strings.Replace(installableValues, "secretName=songe-hello-secrets,", "", 1))
+	out, err := helmTemplate(t, strings.Replace(installableValues, "secret_name=songe-hello-secrets,", "", 1))
 	if err == nil {
-		t.Fatalf("helm template rendered with secretName set by nobody\n%s", out)
+		t.Fatalf("helm template rendered with secret_name set by nobody\n%s", out)
 	}
 
 	if !strings.Contains(out, secretNameRefusal) {
-		t.Errorf("the refusal does not name secretName\n%s", out)
+		t.Errorf("the refusal does not name secret_name\n%s", out)
 	}
 }
 
@@ -741,7 +741,7 @@ func TestHelmTemplateRendersNoPortOfADisabledDriverAndNeverReadsItsAddr(t *testi
 }
 
 func TestHelmTemplateRendersNoServiceWhenEveryListeningDriverIsDisabled(t *testing.T) {
-	rendered, err := helmTemplate(t, "secretName=songe-hello-secrets,world_client_endpoint=http://world:9090,driver_rest=false,driver_grpc=false,driver_udp=false")
+	rendered, err := helmTemplate(t, "secret_name=songe-hello-secrets,world_client_endpoint=http://world:9090,driver_rest=false,driver_grpc=false,driver_udp=false")
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, rendered)
 	}
