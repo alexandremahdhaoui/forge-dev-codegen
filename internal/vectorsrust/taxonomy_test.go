@@ -270,13 +270,13 @@ func TestABodyBoundBreakExpectingAStatusOtherThanTheInvalidStatusIsRefused(t *te
 func TestANamedErrorOnACaseWhoseBodyBreaksABoundIsRefusedBecauseTheControllerNeverRuns(t *testing.T) {
 	vectors := `{"cases": [{"case": "a", "operation": "signIn", "input": {"provider": "google", "nickname": "Al"}, "expectedStatus": 422, "expectedError": "Invalid", "expectedErrorSubstring": "nickname"}]}`
 
-	refusedVectors(t, boundedSpec, vectors, `reading vector "a": expectedError "Invalid" names an error the controller answers, and input breaks the declared bound of the body property "nickname", so the driver refuses before the controller runs and the case names no expectedError`)
+	refusedVectors(t, boundedSpec, vectors, `reading vector "a": expectedError "Invalid" never happens, because input breaks the declared bound of the body property "nickname" and the driver refuses before the controller runs, so the case names no expectedError`)
 }
 
 func TestANamedErrorOnACaseMissingARequiredQueryParameterIsRefusedBecauseTheControllerNeverRuns(t *testing.T) {
 	vectors := `{"cases": [{"case": "a", "operation": "listGreetings", "input": {"limit": 10}, "expectedStatus": 422, "expectedError": "Invalid", "expectedErrorSubstring": "name"}]}`
 
-	refusedVectors(t, queriedSpec, vectors, `reading vector "a": expectedError "Invalid" names an error the controller answers, and input names no value for the required query parameter "name", so the driver refuses before the controller runs and the case names no expectedError`)
+	refusedVectors(t, queriedSpec, vectors, `reading vector "a": expectedError "Invalid" never happens, because input names no value for the required query parameter "name" and the driver refuses before the controller runs, so the case names no expectedError`)
 }
 
 func TestANamedErrorOutsideTheTaxonomyIsRefusedWithTheTaxonomyListEvenWhenTheDriverRefusesFirst(t *testing.T) {

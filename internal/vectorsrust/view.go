@@ -440,7 +440,7 @@ func refuseANamedErrorTheDriverNeverAnswers(c VectorCase, refusal string) error 
 		return nil
 	}
 
-	return fmt.Errorf("reading vector %q: expectedError %q names an error the controller answers, and %s, so the driver refuses before the controller runs and the case names no expectedError", c.Case, c.ExpectedError, refusal)
+	return fmt.Errorf("reading vector %q: expectedError %q never happens, because %s and the driver refuses before the controller runs, so the case names no expectedError", c.Case, c.ExpectedError, refusal)
 }
 
 func namedArm(c VectorCase, op restrust.Operation) (arm, error) {
