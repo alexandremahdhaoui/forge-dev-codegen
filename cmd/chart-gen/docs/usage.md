@@ -26,8 +26,9 @@ chart-gen emits these files, relative to the cell.
 | File | Holds |
 |---|---|
 | `Chart.yaml` | the root name and description, the root version as both `version` and `appVersion` |
-| `values.yaml` | `image.repository` set to the binary, then one key per config key with no `x-secret` with its default, plus `secret_name` when a key carries `x-secret` |
+| `values.yaml` | `image.repository` set to the binary, then one key set to its default for each config key that carries no `x-secret`, plus `secret_name` when a key carries `x-secret` |
 | `templates/zz_generated_deployment.yaml` | one Deployment, one replica, one env entry per config key named by its `x-env`, one container port per enabled driver with a protocol |
+| `templates/zz_generated_service.yaml` | one Service with one port per enabled driver with a protocol. Absent when no driver carries one, and renders nothing when every such driver is off |
 
 A config key marked `x-secret: true` holds a secret value. The env entry
 of a secret key reads it with `valueFrom.secretKeyRef` from the Kubernetes
@@ -37,7 +38,6 @@ config key. `secret_name` has no default, and the render fails naming
 of its own, and the chart never renders a secret value. A person writes the
 Secret into the cluster once by hand. chart-gen refuses by name a config key
 that carries `x-secret` and a default, because git holds no secret.
-| `templates/zz_generated_service.yaml` | one Service with one port per enabled driver with a protocol. Absent when no driver carries one, and renders nothing when every such driver is off |
 
 A container port and a service port read the text after the last colon of
 `.Values.<driver>_addr` at template time. hexagonal-rust's config key rule
@@ -45,8 +45,8 @@ composes the key from the driver name and the field `addr`, so the chart and
 the config schema spell it one way. A driver whose key the schema lacks is
 refused by name. A port that is not an integer above zero fails the render
 naming the key. A loopback host, `127.0.0.0/8`, `localhost` or `[::1]`,
-fails the render naming the key too, since nothing outside the pod reaches
-a loopback host.
+fails the render naming the key, since nothing outside the pod reaches a
+loopback host.
 
 A port renders only when `.Values.driver_<driver>` is on, in the Service and
 in the container alike, and the render never reads the addr of a driver that
