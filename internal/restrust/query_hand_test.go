@@ -889,6 +889,11 @@ func TestAJwksDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 			want:    `verifier port "GoogleVerifier" declares a jwks block while its adapters do not list jwks`,
 		},
 		{
+			name:    "a jwks verifier whose subject declares no email",
+			replace: "        - kind: verifier\n          name: GoogleVerifier\n          subject: Label\n          adapters: [jwks]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com]",
+			want:    `verifier port "GoogleVerifier" lists the jwks adapter and its subject "Label" declares no email property`,
+		},
+		{
 			name:    "a jwks block on a string port",
 			replace: "        - kind: string\n          name: GoogleAddress\n          value: GoogleIdentity\n          adapters: [setting]\n          jwks:\n            url: https://www.googleapis.com/oauth2/v3/certs\n            issuers: [https://accounts.google.com]",
 			want:    `string port "GoogleAddress" declares jwks, which belongs to the verifier kind`,

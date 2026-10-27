@@ -148,7 +148,7 @@ const ISSUER: &str = "https://accounts.google.com";
 
 struct KeySet {
     body: Value,
-    max_age: u64,
+    cache_control: String,
     fetches: AtomicUsize,
 }
 
@@ -162,15 +162,19 @@ async fn certs(State(set): State<Arc<KeySet>>) -> impl IntoResponse {
     set.fetches.fetch_add(1, Ordering::SeqCst);
 
     (
-        [(header::CACHE_CONTROL, format!("public, max-age={}", set.max_age))],
+        [(header::CACHE_CONTROL, set.cache_control.clone())],
         Json(set.body.clone()),
     )
 }
 
 async fn serve(body: Value, max_age: u64) -> (String, Arc<KeySet>) {
+    serve_with(body, format!("public, max-age={max_age}")).await
+}
+
+async fn serve_with(body: Value, cache_control: String) -> (String, Arc<KeySet>) {
     let set = Arc::new(KeySet {
         body,
-        max_age,
+        cache_control,
         fetches: AtomicUsize::new(0),
     });
 
@@ -384,6 +388,17 @@ async fn a_known_key_past_its_max_age_fetches_the_key_set_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_key_set_response_with_no_max_age_is_fetched_again_on_the_next_token() {
+    let (url, set) = serve_with(listed_keys(), "public".to_string()).await;
+    let verifier = verifier(url);
+
+    verifier.verify(&sign(&claims())).expect("verifying the first token");
+    verifier.verify(&sign(&claims())).expect("verifying the next token");
+
+    assert_eq!(set.fetches(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_token_naming_an_unknown_key_fetches_once_and_is_refused_naming_the_key() {
     let (url, set) = serve(listed_keys(), 3600).await;
 
@@ -391,6 +406,51 @@ async fn a_token_naming_an_unknown_key_fetches_once_and_is_refused_naming_the_ke
 
     assert!(reason.contains("rotated-out"), "{reason}");
     assert_eq!(set.fetches(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_whose_claims_cannot_be_read_is_refused_naming_the_claims() {
+    let (url, _set) = serve(listed_keys(), 3600).await;
+    let mut unreadable = claims();
+    unreadable["sub"] = json!(123);
+
+    let reason = refusal(verifier(url).verify(&sign(&unreadable)));
+
+    assert!(reason.contains("reading the token claims"), "{reason}");
+}
+
+fn listed_keys_and(extra: Value) -> Value {
+    json!({ "keys": [rsa_key(), extra] })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_naming_no_algorithm_is_refused_naming_the_key() {
+    let bare = json!({ "kty": "RSA", "kid": "bare-key", "use": "sig", "n": MODULUS, "e": "AQAB" });
+    let (url, _set) = serve(listed_keys_and(bare), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign_with("bare-key", &claims())));
+
+    assert!(reason.contains("names no algorithm") && reason.contains("bare-key"), "{reason}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_naming_an_algorithm_that_verifies_no_token_is_refused_naming_the_key() {
+    let encryption = json!({ "kty": "RSA", "kid": "encryption-key", "alg": "RSA-OAEP", "use": "enc", "n": MODULUS, "e": "AQAB" });
+    let (url, _set) = serve(listed_keys_and(encryption), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign_with("encryption-key", &claims())));
+
+    assert!(reason.contains("verifies no token") && reason.contains("encryption-key"), "{reason}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_that_cannot_be_read_is_refused_naming_the_key() {
+    let broken = json!({ "kty": "RSA", "kid": "broken-key", "alg": "RS256", "use": "sig", "n": "!!!", "e": "AQAB" });
+    let (url, _set) = serve(listed_keys_and(broken), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign_with("broken-key", &claims())));
+
+    assert!(reason.contains("reading the key") && reason.contains("broken-key"), "{reason}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -422,7 +482,62 @@ async fn a_key_set_that_cannot_be_fetched_is_a_call_failure_and_never_a_refusal(
 }
 `
 
-const jwksRustTestCount = "14 passed"
+const jwksRustTestCount = "19 passed"
+
+const clientRejectionTest = `use std::io::{Read, Write};
+
+use songe_identity::rest::adapter::identity_rest_client::{
+    IdentityRestClient, IdentityRestClientConfig,
+};
+use songe_identity::rest::port::identity_client::{IdentityClient, IdentityClientError};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejection_whose_body_cannot_be_read_fails_by_name_and_never_answers_an_empty_string() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("binding the rejecting server");
+    let addr = listener.local_addr().expect("reading the rejecting address");
+
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accepting the client");
+        let mut request = [0u8; 4096];
+        let _ = stream.read(&mut request);
+        let _ = stream.write_all(
+            b"HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{\"type\"",
+        );
+    });
+
+    let client = IdentityRestClient::new(IdentityRestClientConfig {
+        base_url: format!("http://{addr}"),
+    });
+
+    match client.get_identity() {
+        Err(IdentityClientError::Runtime { message, source, .. }) => {
+            assert!(message.contains("reading the rejection body"), "{message}");
+            assert!(source.is_some(), "{message}");
+        }
+        other => panic!("want a runtime failure naming the rejection body, got {other:?}"),
+    }
+}
+`
+
+func TestAClientRejectionWhoseBodyCannotBeReadFailsByNameAndNeverAnswersAnEmptyString(t *testing.T) {
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Fatalf("finding cargo, which this contract runs through and never skips: %v", err)
+	}
+
+	root := writeJwksCrate(t)
+
+	if err := os.WriteFile(filepath.Join(root, "tests", "client.rs"), []byte(clientRejectionTest), 0o644); err != nil {
+		t.Fatalf("writing the client test: %v", err)
+	}
+
+	mustCargo(t, cargo, root, "clippy", "--all-targets", "--", "-D", "warnings")
+
+	out := mustCargo(t, cargo, root, "test", "--test", "client")
+	if !strings.Contains(out, "1 passed") {
+		t.Fatalf("the client rejection contract never reported one passed test:\n%s", out)
+	}
+}
 
 func TestTheJwksVerifierHoldsItsContractAgainstALocalKeySet(t *testing.T) {
 	cargo, err := exec.LookPath("cargo")
@@ -443,7 +558,7 @@ func TestTheJwksVerifierHoldsItsContractAgainstALocalKeySet(t *testing.T) {
 func writeJwksCrate(t *testing.T) string {
 	t.Helper()
 
-	files, err := restrust.Generate([]byte(jwksSpec), restrust.Options{Service: "songe-identity"})
+	files, err := restrust.Generate([]byte(jwksSpec), restrust.Options{Service: "songe-identity", Side: restrust.SideBoth})
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}

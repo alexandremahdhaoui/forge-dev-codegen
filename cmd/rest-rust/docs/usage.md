@@ -226,7 +226,10 @@ The `jwks` adapter verifies a signed token against a JSON Web Key Set,
 the public keys an issuer such as Google publishes. A port that lists
 `jwks` carries a `jwks` block with a `url` and a list of `issuers`, and
 the engine refuses by name a block with no url, a block with no issuers,
-and a block on a port whose adapters do not list `jwks`. The adapter
+and a block on a port whose adapters do not list `jwks`. The engine also
+refuses by name a jwks port whose subject declares no `email` property,
+because a jwks verifier accepts a token only when its email claim is
+present. The adapter
 holds two config keys. The `audience` key has no default and is required
 only while the port choice names the `jwks` adapter. The `url` key
 defaults to the declared url so a test can point it at a local key set.

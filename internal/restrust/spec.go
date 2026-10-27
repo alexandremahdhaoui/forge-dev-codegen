@@ -1063,6 +1063,10 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 		}
 	}
 
+	if holds(*ref.Adapters, VerifierAdapterJwks) && !declaresProperty(subject, JwksEmailClaim) {
+		return HandPort{}, fmt.Errorf("reading %s: verifier port %q lists the jwks adapter and its subject %q declares no %s property, a jwks verifier accepts a token only when its %s claim is present", where, ref.Name, ref.Subject, JwksEmailClaim, JwksEmailClaim)
+	}
+
 	return HandPort{
 		Name:          ref.Name,
 		Snake:         rustname.Snake(ref.Name),
@@ -1081,6 +1085,18 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 			},
 		},
 	}, nil
+}
+
+const JwksEmailClaim = "email"
+
+func declaresProperty(t TypeDef, name string) bool {
+	for _, field := range t.Fields {
+		if field.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func jwksOf(where string, ref portRef) (jwksBlock, error) {

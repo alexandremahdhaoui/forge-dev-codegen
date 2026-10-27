@@ -2447,8 +2447,18 @@ fn transport(operation: &str, source: reqwest::Error) -> {{ $c.Error }} {
 
 async fn rejection(operation: &str, response: reqwest::Response) -> {{ $c.Error }} {
     let status = response.status();
-    let text = response.text().await.unwrap_or_default();
     let operation = operation.to_string();
+
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(source) => {
+            return {{ $c.Error }}::Runtime {
+                operation,
+                message: format!("{status}: reading the rejection body"),
+                source: Some(Box::new(source)),
+            };
+        }
+    };
 
     let Ok(wire) = serde_json::from_str::<RejectionWire>(&text) else {
         return {{ $c.Error }}::Runtime {
