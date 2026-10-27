@@ -38,8 +38,9 @@ The manifest lists what the cell provides and what it needs.
 A config field carries a type among string, integer, boolean and duration, plus
 `required`, `secret`, `default` and `description`. A field marked
 `secret: true` holds a secret value, and hexagonal-rust writes the mark into
-the config spec as `x-secret`. Names are snake case. Types and traits
-are Rust idents. Modules are `::` paths and every driver, adapter, controller
+the config spec as `x-secret`. Validation refuses by name a field marked
+`secret: true` that carries a default, because git holds no secret. Names
+are snake case. Types and traits are Rust idents. Modules are `::` paths and every driver, adapter, controller
 and port names one.
 
 An integer default above 2 to the 53 travels as a string, because JSON numbers

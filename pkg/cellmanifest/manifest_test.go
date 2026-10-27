@@ -286,6 +286,13 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 		Type: cellmanifest.FieldTypeString,
 	}
 
+	secretFieldWithADefault := exampleManifest()
+	secretFieldWithADefault.Provides.Drivers[0].Config["token"] = cellmanifest.ConfigField{
+		Type:    cellmanifest.FieldTypeString,
+		Secret:  true,
+		Default: "open",
+	}
+
 	absoluteBuildScript := exampleManifest()
 	absoluteBuildScript.BuildScript = "/zz_generated_build.rs"
 
@@ -509,6 +516,12 @@ func TestValidateNamesTheThingItRefuses(t *testing.T) {
 			name:     "a config field name that is not snake case is refused",
 			manifest: configFieldWithABadName,
 			message:  `config field "Addr" of driver "grpc" in cell "grpc" is not snake case`,
+		},
+		{
+			name:     "a config field marked secret that carries a default is refused",
+			manifest: secretFieldWithADefault,
+			message: `config field "token" of driver "grpc" in cell "grpc" is marked secret and carries a default, ` +
+				`a secret has no default because git holds no secret`,
 		},
 	}
 
