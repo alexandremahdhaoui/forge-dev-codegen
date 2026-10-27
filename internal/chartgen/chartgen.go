@@ -240,6 +240,10 @@ func envEntries(keys []string, properties map[string]specProperty) ([]envEntry, 
 			return nil, fmt.Errorf("config key %q carries no x-env, the loader reads it by that name", key)
 		}
 
+		if properties[key].Secret && properties[key].Default != nil {
+			return nil, fmt.Errorf("config key %q carries x-secret and a default, a secret has no default because git holds no secret", key)
+		}
+
 		if properties[key].Secret {
 			env = append(env, envEntry{Name: properties[key].Env, SecretKey: key})
 

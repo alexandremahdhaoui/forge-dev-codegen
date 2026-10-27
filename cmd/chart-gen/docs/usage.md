@@ -35,7 +35,8 @@ Secret that `.Values.secretName` names, under a Secret key spelled like the
 config key. `secretName` has no default, and the render fails naming
 `secretName` while nobody sets it. A secret key gets no `values.yaml` entry
 of its own, and the chart never renders a secret value. A person writes the
-Secret into the cluster once by hand.
+Secret into the cluster once by hand. chart-gen refuses by name a config key
+that carries `x-secret` and a default, because git holds no secret.
 | `templates/zz_generated_service.yaml` | one Service with one port per enabled driver with a protocol. Absent when no driver carries one, and renders nothing when every such driver is off |
 
 A container port and a service port read the text after the last colon of

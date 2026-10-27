@@ -546,6 +546,21 @@ func TestADriverWhoseAddrKeyIsMissingFromTheSpecIsRefusedByName(t *testing.T) {
 	}
 }
 
+func TestAPropertyMarkedXSecretThatCarriesADefaultIsRefusedByName(t *testing.T) {
+	_, err := chartgen.Generate(chartgen.Options{
+		OpenapiSpec: []byte(strings.Replace(configSpec, "          x-secret: true\n", "          x-secret: true\n          default: open\n", 1)),
+		SrcDir:      filepath.Join(crate(t, manifests()), "chart"),
+	})
+	if err == nil {
+		t.Fatal("a secret property with a default was accepted")
+	}
+
+	want := `config key "ticket_verifier_secret_secret" carries x-secret and a default`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("got %q, want it to contain %q", err.Error(), want)
+	}
+}
+
 func TestADriverWhoseEnabledKeyIsMissingFromTheSpecIsRefusedByName(t *testing.T) {
 	_, err := chartgen.Generate(chartgen.Options{
 		OpenapiSpec: []byte(strings.Replace(configSpec, "        driver_udp:", "        udp_enabled:", 1)),
