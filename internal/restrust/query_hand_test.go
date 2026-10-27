@@ -740,6 +740,182 @@ func TestAVerifierDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	}
 }
 
+const stringDeclaration = "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]"
+
+const addressSchema = `    Address:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          description: The host and port the combat service listens on.
+`
+
+func specWithACombatAddress(t *testing.T) string {
+	t.Helper()
+
+	spec := strings.Replace(queriedSpec, clockDeclaration, clockDeclaration+"\n"+stringDeclaration, 1)
+	if spec == queriedSpec {
+		t.Fatal("the clock declaration was never replaced, the fixture moved")
+	}
+
+	withSchema := strings.Replace(spec, "    Label:", addressSchema+"    Label:", 1)
+	if withSchema == spec {
+		t.Fatal("the Label schema was never found, the fixture moved")
+	}
+
+	return withSchema
+}
+
+func TestAStringPortIsDeclaredOnAnOperationAndTheEngineWritesItsTraitItsAdapterAndItsMock(t *testing.T) {
+	files, err := generatedByPath(t, specWithACombatAddress(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, files, "port/zz_generated_combat_address.rs",
+		"use crate::rest::types::address::Address;",
+		"pub enum CombatAddressError {",
+		"#[cfg_attr(test, mockall::automock)]",
+		"pub trait CombatAddress: Send + Sync {",
+		"fn get(&self) -> Result<Address, CombatAddressError>;",
+	)
+
+	wantIn(t, files, "adapter/zz_generated_combat_address_config.rs",
+		"use crate::rest::types::address::Address;",
+		"pub struct CombatAddressConfigConfig {\n    pub address: String,\n}",
+		"pub struct CombatAddressConfig {\n    value: Address,\n}",
+		"value: Address {\n                address: config.address,\n            },",
+		"impl CombatAddress for CombatAddressConfig {",
+		"fn get(&self) -> Result<Address, CombatAddressError> {\n        Ok(self.value.clone())\n    }",
+	)
+
+	wantIn(t, files, "adapter/mod.rs", "pub mod zz_generated_combat_address_config;")
+}
+
+func TestAStringPortReachesTheManifestAsAPortAnAdapterWithOneRequiredConfigKeyAndAControllerField(t *testing.T) {
+	files, err := generatedByPath(t, specWithACombatAddress(t))
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	m, err := cellmanifest.Parse([]byte(files[cellmanifest.FileName]))
+	if err != nil {
+		t.Fatalf("parsing the manifest: %v", err)
+	}
+
+	declared := false
+	for _, p := range m.Provides.Ports {
+		declared = declared || (p.Trait == "CombatAddress" && p.Module == "rest::port::combat_address")
+	}
+
+	if !declared {
+		t.Errorf("the manifest never declares the string port: %+v", m.Provides.Ports)
+	}
+
+	for _, required := range m.Requires.Ports {
+		if required == "CombatAddress" {
+			t.Error("the cell provides the config adapter and still requires the port")
+		}
+	}
+
+	controller := files["controller/zz_generated_greeting_controller.rs"]
+	if !strings.Contains(controller, "pub(crate) combat_address: Arc<dyn CombatAddress + Send + Sync>,") {
+		t.Errorf("the controller never held the string port:\n%s", controller)
+	}
+
+	for _, adapter := range m.Provides.Adapters {
+		if adapter.Name != "combat_address_config" {
+			continue
+		}
+
+		if adapter.Implements != "CombatAddress" {
+			t.Errorf("the config adapter implements %q", adapter.Implements)
+		}
+
+		want := map[string]cellmanifest.ConfigField{
+			"address": {
+				Type:        cellmanifest.FieldTypeString,
+				Required:    true,
+				Description: "The address the combat_address port answers, read as the Address it returns",
+			},
+		}
+
+		if !reflect.DeepEqual(adapter.Config, want) {
+			t.Errorf("the config adapter config = %+v, want one required string key with no default that is not secret", adapter.Config)
+		}
+
+		return
+	}
+
+	t.Fatalf("the manifest never provides the config adapter: %+v", m.Provides.Adapters)
+}
+
+func TestAStringDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		replace string
+		want    string
+	}{
+		{
+			name:    "no value",
+			replace: "        - kind: string\n          name: CombatAddress\n          adapters: [config]",
+			want:    `string port "CombatAddress" names no value, a string declaration names the one schema it answers`,
+		},
+		{
+			name:    "a value that is no schema",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Place\n          adapters: [config]",
+			want:    `string port "CombatAddress" names value "Place", which is not a schema of components.schemas`,
+		},
+		{
+			name:    "two properties",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: GreetingPage\n          adapters: [config]",
+			want:    `names value "GreetingPage", which declares 2 properties, a string port answers one string so its value carries one property`,
+		},
+		{
+			name:    "a property that is not a required string",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Instant\n          adapters: [config]",
+			want:    `names value "Instant", whose one property "epochMs" is of type integer, a string port reads one config string so that property is a required string`,
+		},
+		{
+			name:    "no adapters",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address",
+			want:    `string port "CombatAddress" names no adapters`,
+		},
+		{
+			name:    "an empty adapters list",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: []",
+			want:    `string port "CombatAddress" names an empty adapters list`,
+		},
+		{
+			name:    "an unknown adapter kind",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [env]",
+			want:    `adapter kind "env", a string adapter is one of config`,
+		},
+		{
+			name:    "declared methods",
+			replace: "        - kind: string\n          name: CombatAddress\n          value: Address\n          adapters: [config]\n          methods:\n            - name: get\n              reply: Address",
+			want:    "declares methods, a string answers get and the engine writes them",
+		},
+		{
+			name:    "the name of a store port",
+			replace: "        - kind: string\n          name: GreetingStore\n          value: Address\n          adapters: [config]",
+			want:    "takes the name of a store or subscribe port",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broken := strings.Replace(specWithACombatAddress(t), stringDeclaration, tc.replace, 1)
+
+			_, err := restrust.Generate([]byte(broken), restrust.Options{Service: "songe-hello"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error carrying %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestAClockDeclarationIsRefusedWhenItBreaksTheContract(t *testing.T) {
 	cases := []struct {
 		name    string

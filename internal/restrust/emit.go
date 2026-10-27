@@ -500,6 +500,12 @@ func handAdapterConfig(h handPortView, a handAdapterView) map[string]cellmanifes
 			Default:     0,
 			Description: "The moment the " + h.Snake + " memory clock starts at, read as the " + h.Instant + " the port answers",
 		}
+	case h.Kind == StringPortKind && a.Kind == StringAdapterConfig:
+		config[h.ValueField] = cellmanifest.ConfigField{
+			Type:        cellmanifest.FieldTypeString,
+			Required:    true,
+			Description: "The " + h.ValueField + " the " + h.Snake + " port answers, read as the " + h.Value + " it returns",
+		}
 	case h.Kind == VerifierPortKind && a.Kind == VerifierAdapterSecret:
 		config["secret"] = cellmanifest.ConfigField{
 			Type:        cellmanifest.FieldTypeString,
@@ -1478,6 +1484,38 @@ impl {{ $p.Name }} for {{ $a.Struct }} {
             })?;
 
         Ok({{ $p.Span }} { {{ $p.SpanField }} })
+    }
+}
+{{ end -}}
+
+{{- define "string_config" -}}
+{{ .Header }}
+{{ $p := .Port }}{{ $a := .Adapter }}
+use {{ .CratePath }}port::{{ $p.PortSnake }}::{{ "{" }}{{ $p.Name }}, {{ $p.Error }}{{ "}" }};
+use {{ .CratePath }}types::{{ $p.ValueSnake }}::{{ $p.Value }};
+
+#[derive(Default)]
+pub struct {{ $a.ConfigStruct }} {
+    pub {{ $p.ValueField }}: String,
+}
+
+pub struct {{ $a.Struct }} {
+    value: {{ $p.Value }},
+}
+
+impl {{ $a.Struct }} {
+    pub fn new(config: {{ $a.ConfigStruct }}) -> Self {
+        Self {
+            value: {{ $p.Value }} {
+                {{ $p.ValueField }}: config.{{ $p.ValueField }},
+            },
+        }
+    }
+}
+
+impl {{ $p.Name }} for {{ $a.Struct }} {
+    fn get(&self) -> Result<{{ $p.Value }}, {{ $p.Error }}> {
+        Ok(self.value.clone())
     }
 }
 {{ end -}}

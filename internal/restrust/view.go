@@ -167,6 +167,9 @@ type handPortView struct {
 	Subject       string
 	SubjectSnake  string
 	SubjectFields []subjectFieldView
+	Value         string
+	ValueSnake    string
+	ValueField    string
 	Adapters      []handAdapterView
 	Imports      []importView
 	Methods      []handMethodView
@@ -724,6 +727,9 @@ func buildHandPortView(h HandPort) handPortView {
 		SpanField:    h.SpanField,
 		Subject:      h.Subject,
 		SubjectSnake: rustname.Snake(h.Subject),
+		Value:        h.Value,
+		ValueSnake:   rustname.Snake(h.Value),
+		ValueField:   h.ValueField,
 	}
 
 	for _, field := range h.SubjectFields {

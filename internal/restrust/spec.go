@@ -82,6 +82,7 @@ type portRef struct {
 	Instant  string
 	Span     string
 	Subject  string
+	Value    string
 	Adapters *[]string
 }
 
@@ -106,6 +107,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 		Instant  string       `json:"instant"`
 		Span     string       `json:"span"`
 		Subject  string       `json:"subject"`
+		Value    string       `json:"value"`
 		Adapters *[]string    `json:"adapters"`
 	}
 
@@ -120,6 +122,7 @@ func (p *portRef) UnmarshalJSON(raw []byte) error {
 	p.Instant = declared.Instant
 	p.Span = declared.Span
 	p.Subject = declared.Subject
+	p.Value = declared.Value
 	p.Adapters = declared.Adapters
 
 	return nil
@@ -216,6 +219,8 @@ type HandPort struct {
 	SpanField     string
 	Subject       string
 	SubjectFields []Field
+	Value         string
+	ValueField    string
 	Adapters      []string
 	Methods       []HandMethod
 }
@@ -284,6 +289,7 @@ const SubscribePortSuffix = "Subscribe"
 
 const (
 	ClockPortKind    = "clock"
+	StringPortKind   = "string"
 	VerifierPortKind = "verifier"
 )
 
@@ -292,14 +298,20 @@ const (
 	ClockAdapterSystem = "system"
 )
 
+const StringAdapterConfig = "config"
+
 const VerifierAdapterSecret = "secret"
 
 func PortKinds() []string {
-	return []string{ClockPortKind, VerifierPortKind}
+	return []string{ClockPortKind, StringPortKind, VerifierPortKind}
 }
 
 func ClockAdapterKinds() []string {
 	return []string{ClockAdapterMemory, ClockAdapterSystem}
+}
+
+func StringAdapterKinds() []string {
+	return []string{StringAdapterConfig}
 }
 
 func VerifierAdapterKinds() []string {
@@ -812,6 +824,8 @@ func parseHandPort(where string, ref portRef, byName map[string]TypeDef, storeNa
 	switch ref.Kind {
 	case ClockPortKind:
 		return parseClockPort(where, ref, byName, storeNames)
+	case StringPortKind:
+		return parseStringPort(where, ref, byName, storeNames)
 	case VerifierPortKind:
 		return parseVerifierPort(where, ref, byName, storeNames)
 	default:
@@ -850,12 +864,12 @@ func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeN
 		return HandPort{}, err
 	}
 
-	instantField, err := clockField(where, ref.Name, "instant", ref.Instant, byName)
+	instantField, err := oneFieldOf(where, ref, "instant", ref.Instant, clockFieldRule, byName)
 	if err != nil {
 		return HandPort{}, err
 	}
 
-	spanField, err := clockField(where, ref.Name, "span", ref.Span, byName)
+	spanField, err := oneFieldOf(where, ref, "span", ref.Span, clockFieldRule, byName)
 	if err != nil {
 		return HandPort{}, err
 	}
@@ -882,6 +896,27 @@ func parseClockPort(where string, ref portRef, byName map[string]TypeDef, storeN
 				Reply:  ref.Span,
 			},
 		},
+	}, nil
+}
+
+func parseStringPort(where string, ref portRef, byName map[string]TypeDef, storeNames map[string]bool) (HandPort, error) {
+	if err := checkPortShape(where, ref, StringAdapterKinds(), storeNames, "answers get"); err != nil {
+		return HandPort{}, err
+	}
+
+	valueField, err := oneFieldOf(where, ref, "value", ref.Value, stringFieldRule, byName)
+	if err != nil {
+		return HandPort{}, err
+	}
+
+	return HandPort{
+		Name:       ref.Name,
+		Snake:      rustname.Snake(ref.Name),
+		Kind:       StringPortKind,
+		Value:      ref.Value,
+		ValueField: valueField,
+		Adapters:   *ref.Adapters,
+		Methods:    []HandMethod{{Name: "get", Ident: "get", Reply: ref.Value}},
 	}, nil
 }
 
@@ -927,23 +962,44 @@ func parseVerifierPort(where string, ref portRef, byName map[string]TypeDef, sto
 	}, nil
 }
 
-func clockField(where, port, label, name string, byName map[string]TypeDef) (string, error) {
+type oneFieldRule struct {
+	fieldKind string
+	names     string
+	carries   string
+	holds     string
+}
+
+var clockFieldRule = oneFieldRule{
+	fieldKind: "integer",
+	names:     "a clock declaration names the two schemas it speaks",
+	carries:   "a clock reads and writes one number",
+	holds:     "a clock counts in whole units",
+}
+
+var stringFieldRule = oneFieldRule{
+	fieldKind: "string",
+	names:     "a string declaration names the one schema it answers",
+	carries:   "a string port answers one string",
+	holds:     "a string port reads one config string",
+}
+
+func oneFieldOf(where string, ref portRef, label, name string, rule oneFieldRule, byName map[string]TypeDef) (string, error) {
 	if name == "" {
-		return "", fmt.Errorf("reading %s: clock port %q names no %s, a clock declaration names the two schemas it speaks", where, port, label)
+		return "", fmt.Errorf("reading %s: %s port %q names no %s, %s", where, ref.Kind, ref.Name, label, rule.names)
 	}
 
 	declared, ok := byName[name]
 	if !ok {
-		return "", fmt.Errorf("reading %s: clock port %q names %s %q, which is not a schema of components.schemas", where, port, label, name)
+		return "", fmt.Errorf("reading %s: %s port %q names %s %q, which is not a schema of components.schemas", where, ref.Kind, ref.Name, label, name)
 	}
 
 	if len(declared.Fields) != 1 {
-		return "", fmt.Errorf("reading %s: clock port %q names %s %q, which declares %d properties, a clock reads and writes one number so its %s carries one property and the engine takes that property's name from the schema", where, port, label, name, len(declared.Fields), label)
+		return "", fmt.Errorf("reading %s: %s port %q names %s %q, which declares %d properties, %s so its %s carries one property and the engine takes that property's name from the schema", where, ref.Kind, ref.Name, label, name, len(declared.Fields), rule.carries, label)
 	}
 
 	field := declared.Fields[0]
-	if field.Type.Kind != "integer" || field.Optional {
-		return "", fmt.Errorf("reading %s: clock port %q names %s %q, whose one property %q is %s, a clock counts in whole units so that property is a required integer", where, port, label, name, field.Name, describeClockField(field))
+	if field.Type.Kind != rule.fieldKind || field.Optional {
+		return "", fmt.Errorf("reading %s: %s port %q names %s %q, whose one property %q is %s, %s so that property is a required %s", where, ref.Kind, ref.Name, label, name, field.Name, describeField(field), rule.holds, rule.fieldKind)
 	}
 
 	return field.Ident, nil
@@ -959,7 +1015,7 @@ func holds(declared []string, name string) bool {
 	return false
 }
 
-func describeClockField(field Field) string {
+func describeField(field Field) string {
 	if field.Optional {
 		return "optional and of type " + field.Type.Kind
 	}

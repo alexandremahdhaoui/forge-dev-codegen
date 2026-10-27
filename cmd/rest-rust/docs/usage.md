@@ -119,7 +119,7 @@ parameters:
 of an `x-store` schema, the subscribe port of the operation's own
 stream, a port some operation declares, or a port another cell
 provides. A declaration is an object naming a `kind`. The declared
-kinds are `clock` and `verifier`.
+kinds are `clock`, `string` and `verifier`.
 
 ```yaml
 x-ports:
@@ -157,6 +157,15 @@ A clock names two schemas and each carries one required integer
 property. The engine takes the field names from those schemas, so the
 declaration owns them and the engine invents nothing. A schema carrying
 any other shape is refused by name.
+
+A `string` port answers one string the node reads from configuration.
+The declaration names its schema under `value`, and that schema carries
+exactly one required string property. The trait carries one method,
+`fn get(&self) -> Result<<Value>, <Name>Error>`. The only `string`
+adapter is `config`, which holds one config key named after that
+property. The key is required with no default and is not secret, so a
+node left without it refuses to start by name. The `get` method answers
+a clone of the value the node read at start.
 
 A `verifier` takes an offered string and answers a subject or refuses.
 
