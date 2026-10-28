@@ -89,7 +89,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
-use axum::http::header;
+use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -178,17 +178,34 @@ async fn serve_with(body: Value, cache_control: String) -> (String, Arc<KeySet>)
         fetches: AtomicUsize::new(0),
     });
 
+    let url = listen(Router::new().route("/certs", get(certs)).with_state(set.clone())).await;
+
+    (url, set)
+}
+
+async fn answer(status: StatusCode, body: &'static str) -> String {
+    listen(Router::new().route("/certs", get(move || async move { (status, body) }))).await
+}
+
+async fn listen(app: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("binding the key set server");
     let addr = listener.local_addr().expect("reading the key set address");
-    let app = Router::new()
-        .route("/certs", get(certs))
-        .with_state(set.clone());
 
     tokio::spawn(async move { axum::serve(listener, app).await });
 
-    (format!("http://{addr}/certs"), set)
+    format!("http://{addr}/certs")
+}
+
+fn without(claim: &str) -> Value {
+    let mut stripped = claims();
+    stripped
+        .as_object_mut()
+        .expect("reading the claims")
+        .remove(claim);
+
+    stripped
 }
 
 fn rsa_key() -> Value {
@@ -321,6 +338,33 @@ async fn a_token_carrying_no_audience_is_refused_naming_the_claim() {
     let reason = refusal(verifier(url).verify(&sign(&unaddressed)));
 
     assert!(reason.contains("carries no aud claim"), "{reason}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_carrying_no_expiry_is_refused_naming_the_exp_claim() {
+    let (url, _set) = serve(listed_keys(), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign(&without("exp"))));
+
+    assert!(reason.contains("carries no exp claim"), "{reason}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_carrying_no_issuer_is_refused_naming_the_iss_claim() {
+    let (url, _set) = serve(listed_keys(), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign(&without("iss"))));
+
+    assert!(reason.contains("carries no iss claim"), "{reason}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_carrying_no_email_verified_claim_is_refused() {
+    let (url, _set) = serve(listed_keys(), 3600).await;
+
+    let reason = refusal(verifier(url).verify(&sign(&without("email_verified"))));
+
+    assert!(reason.contains("email_verified"), "{reason}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -469,20 +513,30 @@ async fn a_symmetric_key_in_the_set_is_refused() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_key_set_that_cannot_be_fetched_is_a_call_failure_and_never_a_refusal() {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("binding a port to close");
-    let addr = closed.local_addr().expect("reading the closed address");
-    drop(closed);
+    let url = answer(StatusCode::INTERNAL_SERVER_ERROR, "").await;
 
-    let answer = verifier(format!("http://{addr}/certs")).verify(&sign(&claims()));
+    let verdict = verifier(url).verify(&sign(&claims()));
 
     assert!(
-        matches!(answer, Err(GoogleVerifierError::Call { .. })),
-        "{answer:?}"
+        matches!(verdict, Err(GoogleVerifierError::Call { .. })),
+        "{verdict:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_set_response_whose_body_is_not_json_is_a_call_failure_and_never_a_refusal() {
+    let url = answer(StatusCode::OK, "this body is not a key set").await;
+
+    let verdict = verifier(url).verify(&sign(&claims()));
+
+    assert!(
+        matches!(verdict, Err(GoogleVerifierError::Call { .. })),
+        "{verdict:?}"
     );
 }
 `
 
-const jwksRustTestCount = "19 passed"
+const jwksRustTestCount = "23 passed"
 
 const clientRejectionTest = `use std::io::{Read, Write};
 
