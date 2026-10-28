@@ -183,8 +183,15 @@ async fn serve_with(body: Value, cache_control: String) -> (String, Arc<KeySet>)
     (url, set)
 }
 
-async fn answer(status: StatusCode, body: &'static str) -> String {
-    listen(Router::new().route("/certs", get(move || async move { (status, body) }))).await
+async fn answer(status: StatusCode, body: String) -> String {
+    listen(Router::new().route(
+        "/certs",
+        get(move || {
+            let body = body.clone();
+            async move { (status, body) }
+        }),
+    ))
+    .await
 }
 
 async fn listen(app: Router) -> String {
@@ -513,7 +520,7 @@ async fn a_symmetric_key_in_the_set_is_refused() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_key_set_that_cannot_be_fetched_is_a_call_failure_and_never_a_refusal() {
-    let url = answer(StatusCode::INTERNAL_SERVER_ERROR, "").await;
+    let url = answer(StatusCode::INTERNAL_SERVER_ERROR, listed_keys().to_string()).await;
 
     let verdict = verifier(url).verify(&sign(&claims()));
 
@@ -525,7 +532,7 @@ async fn a_key_set_that_cannot_be_fetched_is_a_call_failure_and_never_a_refusal(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_key_set_response_whose_body_is_not_json_is_a_call_failure_and_never_a_refusal() {
-    let url = answer(StatusCode::OK, "this body is not a key set").await;
+    let url = answer(StatusCode::OK, "this body is not a key set".to_string()).await;
 
     let verdict = verifier(url).verify(&sign(&claims()));
 
