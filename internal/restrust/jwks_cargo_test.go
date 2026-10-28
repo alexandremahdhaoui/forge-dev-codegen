@@ -460,6 +460,19 @@ async fn a_token_naming_an_unknown_key_fetches_once_and_is_refused_naming_the_ke
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_tokens_naming_two_unknown_key_ids_inside_one_max_age_window_cause_one_fetch() {
+    let (url, set) = serve(listed_keys(), 3600).await;
+    let verifier = verifier(url);
+
+    let first = refusal(verifier.verify(&sign_with("rotated-out", &claims())));
+    let second = refusal(verifier.verify(&sign_with("never-published", &claims())));
+
+    assert!(first.contains("rotated-out"), "{first}");
+    assert!(second.contains("never-published"), "{second}");
+    assert_eq!(set.fetches(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_token_whose_claims_cannot_be_read_is_refused_naming_the_claims() {
     let (url, _set) = serve(listed_keys(), 3600).await;
     let mut unreadable = claims();
@@ -543,7 +556,7 @@ async fn a_key_set_response_whose_body_is_not_json_is_a_call_failure_and_never_a
 }
 `
 
-const jwksRustTestCount = "23 passed"
+const jwksRustTestCount = "24 passed"
 
 const clientRejectionTest = `use std::io::{Read, Write};
 

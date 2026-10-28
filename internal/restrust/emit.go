@@ -1623,16 +1623,16 @@ struct {{ $a.Struct }}Claims {
     email_verified: Option<bool>,
 }
 
-struct CachedKey {
-    jwk: Jwk,
-    expires: Instant,
+struct KeyCache {
+    keys: HashMap<String, Jwk>,
+    fresh_until: Instant,
 }
 
 pub struct {{ $a.Struct }} {
     audience: String,
     url: String,
     client: reqwest::Client,
-    keys: Mutex<HashMap<String, CachedKey>>,
+    keys: Mutex<KeyCache>,
 }
 
 impl {{ $a.Struct }} {
@@ -1641,7 +1641,10 @@ impl {{ $a.Struct }} {
             audience: config.audience,
             url: config.url,
             client: reqwest::Client::new(),
-            keys: Mutex::new(HashMap::new()),
+            keys: Mutex::new(KeyCache {
+                keys: HashMap::new(),
+                fresh_until: Instant::now(),
+            }),
         }
     }
 
@@ -1649,39 +1652,41 @@ impl {{ $a.Struct }} {
         tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
     }
 
-    fn cache(&self) -> Result<MutexGuard<'_, HashMap<String, CachedKey>>, {{ $p.Error }}> {
+    fn cache(&self) -> Result<MutexGuard<'_, KeyCache>, {{ $p.Error }}> {
         self.keys.lock().map_err(|_| {{ $p.Error }}::Call {
             method: "verify".to_string(),
             source: "locking the key cache: poisoned".into(),
         })
     }
 
-    fn cached(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
-        let now = Instant::now();
+    fn window_open(&self) -> Result<bool, {{ $p.Error }}> {
+        Ok(Instant::now() < self.cache()?.fresh_until)
+    }
 
-        Ok(self
-            .cache()?
+    fn cached(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
+        let cache = self.cache()?;
+
+        Ok(cache
+            .keys
             .get(kid)
-            .filter(|cached| now < cached.expires)
-            .map(|cached| cached.jwk.clone()))
+            .filter(|_| Instant::now() < cache.fresh_until)
+            .cloned())
     }
 
     fn fetched(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
         let (set, max_age) = self.block(self.fetch())?;
-        let expires = Instant::now() + max_age;
 
-        let fresh: HashMap<String, CachedKey> = set
+        let keys: HashMap<String, Jwk> = set
             .keys
             .into_iter()
-            .filter_map(|jwk| {
-                let kid = jwk.common.key_id.clone()?;
-
-                Some((kid, CachedKey { jwk, expires }))
-            })
+            .filter_map(|jwk| Some((jwk.common.key_id.clone()?, jwk)))
             .collect();
 
-        let found = fresh.get(kid).map(|cached| cached.jwk.clone());
-        *self.cache()? = fresh;
+        let found = keys.get(kid).cloned();
+        *self.cache()? = KeyCache {
+            keys,
+            fresh_until: Instant::now() + max_age,
+        };
 
         Ok(found)
     }
@@ -1709,11 +1714,11 @@ impl {{ $a.Struct }} {
 
     fn key(&self, kid: &str) -> Result<(DecodingKey, Algorithm), {{ $p.Error }}> {
         let jwk = match self.cached(kid)? {
-            Some(jwk) => jwk,
-            None => self
-                .fetched(kid)?
-                .ok_or_else(|| refused(format!("no published key carries the key id {kid:?}")))?,
-        };
+            Some(jwk) => Some(jwk),
+            None if self.window_open()? => None,
+            None => self.fetched(kid)?,
+        }
+        .ok_or_else(|| refused(format!("no published key carries the key id {kid:?}")))?;
 
         if let AlgorithmParameters::OctetKey(_) = jwk.algorithm {
             return Err(refused(format!(
