@@ -1623,9 +1623,14 @@ struct {{ $a.Struct }}Claims {
     email_verified: Option<bool>,
 }
 
+struct CachedKey {
+    jwk: Jwk,
+    expires: Instant,
+}
+
 struct KeyCache {
-    keys: HashMap<String, Jwk>,
-    fresh_until: Instant,
+    keys: HashMap<String, CachedKey>,
+    fetch_blocked_until: Instant,
 }
 
 pub struct {{ $a.Struct }} {
@@ -1643,7 +1648,7 @@ impl {{ $a.Struct }} {
             client: reqwest::Client::new(),
             keys: Mutex::new(KeyCache {
                 keys: HashMap::new(),
-                fresh_until: Instant::now(),
+                fetch_blocked_until: Instant::now(),
             }),
         }
     }
@@ -1660,36 +1665,38 @@ impl {{ $a.Struct }} {
     }
 
     fn window_open(&self) -> Result<bool, {{ $p.Error }}> {
-        Ok(Instant::now() < self.cache()?.fresh_until)
+        Ok(Instant::now() < self.cache()?.fetch_blocked_until)
     }
 
     fn cached(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
-        let cache = self.cache()?;
+        let now = Instant::now();
 
-        Ok(cache
+        Ok(self
+            .cache()?
             .keys
             .get(kid)
-            .filter(|_| Instant::now() < cache.fresh_until)
-            .cloned())
+            .filter(|cached| now < cached.expires)
+            .map(|cached| cached.jwk.clone()))
     }
 
     fn fetched(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
         let fetch = self.block(self.fetch());
         if fetch.is_err() {
-            self.cache()?.fresh_until = Instant::now() + Duration::from_secs(LEEWAY_SECONDS);
+            self.cache()?.fetch_blocked_until = Instant::now() + Duration::from_secs(LEEWAY_SECONDS);
         }
         let (set, max_age) = fetch?;
+        let expires = Instant::now() + max_age;
 
-        let keys: HashMap<String, Jwk> = set
+        let keys: HashMap<String, CachedKey> = set
             .keys
             .into_iter()
-            .filter_map(|jwk| Some((jwk.common.key_id.clone()?, jwk)))
+            .filter_map(|jwk| Some((jwk.common.key_id.clone()?, CachedKey { jwk, expires })))
             .collect();
 
-        let found = keys.get(kid).cloned();
+        let found = keys.get(kid).map(|cached| cached.jwk.clone());
         *self.cache()? = KeyCache {
             keys,
-            fresh_until: Instant::now() + max_age,
+            fetch_blocked_until: expires,
         };
 
         Ok(found)

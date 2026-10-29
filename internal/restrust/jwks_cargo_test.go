@@ -495,6 +495,35 @@ async fn two_unknown_key_ids_while_the_key_set_url_answers_500_cause_one_fetch()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_key_past_its_max_age_is_refused_while_the_key_set_url_answers_500() {
+    let failing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let answers = failing.clone();
+    let url = listen(Router::new().route(
+        "/certs",
+        get(move || {
+            let status = if answers.load(Ordering::SeqCst) {
+                StatusCode::INTERNAL_SERVER_ERROR
+            } else {
+                StatusCode::OK
+            };
+            async move { (status, [(header::CACHE_CONTROL, "public, max-age=1")], Json(listed_keys())) }
+        }),
+    ))
+    .await;
+    let verifier = verifier(url);
+
+    verifier.verify(&sign(&claims())).expect("verifying within the max age");
+    failing.store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
+    let first = verifier.verify(&sign(&claims()));
+    let second = refusal(verifier.verify(&sign(&claims())));
+
+    assert!(matches!(first, Err(GoogleVerifierError::Call { .. })), "{first:?}");
+    assert!(second.contains(KEY_ID), "{second}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_token_whose_claims_cannot_be_read_is_refused_naming_the_claims() {
     let (url, _set) = serve(listed_keys(), 3600).await;
     let mut unreadable = claims();
@@ -578,7 +607,7 @@ async fn a_key_set_response_whose_body_is_not_json_is_a_call_failure_and_never_a
 }
 `
 
-const jwksRustTestCount = "25 passed"
+const jwksRustTestCount = "26 passed"
 
 const clientRejectionTest = `use std::io::{Read, Write};
 
