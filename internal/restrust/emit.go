@@ -857,7 +857,9 @@ use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port
 use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
 {{- if $s.Publishes }}
 use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
+{{- if ne $s.Publishes.Name $s.Name }}
 use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
+{{- end }}
 {{- end }}
 
 const SCHEMA: &str = r#"{{ $s.Schema }}"#;
@@ -1186,7 +1188,9 @@ use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port
 use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
 {{- if $s.Publishes }}
 use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
+{{- if ne $s.Publishes.Name $s.Name }}
 use {{ .CratePath }}types::{{ $s.Publishes.Snake }}::{{ $s.Publishes.Name }};
+{{- end }}
 {{- end }}
 
 pub struct {{ $s.MemoryConfigStruct }} {

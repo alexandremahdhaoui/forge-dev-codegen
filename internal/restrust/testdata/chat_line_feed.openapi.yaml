@@ -1,0 +1,43 @@
+openapi: 3.1.0
+info:
+  title: Chat API
+  version: 1.0.0
+paths:
+  /chats/{chatId}/lines:
+    get:
+      operationId: streamChatLines
+      x-controller: chat
+      x-ports: [ChatLineStore]
+      x-stream:
+        from: ChatLine
+        key: chatId
+        adapters: [memory]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The lines of one chat
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ChatLine"
+components:
+  schemas:
+    ChatLine:
+      type: object
+      x-store:
+        key: lineId
+        lookups: []
+        adapters: [sqlite, memory]
+      required: [lineId, chatId, text]
+      properties:
+        lineId:
+          type: string
+        chatId:
+          type: string
+        text:
+          type: string
