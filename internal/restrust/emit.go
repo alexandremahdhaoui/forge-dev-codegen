@@ -1674,7 +1674,11 @@ impl {{ $a.Struct }} {
     }
 
     fn fetched(&self, kid: &str) -> Result<Option<Jwk>, {{ $p.Error }}> {
-        let (set, max_age) = self.block(self.fetch())?;
+        let fetch = self.block(self.fetch());
+        if fetch.is_err() {
+            self.cache()?.fresh_until = Instant::now() + Duration::from_secs(LEEWAY_SECONDS);
+        }
+        let (set, max_age) = fetch?;
 
         let keys: HashMap<String, Jwk> = set
             .keys

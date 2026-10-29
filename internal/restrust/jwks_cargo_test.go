@@ -473,6 +473,28 @@ async fn two_tokens_naming_two_unknown_key_ids_inside_one_max_age_window_cause_o
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_unknown_key_ids_while_the_key_set_url_answers_500_cause_one_fetch() {
+    let fetches = Arc::new(AtomicUsize::new(0));
+    let counted = fetches.clone();
+    let url = listen(Router::new().route(
+        "/certs",
+        get(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            async { StatusCode::INTERNAL_SERVER_ERROR }
+        }),
+    ))
+    .await;
+    let verifier = verifier(url);
+
+    let first = verifier.verify(&sign_with("rotated-out", &claims()));
+    let second = refusal(verifier.verify(&sign_with("never-published", &claims())));
+
+    assert!(matches!(first, Err(GoogleVerifierError::Call { .. })), "{first:?}");
+    assert!(second.contains("never-published"), "{second}");
+    assert_eq!(fetches.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_token_whose_claims_cannot_be_read_is_refused_naming_the_claims() {
     let (url, _set) = serve(listed_keys(), 3600).await;
     let mut unreadable = claims();
@@ -556,7 +578,7 @@ async fn a_key_set_response_whose_body_is_not_json_is_a_call_failure_and_never_a
 }
 `
 
-const jwksRustTestCount = "24 passed"
+const jwksRustTestCount = "25 passed"
 
 const clientRejectionTest = `use std::io::{Read, Write};
 
