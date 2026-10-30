@@ -263,10 +263,10 @@ func serverSteps(v view, add adder, mount mounter, userMods map[string][]string)
 		})
 
 		if e.HasMemory {
-			mount("adapter", modEntry{Module: "zz_generated_" + e.MemoryModule, Alias: e.MemoryModule})
+			mount("adapter", modEntry{Module: "zz_generated_" + e.MemoryAdapterName, Alias: e.MemoryAdapterName})
 
 			steps = append(steps, func() error {
-				return add(path.Join("adapter", "zz_generated_"+e.MemoryModule+".rs"), "memory_feed", map[string]any{"Header": v.Header, "Event": e, "CratePath": v.CratePath})
+				return add(path.Join("adapter", "zz_generated_"+e.MemoryAdapterName+".rs"), "memory_feed", map[string]any{"Header": v.Header, "Event": e, "CratePath": v.CratePath})
 			})
 		}
 	}
@@ -468,7 +468,7 @@ func addServerToManifest(m *cellmanifest.Manifest, v view) {
 		m.Provides.Adapters = append(m.Provides.Adapters, cellmanifest.Adapter{
 			Name:       e.MemoryAdapterName,
 			Type:       e.MemoryStruct,
-			Module:     v.ModulePrefix + "adapter::" + e.MemoryModule,
+			Module:     v.ModulePrefix + "adapter::" + e.MemoryAdapterName,
 			Implements: e.Port,
 			Config:     map[string]cellmanifest.ConfigField{},
 		})

@@ -102,17 +102,17 @@ func TestAnXStreamKeyIsRefusedByNameUnlessItIsARequiredStringPropertyOfTheFromSt
 		{
 			name: "a key the from store does not declare",
 			line: "        key: roomId\n",
-			want: `reading GET /chats/{chatId}/lines: the x-stream key names property "roomId", which "ChatLine" does not declare`,
+			want: `reading GET /chats/{chatId}/lines: reading schema "ChatLine": the x-stream key names property "roomId", which the schema does not declare`,
 		},
 		{
 			name: "a key whose property is a required integer",
 			line: "        key: sentAt\n",
-			want: `reading GET /chats/{chatId}/lines: the x-stream key names property "sentAt" of "ChatLine", which must be a required string property`,
+			want: `reading GET /chats/{chatId}/lines: reading schema "ChatLine": the x-stream key names property "sentAt", which must be a required string property`,
 		},
 		{
 			name: "a key whose property is an optional string",
 			line: "        key: editedBy\n",
-			want: `reading GET /chats/{chatId}/lines: the x-stream key names property "editedBy" of "ChatLine", which must be a required string property`,
+			want: `reading GET /chats/{chatId}/lines: reading schema "ChatLine": the x-stream key names property "editedBy", which must be a required string property`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

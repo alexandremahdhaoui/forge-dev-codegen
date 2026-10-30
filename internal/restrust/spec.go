@@ -285,7 +285,6 @@ type Event struct {
 	TypeDef
 
 	From     TypeDef
-	Key      string
 	KeyIdent string
 	Adapters []string
 }
@@ -453,7 +452,6 @@ func eventTypes(operations []Operation, types []TypeDef) ([]Event, error) {
 		events = append(events, Event{
 			TypeDef:  t,
 			From:     byName[op.StreamFrom],
-			Key:      op.StreamKey,
 			KeyIdent: rustname.RustIdent(op.StreamKey),
 			Adapters: op.StreamAdapters,
 		})
@@ -532,7 +530,7 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 		return nil, fmt.Errorf("reading schema %q: x-store names no adapters, adapters lists which of %s the engine emits", name, list(StoreAdapterKinds()))
 	}
 
-	if err := checkStoreField(name, "key", declared.Key, fields); err != nil {
+	if err := checkStoreField(name, "x-store key", declared.Key, fields); err != nil {
 		return nil, err
 	}
 
@@ -550,7 +548,7 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 		idents := make([]string, 0, len(by))
 
 		for _, field := range by {
-			if err := checkStoreField(name, "lookup", field, fields); err != nil {
+			if err := checkStoreField(name, "x-store lookup", field, fields); err != nil {
 				return nil, err
 			}
 
@@ -656,13 +654,13 @@ func checkStoreField(name, what, field string, fields []Field) error {
 		}
 
 		if f.Optional || f.Type.Kind != "string" {
-			return fmt.Errorf("reading schema %q: the x-store %s names property %q, which must be a required string property", name, what, field)
+			return fmt.Errorf("reading schema %q: the %s names property %q, which must be a required string property", name, what, field)
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("reading schema %q: the x-store %s names property %q, which the schema does not declare", name, what, field)
+	return fmt.Errorf("reading schema %q: the %s names property %q, which the schema does not declare", name, what, field)
 }
 
 func list(values []string) string {
@@ -1373,19 +1371,11 @@ func checkStreamKey(where, key string, source TypeDef) error {
 		return fmt.Errorf("reading %s: x-stream names no key, key names the required string property of %q whose value a saved record is published under", where, source.Name)
 	}
 
-	for _, f := range source.Fields {
-		if f.Name != key {
-			continue
-		}
-
-		if f.Optional || f.Type.Kind != "string" {
-			return fmt.Errorf("reading %s: the x-stream key names property %q of %q, which must be a required string property", where, key, source.Name)
-		}
-
-		return nil
+	if err := checkStoreField(source.Name, "x-stream key", key, source.Fields); err != nil {
+		return fmt.Errorf("reading %s: %w", where, err)
 	}
 
-	return fmt.Errorf("reading %s: the x-stream key names property %q, which %q does not declare", where, key, source.Name)
+	return nil
 }
 
 func checkStreamMapping(where, event string, source TypeDef, byName map[string]TypeDef) error {

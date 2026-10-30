@@ -139,7 +139,6 @@ type eventView struct {
 	MemoryStruct       string
 	MemoryConfigStruct string
 	MemoryAdapterName  string
-	MemoryModule       string
 }
 
 type portView struct {
@@ -388,8 +387,6 @@ func buildView(spec *Spec, opts Options) view {
 	}
 
 	for _, e := range spec.Events {
-		memoryFeed := feedAdapterName(e, FeedAdapterMemory)
-
 		ev := eventView{
 			Name:               e.Name,
 			Snake:              e.Snake,
@@ -399,8 +396,7 @@ func buildView(spec *Spec, opts Options) view {
 			FromSnake:          e.From.Snake,
 			MemoryStruct:       e.Name + "MemoryFeed",
 			MemoryConfigStruct: e.Name + "MemoryFeedConfig",
-			MemoryAdapterName:  memoryFeed,
-			MemoryModule:       memoryFeed,
+			MemoryAdapterName:  feedAdapterName(e, FeedAdapterMemory),
 		}
 
 		for _, kind := range e.Adapters {
