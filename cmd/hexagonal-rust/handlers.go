@@ -42,12 +42,18 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
 			}
 
+			helpers, err := hexrust.HelpersFromLayout(input.Layout)
+			if err != nil {
+				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)
+			}
+
 			files, err := hexrust.Generate(hexrust.Options{
 				Service: input.Name,
 				SrcDir:  input.SrcDir,
 				Cells:   cells,
 				Wiring:  []byte(input.WiringSpec),
 				Ports:   ports,
+				Helpers: helpers,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("emitting the skeleton of %q: %w", input.Name, err)

@@ -186,6 +186,65 @@ func TestALayoutThatMalformsTheCellsListIsRefused(t *testing.T) {
 	}
 }
 
+func generateWithHelpers(t *testing.T, helpers interface{}) (*GenerateOutput, error) {
+	t.Helper()
+
+	return NewHandlers().Generate(context.Background(), GenerateInput{
+		Name: "svc", Kind: "hexagonal", SrcDir: standUpTheRestCell(t), WiringSpec: smallWiring,
+		Layout: map[string]interface{}{"cells": []interface{}{"rest"}, "helpers": helpers},
+	})
+}
+
+func helperRefusal(t *testing.T, helpers interface{}, want string) {
+	t.Helper()
+
+	_, err := generateWithHelpers(t, helpers)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want a refusal naming %q, got %v", want, err)
+	}
+}
+
+func TestADeclaredHelperIsMountedInTheRootControllerLayer(t *testing.T) {
+	out, err := generateWithHelpers(t, []interface{}{"presence", "stamps"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	byPath := map[string]string{}
+	for _, f := range out.Files {
+		byPath[f.Path] = f.Content
+	}
+
+	controller := byPath["src/controller/mod.rs"]
+
+	if !strings.Contains(controller, "\npub mod presence;\npub mod stamps;\n") {
+		t.Errorf("src/controller/mod.rs never mounts the two helpers in declared order\n%s", controller)
+	}
+
+	for _, layer := range []string{"adapter", "driver", "port", "types"} {
+		if strings.Contains(byPath["src/"+layer+"/mod.rs"], "presence") {
+			t.Errorf("src/%s/mod.rs mounts a controller helper\n%s", layer, byPath["src/"+layer+"/mod.rs"])
+		}
+	}
+}
+
+func TestAHelpersValueThatIsNotAListOfModuleNamesIsRefused(t *testing.T) {
+	helperRefusal(t, "presence", "reading helpers: it is a list of module names under src/controller, not presence")
+	helperRefusal(t, []interface{}{7}, "reading helpers: it is a list of module names under src/controller, not [7]")
+}
+
+func TestAHelperNameRustCannotSpellAsAModuleIsRefused(t *testing.T) {
+	helperRefusal(t, []interface{}{"Presence"}, `mounting helper "Presence": it is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter`)
+}
+
+func TestAHelperListedTwiceIsRefused(t *testing.T) {
+	helperRefusal(t, []interface{}{"presence", "presence"}, `mounting helper "presence": it is listed twice`)
+}
+
+func TestAHelperCarryingTheGeneratedPrefixIsRefusedBecauseThePrefixBelongsToGeneratedFiles(t *testing.T) {
+	helperRefusal(t, []interface{}{"zz_generated_presence"}, `mounting helper "zz_generated_presence": the zz_generated prefix belongs to generated files, name the helper for what it shares`)
+}
+
 func TestAModelWithNoWiringDocumentIsRefused(t *testing.T) {
 	_, err := NewHandlers().Generate(context.Background(), GenerateInput{
 		Name: "svc", Kind: "hexagonal",

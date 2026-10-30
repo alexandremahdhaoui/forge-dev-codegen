@@ -25,6 +25,28 @@ its own `forge-dev.yaml` and its own generator. `wiring.specPath` names
 the document that says which adapter answers which port and which driver
 starts.
 
+## A declared helper module holds functions every controller shares
+
+```yaml
+layout:
+  cells: [rest, grpc, udp]
+  helpers: [presence]
+```
+
+`layout.helpers` lists module names. hexagonal-rust writes
+`pub mod <name>;` into the root `src/controller/mod.rs` for each one.
+The user writes free functions in `src/controller/<name>.rs`, and each
+function returns one port error. A controller of any cell calls a helper
+from `crate::controller::<name>` with `?`, and the From conversion of
+its port arm carries the error into the controller error. A listed
+helper with no file is a compile error naming the file.
+
+The engine refuses four helper lists by name. A value that is not a
+list of names is refused. A name Rust cannot spell as a module is
+refused. A name listed twice is refused. A name that starts with
+`zz_generated` is refused, because that prefix belongs to generated
+files.
+
 ## The wiring document
 
 ```yaml

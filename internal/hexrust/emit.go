@@ -58,6 +58,7 @@ type Options struct {
 	Cells   []string
 	Wiring  []byte
 	Ports   map[string][]string
+	Helpers []string
 }
 
 type File struct {
@@ -242,6 +243,63 @@ func checkCells(cells []string) error {
 	return nil
 }
 
+const generatedPrefix = "zz_generated"
+
+func checkHelpers(helpers []string) error {
+	seen := map[string]bool{}
+
+	for _, helper := range helpers {
+		if !rustname.IsModuleName(helper) {
+			return fmt.Errorf("mounting helper %q: it is not a name Rust can spell as a module, use lowercase letters, digits and underscores and start with a letter", helper)
+		}
+
+		if strings.HasPrefix(helper, generatedPrefix) {
+			return fmt.Errorf("mounting helper %q: the zz_generated prefix belongs to generated files, name the helper for what it shares", helper)
+		}
+
+		if seen[helper] {
+			return fmt.Errorf("mounting helper %q: it is listed twice", helper)
+		}
+
+		seen[helper] = true
+	}
+
+	return nil
+}
+
+func helpersOf(layer string, helpers []string) []string {
+	if layer != "controller" {
+		return nil
+	}
+
+	return helpers
+}
+
+func HelpersFromLayout(layout map[string]interface{}) ([]string, error) {
+	raw, ok := layout["helpers"]
+	if !ok {
+		return nil, nil
+	}
+
+	entries, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reading helpers: it is a list of module names under src/controller, not %v", raw)
+	}
+
+	names := make([]string, 0, len(entries))
+
+	for _, entry := range entries {
+		name, ok := entry.(string)
+		if !ok {
+			return nil, fmt.Errorf("reading helpers: it is a list of module names under src/controller, not %v", raw)
+		}
+
+		names = append(names, name)
+	}
+
+	return names, nil
+}
+
 func CellsFromLayout(layout map[string]interface{}) ([]string, error) {
 	raw, ok := layout["cells"]
 	if !ok {
@@ -355,6 +413,10 @@ func Generate(opts Options) ([]File, error) {
 		return nil, fmt.Errorf("emitting the skeleton: %w", err)
 	}
 
+	if err := checkHelpers(opts.Helpers); err != nil {
+		return nil, fmt.Errorf("emitting the skeleton: %w", err)
+	}
+
 	if len(opts.Wiring) == 0 {
 		return nil, fmt.Errorf("emitting the skeleton: the cell names no wiring file, add wiring.specPath beside openapi")
 	}
@@ -441,6 +503,7 @@ func Generate(opts Options) ([]File, error) {
 			"Header":    header,
 			"Allow":     allowingLayers[layer],
 			"Entries":   rootEntries[layer],
+			"Helpers":   helpersOf(layer, opts.Helpers),
 			"Reexports": reexportsOf(layer, reexports),
 		}
 
@@ -589,6 +652,9 @@ pub mod {{ . }};
 {{- end }}
 {{ range .Entries }}
 pub mod {{ .Module }};
+{{- end }}
+{{- range .Helpers }}
+pub mod {{ . }};
 {{- end }}
 {{- range .Entries }}
 

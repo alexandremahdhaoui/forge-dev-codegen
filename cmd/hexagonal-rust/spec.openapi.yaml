@@ -35,7 +35,7 @@ components:
         layout:
           type: object
           additionalProperties: true
-          description: The kind's layout. cells lists the module directories under src, one per transport cell.
+          description: The kind's layout. cells lists the module directories under src, one per transport cell. helpers lists the modules of shared controller functions under src/controller.
         runtime:
           type: object
           additionalProperties: true
