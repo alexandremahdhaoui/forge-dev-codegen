@@ -49,3 +49,44 @@ func TestAStoreFeedingAStreamOfItsOwnTypeImportsEachTypeOnceInBothStoreAdapters(
 		}
 	}
 }
+
+func TestTheStoreMemoryModuleAndTheFeedMemoryModuleOfOneTypeLandOnTwoPaths(t *testing.T) {
+	files := generateSpec(t, chatLineFeedSpec(t), restrust.Options{Service: "songe-social"})
+
+	for path, holds := range map[string]string{
+		"adapter/zz_generated_chat_line_memory.rs":      "pub struct ChatLineMemoryStore {",
+		"adapter/zz_generated_chat_line_memory_feed.rs": "pub struct ChatLineMemoryFeed {",
+	} {
+		file, emitted := files[path]
+		if !emitted {
+			t.Fatalf("%s was not emitted, the emitted paths are %q", path, paths(files))
+		}
+
+		if !strings.Contains(file.Content, holds) {
+			t.Errorf("%s lacks %q\n%s", path, holds, file.Content)
+		}
+	}
+
+	mod := files["adapter/mod.rs"].Content
+
+	for _, want := range []string{
+		"pub use zz_generated_chat_line_memory as chat_line_memory;",
+		"pub use zz_generated_chat_line_memory_feed as chat_line_memory_feed;",
+	} {
+		if !strings.Contains(mod, want) {
+			t.Errorf("the adapter mod.rs lacks %q\n%s", want, mod)
+		}
+	}
+}
+
+func TestGenerateRefusesTwoEmittedFilesOnOnePathNamingBothTemplatesAndThePath(t *testing.T) {
+	spec := strings.Replace(queriedSpec, "name: GreetingClock", "name: Greeting", 1)
+	spec = strings.Replace(spec, "x-ports: [GreetingStore, GreetingClock]", "x-ports: [GreetingStore, Greeting]", 1)
+
+	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
+
+	want := "emitting the rest cell: the memory_store template and the clock_memory template both write adapter/zz_generated_greeting_memory.rs, one path holds one file"
+	if err == nil || err.Error() != want {
+		t.Fatalf("two files on one path were not refused by name\n got %v\nwant %s", err, want)
+	}
+}

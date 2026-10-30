@@ -122,8 +122,15 @@ func Generate(doc []byte, opts Options) ([]File, error) {
 	}
 
 	files := []File{}
+	producers := map[string]string{}
 
 	add := func(p, name string, data any) error {
+		if earlier, taken := producers[p]; taken {
+			return fmt.Errorf("emitting the rest cell: the %s template and the %s template both write %s, one path holds one file", earlier, name, p)
+		}
+
+		producers[p] = name
+
 		content, err := render(name, data)
 		if err != nil {
 			return err

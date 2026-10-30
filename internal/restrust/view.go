@@ -386,6 +386,8 @@ func buildView(spec *Spec, opts Options) view {
 	}
 
 	for _, e := range spec.Events {
+		memoryFeed := feedAdapterName(e, FeedAdapterMemory)
+
 		ev := eventView{
 			Name:               e.Name,
 			Snake:              e.Snake,
@@ -395,8 +397,8 @@ func buildView(spec *Spec, opts Options) view {
 			FromSnake:          e.From.Snake,
 			MemoryStruct:       e.Name + "MemoryFeed",
 			MemoryConfigStruct: e.Name + "MemoryFeedConfig",
-			MemoryAdapterName:  feedAdapterName(e, "memory"),
-			MemoryModule:       e.Snake + "_memory",
+			MemoryAdapterName:  memoryFeed,
+			MemoryModule:       memoryFeed,
 		}
 
 		for _, kind := range e.Adapters {
