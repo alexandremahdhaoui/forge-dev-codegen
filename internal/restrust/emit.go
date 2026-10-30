@@ -706,14 +706,29 @@ impl {{ .Store.Name }}Column {
     }
 }
 {{ end }}
-#[cfg_attr(test, mockall::automock)]
+{{ if .Store.Cursor }}#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct {{ .Store.Cursor }} {
+    pub order: String,
+    pub key: String,
+}
+
+impl From<&{{ .Store.Name }}> for {{ .Store.Cursor }} {
+    fn from(row: &{{ .Store.Name }}) -> Self {
+        Self {
+            order: row.{{ .Store.OrderIdent }}.clone(),
+            key: row.{{ .Store.KeyIdent }}.clone(),
+        }
+    }
+}
+
+{{ end }}#[cfg_attr(test, mockall::automock)]
 pub trait {{ .Store.Port }}: Send + Sync {
     fn put(&self, v: {{ .Store.Name }}) -> Result<(), {{ .Store.Port }}Error>;
     fn get(&self, {{ .Store.KeyIdent }}: &str) -> Result<Option<{{ .Store.Name }}>, {{ .Store.Port }}Error>;
     fn delete(&self, {{ .Store.KeyIdent }}: &str) -> Result<(), {{ .Store.Port }}Error>;
 {{- range .Store.Lookups }}
 {{- if .Page }}
-    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
+    fn {{ .Method }}(&self, {{ .Args }}, after: {{ $.Store.PageAfter }}, limit: Option<i64>) -> Result<Vec<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
 {{- else }}
     fn {{ .Method }}(&self, {{ .Args }}) -> Result<Option<{{ $.Store.Name }}>, {{ $.Store.Port }}Error>;
 {{- end }}
@@ -906,7 +921,7 @@ use std::sync::Arc;
 
 use rusqlite::OptionalExtension;
 
-use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ if $s.Lookups }}, {{ $s.Name }}Column{{ end }}{{ "}" }};
+use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ if $s.Lookups }}, {{ $s.Name }}Column{{ end }}{{ if $s.Cursor }}, {{ $s.Cursor }}{{ end }}{{ "}" }};
 use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
 {{- if $s.Publishes }}
 use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
@@ -954,6 +969,10 @@ pub enum {{ $s.Name }}SqliteError {
 {{- if $s.HasOneLookup }}
     #[error("the {{ $s.Snake }} sqlite store already holds {values:?} for the lookup by {lookup}, and that lookup answers one")]
     Duplicate { lookup: String, values: String },
+{{- end }}
+{{- if $s.Stamped }}
+    #[error("the {{ $s.Snake }} sqlite store refuses {{ $s.Order }} {value:?}, {{ template "stamp_rule" }}")]
+    Stamp { value: String },
 {{- end }}
 }
 
@@ -1021,7 +1040,7 @@ impl {{ $s.Struct }} {
 
 {{- if $s.Lookups }}
 
-    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
+    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: {{ $s.RowsAfter }}, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}SqliteError> {
         let value = pairs
             .iter()
             .map(|(_, value)| *value)
@@ -1032,33 +1051,39 @@ impl {{ $s.Struct }} {
             source,
         };
         let connection = self.connection.lock().map_err(|_| {{ $s.Name }}SqliteError::Poisoned)?;
-        let mut clauses = String::new();
-
-        for (position, (column, _)) in pairs.iter().enumerate() {
-            clauses.push_str(&format!(
-                "json_extract(body, '$.{}') = ?{} AND ",
-                column.property(),
-                position + 1
-            ));
-        }
-
-        let statement = format!(
-            "SELECT body FROM {{ $s.TableSQL }} WHERE {}{{ $s.KeySQL }} > ?{} ORDER BY {{ $s.KeySQL }} LIMIT ?{}",
-            clauses,
-            pairs.len() + 1,
-            pairs.len() + 2
-        );
-        let mut prepared = connection.prepare(&statement).map_err(sql)?;
-        let cursor = after.unwrap_or("");
         let taken = limit.unwrap_or(-1);
+        let mut clauses: Vec<String> = pairs
+            .iter()
+            .enumerate()
+            .map(|(position, (column, _))| format!("json_extract(body, '$.{}') = ?{}", column.property(), position + 1))
+            .collect();
         let mut bound: Vec<&dyn rusqlite::ToSql> = pairs
             .iter()
             .map(|(_, value)| value as &dyn rusqlite::ToSql)
             .collect();
+{{- if $s.Cursor }}
 
-        bound.push(&cursor);
+        if let Some(cursor) = after {
+            clauses.push(format!("({{ $s.OrderBySQL }}) > (?{}, ?{})", bound.len() + 1, bound.len() + 2));
+            bound.push(&cursor.order);
+            bound.push(&cursor.key);
+        }
+{{- else }}
+
+        if let Some(cursor) = &after {
+            clauses.push(format!("{{ $s.KeySQL }} > ?{}", bound.len() + 1));
+            bound.push(cursor);
+        }
+{{- end }}
+
         bound.push(&taken);
 
+        let statement = format!(
+            "SELECT body FROM {{ $s.TableSQL }} WHERE {} ORDER BY {{ $s.OrderBySQL }} LIMIT ?{}",
+            clauses.join(" AND "),
+            bound.len()
+        );
+        let mut prepared = connection.prepare(&statement).map_err(sql)?;
         let bodies = prepared
             .query_map(&bound[..], |row| row.get::<_, String>(0))
             .map_err(sql)?
@@ -1077,6 +1102,13 @@ impl {{ $s.Struct }} {
 {{- end }}
 
     fn put_row(&self, v: &{{ $s.Name }}) -> Result<(), {{ $s.Name }}SqliteError> {
+{{- if $s.Stamped }}
+        if !holds_the_utc_millisecond_form(&v.{{ $s.OrderIdent }}) {
+            return Err({{ $s.Name }}SqliteError::Stamp {
+                value: v.{{ $s.OrderIdent }}.clone(),
+            });
+        }
+{{ end }}
         let id = v.{{ $s.KeyIdent }}.clone();
         let sql = |source| {{ $s.Name }}SqliteError::Sql {
             id: id.clone(),
@@ -1205,8 +1237,8 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 {{- range $s.Lookups }}
 {{- if .Page }}
 
-    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.rows_where({{ .Pairs }}, after.as_deref(), limit)
+    fn {{ .Method }}(&self, {{ .Args }}, after: {{ $s.PageAfter }}, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where({{ .Pairs }}, {{ $s.PassAfter }}, limit)
             .map_err(|source| {{ $s.Port }}Error::Lookup {
                 by: "{{ .ByJoined }}".to_string(),
                 value: {{ .ValueExpr }},
@@ -1226,7 +1258,9 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 {{- end }}
 {{- end }}
 }
-{{ end -}}
+{{ if $s.Stamped }}
+{{ template "stamp_check" }}
+{{ end }}{{ end -}}
 
 {{- define "memory_store" -}}
 {{ .Header }}
@@ -1237,7 +1271,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 {{- end }}
 
-use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ if $s.Lookups }}, {{ $s.Name }}Column{{ end }}{{ "}" }};
+use {{ .CratePath }}port::{{ $s.PortSnake }}::{{ "{" }}{{ $s.Port }}, {{ $s.Port }}Error{{ if $s.Lookups }}, {{ $s.Name }}Column{{ end }}{{ if $s.Cursor }}, {{ $s.Cursor }}{{ end }}{{ "}" }};
 use {{ .CratePath }}types::{{ $s.Snake }}::{{ $s.Name }};
 {{- if $s.Publishes }}
 use {{ .CratePath }}port::{{ $s.Publishes.PortSnake }}::{{ $s.Publishes.Port }};
@@ -1267,6 +1301,10 @@ pub enum {{ $s.Name }}MemoryError {
         values: String,
         held: String,
     },
+{{- end }}
+{{- if $s.Stamped }}
+    #[error("the {{ $s.Snake }} memory store refuses {{ $s.Order }} {value:?}, {{ template "stamp_rule" }}")]
+    Stamp { value: String },
 {{- end }}
 }
 
@@ -1315,6 +1353,13 @@ impl {{ $s.MemoryStruct }} {
     }
 
     fn put_row(&self, v: &{{ $s.Name }}) -> Result<(), {{ $s.Name }}MemoryError> {
+{{- if $s.Stamped }}
+        if !holds_the_utc_millisecond_form(&v.{{ $s.OrderIdent }}) {
+            return Err({{ $s.Name }}MemoryError::Stamp {
+                value: v.{{ $s.OrderIdent }}.clone(),
+            });
+        }
+{{ end }}
         let mut rows = self.rows()?;
         let key = v.{{ $s.KeyIdent }}.clone();
 
@@ -1352,9 +1397,36 @@ impl {{ $s.MemoryStruct }} {
 
 {{- if $s.Lookups }}
 
-    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: Option<&str>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}MemoryError> {
+    fn rows_where(&self, pairs: &[({{ $s.Name }}Column, &str)], after: {{ $s.RowsAfter }}, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Name }}MemoryError> {
         let rows = self.rows()?;
         let taken = usize::try_from(limit.unwrap_or(-1)).unwrap_or(usize::MAX);
+{{- if $s.Cursor }}
+        let mut matching: Vec<&{{ $s.Name }}> = rows
+            .values()
+            .filter(|row| {
+                pairs
+                    .iter()
+                    .all(|(column, value)| field_of(row, *column) == *value)
+            })
+            .collect();
+
+        matching.sort_by(|left, right| {
+            left.{{ $s.OrderIdent }}
+                .cmp(&right.{{ $s.OrderIdent }})
+                .then_with(|| left.{{ $s.KeyIdent }}.cmp(&right.{{ $s.KeyIdent }}))
+        });
+
+        Ok(matching
+            .into_iter()
+            .filter(|row| {
+                after.is_none_or(|cursor| {
+                    (row.{{ $s.OrderIdent }}.as_str(), row.{{ $s.KeyIdent }}.as_str()) > (cursor.order.as_str(), cursor.key.as_str())
+                })
+            })
+            .take(taken)
+            .cloned()
+            .collect())
+{{- else }}
 
         Ok(rows
             .iter()
@@ -1368,6 +1440,7 @@ impl {{ $s.MemoryStruct }} {
             .take(taken)
             .cloned()
             .collect())
+{{- end }}
     }
 {{- end }}
 }
@@ -1435,8 +1508,8 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
 {{- range $s.Lookups }}
 {{- if .Page }}
 
-    fn {{ .Method }}(&self, {{ .Args }}, after: Option<String>, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
-        self.rows_where({{ .Pairs }}, after.as_deref(), limit)
+    fn {{ .Method }}(&self, {{ .Args }}, after: {{ $s.PageAfter }}, limit: Option<i64>) -> Result<Vec<{{ $s.Name }}>, {{ $s.Port }}Error> {
+        self.rows_where({{ .Pairs }}, {{ $s.PassAfter }}, limit)
             .map_err(|source| {{ $s.Port }}Error::Lookup {
                 by: "{{ .ByJoined }}".to_string(),
                 value: {{ .ValueExpr }},
@@ -1457,7 +1530,27 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
 {{- end }}
 {{- end }}
 }
-{{ end -}}
+{{ if $s.Stamped }}
+{{ template "stamp_check" }}
+{{ end }}{{ end -}}
+
+{{- define "stamp_rule" -}}
+a date-time order value is written in the UTC millisecond form YYYY-MM-DDTHH:MM:SS.mmmZ
+{{- end -}}
+
+{{- define "stamp_check" -}}
+fn holds_the_utc_millisecond_form(value: &str) -> bool {
+    value.len() == 24
+        && value.bytes().enumerate().all(|(position, byte)| match position {
+            4 | 7 => byte == b'-',
+            10 => byte == b'T',
+            13 | 16 => byte == b':',
+            19 => byte == b'.',
+            23 => byte == b'Z',
+            _ => byte.is_ascii_digit(),
+        })
+}
+{{- end -}}
 
 {{- define "clock_memory" -}}
 {{ .Header }}

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,7 @@ type schema struct {
 	Enum       []json.RawMessage `json:"enum"`
 	MinLength  *int              `json:"minLength"`
 	MaxLength  *int              `json:"maxLength"`
+	Format     string            `json:"format"`
 }
 
 type typeName string
@@ -169,6 +171,7 @@ type Field struct {
 	Enum      []string
 	MinLength *int
 	MaxLength *int
+	Format    string
 }
 
 type fieldType struct {
@@ -189,6 +192,7 @@ type Store struct {
 	KeyIdent string
 	Lookups  []Lookup
 	Adapters []string
+	Order    *Field
 }
 
 type Lookup struct {
@@ -502,7 +506,7 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 
 	var flag bool
 	if err := json.Unmarshal(raw, &flag); err == nil {
-		return nil, fmt.Errorf("reading schema %q: x-store is a boolean, it is an object naming key, lookups and adapters", name)
+		return nil, fmt.Errorf("reading schema %q: x-store is a boolean, it is an object naming %s", name, joinLastWithAnd(storeKeys))
 	}
 
 	var declared struct {
@@ -511,11 +515,16 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 			By      json.RawMessage `json:"by"`
 			Answers string          `json:"answers"`
 		} `json:"lookups"`
+		Order    *string   `json:"order"`
 		Adapters *[]string `json:"adapters"`
 	}
 
 	if err := json.Unmarshal(raw, &declared); err != nil {
-		return nil, fmt.Errorf("reading schema %q: x-store is an object naming key, lookups and adapters: %w", name, err)
+		return nil, fmt.Errorf("reading schema %q: x-store is an object naming %s: %w", name, joinLastWithAnd(storeKeys), err)
+	}
+
+	if err := refuseUnknownStoreKeys(name, raw); err != nil {
+		return nil, err
 	}
 
 	if declared.Key == "" {
@@ -595,7 +604,95 @@ func parseStore(name string, raw json.RawMessage, fields []Field) (*Store, error
 		store.Adapters = append(store.Adapters, kind)
 	}
 
+	if declared.Order == nil {
+		return store, nil
+	}
+
+	order, err := parseOrder(name, *declared.Order, store, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	store.Order = order
+
 	return store, nil
+}
+
+var (
+	storeKeys  = []string{"key", "lookups", "order", "adapters"}
+	lookupKeys = []string{"by", "answers"}
+)
+
+func refuseUnknownStoreKeys(name string, raw json.RawMessage) error {
+	var keys map[string]json.RawMessage
+
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return fmt.Errorf("reading schema %q: x-store is an object naming %s: %w", name, joinLastWithAnd(storeKeys), err)
+	}
+
+	for _, key := range sortedKeys(keys) {
+		if !slices.Contains(storeKeys, key) {
+			return fmt.Errorf("reading schema %q: x-store names %q, x-store names only %s", name, key, joinLastWithAnd(storeKeys))
+		}
+	}
+
+	var entries struct {
+		Lookups []map[string]json.RawMessage `json:"lookups"`
+	}
+
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return fmt.Errorf("reading schema %q: x-store is an object naming %s: %w", name, joinLastWithAnd(storeKeys), err)
+	}
+
+	for _, entry := range entries.Lookups {
+		for _, key := range sortedKeys(entry) {
+			if !slices.Contains(lookupKeys, key) {
+				return fmt.Errorf("reading schema %q: the lookup names %q, a lookup names only %s", name, key, joinLastWithAnd(lookupKeys))
+			}
+		}
+	}
+
+	return nil
+}
+
+func parseOrder(name, order string, store *Store, fields []Field) (*Field, error) {
+	if err := checkStoreField(name, "x-store order", order, fields); err != nil {
+		return nil, err
+	}
+
+	if order == store.Key {
+		return nil, fmt.Errorf("reading schema %q: x-store orders by %q, which is the key, and a store with no order already reads every page in key order", name, order)
+	}
+
+	pages := 0
+
+	for _, l := range store.Lookups {
+		if l.Answers != LookupPage {
+			continue
+		}
+
+		pages++
+
+		if slices.Contains(l.By, order) {
+			return nil, fmt.Errorf("reading schema %q: the page lookup by %s orders by %q, every row it answers holds one value there and only the key would order them", name, quoted(l.By), order)
+		}
+	}
+
+	if pages == 0 {
+		return nil, fmt.Errorf("reading schema %q: x-store names an order and holds no page lookup, an order no lookup reads is a declaration nobody honours", name)
+	}
+
+	return fieldNamed(fields, order), nil
+}
+
+func fieldNamed(fields []Field, name string) *Field {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+
+	return nil
 }
 
 func parseLookupBy(name string, raw json.RawMessage) ([]string, error) {
@@ -702,6 +799,7 @@ func parseFields(typeName string, s schema, schemas map[string]schema) ([]Field,
 			Enum:      enum,
 			MinLength: s.Properties[name].MinLength,
 			MaxLength: s.Properties[name].MaxLength,
+			Format:    s.Properties[name].Format,
 		})
 	}
 

@@ -25,13 +25,13 @@ func TestATableWithNoUniqueLookupIsTheKeyedTableAndTheAuditTable(t *testing.T) {
 	want := "CREATE TABLE IF NOT EXISTS \"greeting\" (\"id\" TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
 		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
 
-	if got := storeddl.Table("greeting", "id", nil); got != want {
+	if got := storeddl.Table(storeddl.Shape{Snake: "greeting", Key: "id"}); got != want {
 		t.Errorf("table:\n got %q\nwant %q", got, want)
 	}
 }
 
 func TestEveryUniqueLookupBecomesOneIndexNamedAfterTheJointItReads(t *testing.T) {
-	got := storeddl.Table("profile", "subject", [][]string{{"alias", "tag"}, {"handle"}})
+	got := storeddl.Table(storeddl.Shape{Snake: "profile", Key: "subject", Uniques: [][]string{{"alias", "tag"}, {"handle"}}})
 
 	for _, want := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS "profile_unique_by_alias_and_tag" ON "profile" (json_extract(body, '$.alias'), json_extract(body, '$.tag'));`,
@@ -43,8 +43,26 @@ func TestEveryUniqueLookupBecomesOneIndexNamedAfterTheJointItReads(t *testing.T)
 	}
 }
 
+func TestEveryPageLookupOfAStoreWithAnOrderBecomesOneIndexOverItsByPropertiesItsOrderAndTheKey(t *testing.T) {
+	want := "CREATE TABLE IF NOT EXISTS \"chat_line\" (\"id\" TEXT PRIMARY KEY, body TEXT NOT NULL);\n" +
+		"CREATE INDEX IF NOT EXISTS \"chat_line_page_by_chat_id\" ON \"chat_line\" (json_extract(body, '$.chatId'), json_extract(body, '$.postedAt'), \"id\");\n" +
+		"CREATE INDEX IF NOT EXISTS \"chat_line_page_by_account_id_and_chat_id\" ON \"chat_line\" (json_extract(body, '$.accountId'), json_extract(body, '$.chatId'), json_extract(body, '$.postedAt'), \"id\");\n" +
+		"CREATE TABLE IF NOT EXISTS audit (at TEXT NOT NULL, table_name TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL, before TEXT, after TEXT);"
+
+	got := storeddl.Table(storeddl.Shape{
+		Snake: "chat_line",
+		Key:   "id",
+		Order: "postedAt",
+		Pages: [][]string{{"chatId"}, {"accountId", "chatId"}},
+	})
+
+	if got != want {
+		t.Errorf("table:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestAKeyThatIsASqlReservedWordIsQuotedSoTheDdlStaysValid(t *testing.T) {
-	got := storeddl.Table("order", "group", nil)
+	got := storeddl.Table(storeddl.Shape{Snake: "order", Key: "group"})
 
 	if !strings.Contains(got, `CREATE TABLE IF NOT EXISTS "order" ("group" TEXT PRIMARY KEY, body TEXT NOT NULL);`) {
 		t.Errorf("table:\n%s", got)

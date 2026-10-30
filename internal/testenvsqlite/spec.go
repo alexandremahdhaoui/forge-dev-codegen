@@ -15,112 +15,79 @@
 package testenvsqlite
 
 import (
-	"encoding/json"
 	"fmt"
-	"regexp"
 
-	"sigs.k8s.io/yaml"
-
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
-
-var tableName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 type Store struct {
 	Name     string
 	Snake    string
 	Upper    string
 	Key      string
+	Order    string
 	Uniques  [][]string
+	Pages    [][]string
 	Required []string
 }
 
-type document struct {
-	Components struct {
-		Schemas map[string]struct {
-			Store    json.RawMessage `json:"x-store"`
-			Required []string        `json:"required"`
-		} `json:"schemas"`
-	} `json:"components"`
-}
-
 func Stores(doc []byte, names []string) ([]Store, error) {
-	var parsed document
-	if err := yaml.Unmarshal(doc, &parsed); err != nil {
+	spec, err := restrust.Parse(doc)
+	if err != nil {
 		return nil, fmt.Errorf("reading the OpenAPI document: %w", err)
+	}
+
+	types := map[string]restrust.TypeDef{}
+	for _, t := range spec.Types {
+		types[t.Name] = t
 	}
 
 	stores := make([]Store, 0, len(names))
 
 	for _, name := range names {
-		schema, ok := parsed.Components.Schemas[name]
+		t, ok := types[name]
 		if !ok {
 			return nil, fmt.Errorf("finding store %q: components.schemas has no such schema", name)
 		}
 
-		key, uniques, err := storeShape(name, schema.Store)
-		if err != nil {
-			return nil, err
+		if t.Store == nil {
+			return nil, fmt.Errorf("finding store %q: the schema is not marked x-store", name)
 		}
 
-		snake := rustname.Snake(name)
-		if !tableName.MatchString(snake) {
-			return nil, fmt.Errorf("naming the table of store %q: %q is not a table name matching %s", name, snake, tableName)
-		}
-
-		stores = append(stores, Store{
-			Name:     name,
-			Snake:    snake,
-			Upper:    rustname.Upper(name),
-			Key:      key,
-			Uniques:  uniques,
-			Required: schema.Required,
-		})
+		stores = append(stores, storeOfType(t))
 	}
 
 	return stores, nil
 }
 
-func storeShape(name string, raw json.RawMessage) (string, [][]string, error) {
-	if len(raw) == 0 {
-		return "", nil, fmt.Errorf("finding store %q: the schema is not marked x-store", name)
+func storeOfType(t restrust.TypeDef) Store {
+	store := Store{
+		Name:  t.Name,
+		Snake: t.Snake,
+		Upper: rustname.Upper(t.Name),
+		Key:   t.Store.Key,
 	}
 
-	var flag bool
-	if err := json.Unmarshal(raw, &flag); err == nil {
-		return "", nil, fmt.Errorf("finding store %q: x-store is a boolean, it is an object naming key, lookups and adapters", name)
+	if t.Store.Order != nil {
+		store.Order = t.Store.Order.Name
 	}
 
-	var declared struct {
-		Key     string `json:"key"`
-		Lookups []struct {
-			By      json.RawMessage `json:"by"`
-			Answers string          `json:"answers"`
-		} `json:"lookups"`
-	}
-
-	if err := json.Unmarshal(raw, &declared); err != nil {
-		return "", nil, fmt.Errorf("finding store %q: x-store is an object naming key, lookups and adapters: %w", name, err)
-	}
-
-	if declared.Key == "" {
-		return "", nil, fmt.Errorf("finding store %q: x-store names no key, key names the property every row is stored under", name)
-	}
-
-	uniques := [][]string{}
-
-	for _, lookup := range declared.Lookups {
-		if lookup.Answers != "one" {
-			continue
+	for _, l := range t.Store.Lookups {
+		if l.Answers == restrust.LookupOne {
+			store.Uniques = append(store.Uniques, l.By)
 		}
 
-		var by []string
-		if err := json.Unmarshal(lookup.By, &by); err != nil {
-			return "", nil, fmt.Errorf("finding store %q: x-store declares a lookup whose by is not a list of properties: %w", name, err)
+		if l.Answers == restrust.LookupPage {
+			store.Pages = append(store.Pages, l.By)
 		}
-
-		uniques = append(uniques, by)
 	}
 
-	return declared.Key, uniques, nil
+	for _, f := range t.Fields {
+		if !f.Optional {
+			store.Required = append(store.Required, f.Name)
+		}
+	}
+
+	return store
 }

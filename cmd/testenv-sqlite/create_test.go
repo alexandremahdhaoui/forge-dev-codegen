@@ -26,6 +26,14 @@ import (
 )
 
 const helloSpec = `
+paths:
+  /ping:
+    get:
+      operationId: ping
+      x-controller: ping
+      responses:
+        "204":
+          description: Nothing
 components:
   schemas:
     Greeting:
@@ -35,6 +43,13 @@ components:
         lookups: []
         adapters: [sqlite]
       required: [id, name, count]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer
 `
 
 const helloVectors = `{"cases":[{"case":"c","operation":"createGreeting","controllerReply":{"id":"g1","name":"Songe","count":0}}]}`

@@ -22,15 +22,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/storeddl"
 )
 
-const helloSpec = `
+const pingPath = `
+paths:
+  /ping:
+    get:
+      operationId: ping
+      x-controller: ping
+      responses:
+        "204":
+          description: Nothing
+`
+
+const helloSpec = pingPath + `
 components:
   schemas:
     CreateGreetingRequest:
       type: object
       required: [name]
+      properties:
+        name:
+          type: string
     Greeting:
       type: object
       x-store:
@@ -38,6 +53,13 @@ components:
         lookups: []
         adapters: [sqlite]
       required: [id, name, count]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer
     PlayerScore:
       type: object
       x-store:
@@ -45,6 +67,11 @@ components:
         lookups: []
         adapters: [sqlite]
       required: [id, score]
+      properties:
+        id:
+          type: string
+        score:
+          type: integer
 `
 
 const helloVectors = `{
@@ -90,7 +117,7 @@ func TestStoresFindsEveryNamedXStoreSchemaWithItsSnakeAndUpperNames(t *testing.T
 		t.Errorf("PlayerScore names: %+v", stores[1])
 	}
 
-	if strings.Join(stores[0].Required, ",") != "id,name,count" {
+	if strings.Join(stores[0].Required, ",") != "count,id,name" {
 		t.Errorf("Greeting required: %v", stores[0].Required)
 	}
 }
@@ -112,17 +139,21 @@ func TestStoresRefusesADocumentThatIsNotYaml(t *testing.T) {
 }
 
 func TestStoresRefusesANameWhoseSnakeFormIsNotAPlainTableName(t *testing.T) {
-	doc := "components:\n  schemas:\n    \"Bad; DROP\":\n      x-store:\n        key: id\n    \"9Lives\":\n      x-store:\n        key: id\n"
+	for name, want := range map[string]string{
+		"Bad; DROP": `reading the OpenAPI document: reading schema "Bad; DROP": its snake form "bad;_drop" is not a name Rust or SQL can spell, use letters, digits and underscores and start with a letter`,
+		"9Lives":    `reading the OpenAPI document: reading schema "9Lives": its snake form "9_lives" is not a name Rust or SQL can spell, use letters, digits and underscores and start with a letter`,
+	} {
+		doc := pingPath + "components:\n  schemas:\n    \"" + name + "\":\n      type: object\n      x-store:\n        key: id\n        lookups: []\n        adapters: [sqlite]\n      required: [id]\n      properties:\n        id:\n          type: string\n"
 
-	for _, name := range []string{"Bad; DROP", "9Lives"} {
-		if _, err := Stores([]byte(doc), []string{name}); err == nil {
-			t.Errorf("%q must be refused as a table name", name)
+		_, err := Stores([]byte(doc), []string{name})
+		if err == nil || err.Error() != want {
+			t.Errorf("%q was not refused as a table name:\n got %v\nwant %s", name, err, want)
 		}
 	}
 }
 
 func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testing.T) {
-	doc := "components:\n  schemas:\n    Profile:\n      type: object\n      x-store:\n        key: subject\n        lookups:\n          - { by: [alias, tag], answers: one }\n          - { by: [alias], answers: page }\n        adapters: [sqlite]\n"
+	doc := pingPath + "components:\n  schemas:\n    Profile:\n      type: object\n      x-store:\n        key: subject\n        lookups:\n          - { by: [alias, tag], answers: one }\n          - { by: [alias], answers: page }\n        adapters: [sqlite]\n      required: [subject, alias, tag]\n      properties:\n        subject:\n          type: string\n        alias:\n          type: string\n        tag:\n          type: string\n"
 
 	stores, err := Stores([]byte(doc), []string{"Profile"})
 	if err != nil {
@@ -131,7 +162,7 @@ func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testin
 
 	want := `CREATE UNIQUE INDEX IF NOT EXISTS "profile_unique_by_alias_and_tag" ON "profile" (json_extract(body, '$.alias'), json_extract(body, '$.tag'));`
 
-	got := storeddl.Table(stores[0].Snake, stores[0].Key, stores[0].Uniques)
+	got := storeddl.Table(storeddl.Shape{Snake: stores[0].Snake, Key: stores[0].Key, Uniques: stores[0].Uniques})
 	if !strings.Contains(got, want) {
 		t.Errorf("table:\n%s", got)
 	}
@@ -142,7 +173,7 @@ func TestALookupThatAnswersOneBecomesAUniqueIndexOverEveryFieldItReads(t *testin
 }
 
 func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
-	doc := "components:\n  schemas:\n    Account:\n      type: object\n      x-store:\n        key: subject\n        lookups: []\n        adapters: [sqlite]\n"
+	doc := pingPath + "components:\n  schemas:\n    Account:\n      type: object\n      x-store:\n        key: subject\n        lookups: []\n        adapters: [sqlite]\n      required: [subject]\n      properties:\n        subject:\n          type: string\n"
 
 	stores, err := Stores([]byte(doc), []string{"Account"})
 	if err != nil {
@@ -153,13 +184,14 @@ func TestTheKeyColumnIsTheDeclaredKeyAndNeverAssumedToBeId(t *testing.T) {
 		t.Fatalf("key: %q", stores[0].Key)
 	}
 
-	if !strings.Contains(storeddl.Table(stores[0].Snake, stores[0].Key, nil), `"subject" TEXT PRIMARY KEY`) {
-		t.Errorf("table: %s", storeddl.Table(stores[0].Snake, stores[0].Key, nil))
+	table := storeddl.Table(storeddl.Shape{Snake: stores[0].Snake, Key: stores[0].Key})
+	if !strings.Contains(table, `"subject" TEXT PRIMARY KEY`) {
+		t.Errorf("table: %s", table)
 	}
 }
 
 func TestACamelCaseKeyIsAQuotedColumnTheWriterSeeds(t *testing.T) {
-	doc := "components:\n  schemas:\n    Consent:\n      type: object\n      x-store:\n        key: accountId\n        lookups: []\n        adapters: [sqlite]\n      required: [accountId]\n"
+	doc := pingPath + "components:\n  schemas:\n    Consent:\n      type: object\n      x-store:\n        key: accountId\n        lookups: []\n        adapters: [sqlite]\n      required: [accountId]\n      properties:\n        accountId:\n          type: string\n"
 
 	databases, err := Plan([]byte(doc), []string{"Consent"}, []byte(`{"cases":[{"case":"c","operation":"createConsent","controllerReply":{"accountId":"a1"}}]}`))
 	if err != nil {
@@ -181,20 +213,80 @@ func TestACamelCaseKeyIsAQuotedColumnTheWriterSeeds(t *testing.T) {
 }
 
 func TestTheBooleanFormOfXStoreIsRefusedNamingTheSchema(t *testing.T) {
-	doc := "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store: true\n"
+	doc := pingPath + "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store: true\n      required: [id]\n      properties:\n        id:\n          type: string\n"
 
 	_, err := Stores([]byte(doc), []string{"Greeting"})
-	if err == nil || !strings.Contains(err.Error(), `finding store "Greeting": x-store is a boolean`) {
+	if err == nil || err.Error() != `reading the OpenAPI document: reading schema "Greeting": x-store is a boolean, it is an object naming key, lookups, order and adapters` {
 		t.Fatalf("the boolean form was not refused by name: %v", err)
 	}
 }
 
 func TestAStoreThatNamesNoKeyIsRefusedByName(t *testing.T) {
-	doc := "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store:\n        lookups: []\n        adapters: [sqlite]\n"
+	doc := pingPath + "components:\n  schemas:\n    Greeting:\n      type: object\n      x-store:\n        lookups: []\n        adapters: [sqlite]\n      required: [id]\n      properties:\n        id:\n          type: string\n"
 
 	_, err := Stores([]byte(doc), []string{"Greeting"})
-	if err == nil || !strings.Contains(err.Error(), "x-store names no key") {
+	if err == nil || err.Error() != `reading the OpenAPI document: reading schema "Greeting": x-store names no key, key names the required string property every row is stored under` {
 		t.Fatalf("a store with no key was not refused by name: %v", err)
+	}
+}
+
+const chatLineSpec = pingPath + `
+components:
+  schemas:
+    ChatLine:
+      type: object
+      x-store:
+        key: id
+        lookups:
+          - { by: [chatId], answers: page }
+          - { by: [accountId, chatId], answers: page }
+        order: postedAt
+        adapters: [sqlite, memory]
+      required: [id, chatId, accountId, postedAt]
+      properties:
+        id:
+          type: string
+        chatId:
+          type: string
+        accountId:
+          type: string
+        postedAt:
+          type: string
+          format: date-time
+`
+
+func TestTestenvSqliteSeedsTheSameIndexesTheSqliteAdapterCreates(t *testing.T) {
+	files, err := restrust.Generate([]byte(chatLineSpec), restrust.Options{Service: "songe-social"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	schema := ""
+
+	for _, f := range files {
+		if f.Path != "adapter/zz_generated_chat_line_sqlite.rs" {
+			continue
+		}
+
+		_, rest, found := strings.Cut(f.Content, "const SCHEMA: &str = r#\"")
+		if !found {
+			t.Fatalf("the sqlite adapter holds no SCHEMA:\n%s", f.Content)
+		}
+
+		schema, _, _ = strings.Cut(rest, "\"#;")
+	}
+
+	if !strings.Contains(schema, `CREATE INDEX IF NOT EXISTS "chat_line_page_by_chat_id"`) {
+		t.Fatalf("the sqlite adapter creates no page index, so this proof compares nothing:\n%s", schema)
+	}
+
+	stores, err := Stores([]byte(chatLineSpec), []string{"ChatLine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := Script(stores[0], nil); got != schema+"\n" {
+		t.Errorf("testenv-sqlite seeds a schema the sqlite adapter does not create:\n got %q\nwant %q", got, schema+"\n")
 	}
 }
 
@@ -320,7 +412,7 @@ func TestPlanPairsEveryStoreWithItsRowsAndScript(t *testing.T) {
 		t.Fatalf("databases: %+v", databases)
 	}
 
-	if !strings.HasPrefix(databases[0].Script, storeddl.Table("greeting", "id", nil)) {
+	if !strings.HasPrefix(databases[0].Script, storeddl.Table(storeddl.Shape{Snake: "greeting", Key: "id"})) {
 		t.Errorf("script: %s", databases[0].Script)
 	}
 }
@@ -331,7 +423,7 @@ func TestPlanWithoutVectorsYieldsEmptyStores(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(databases[0].Rows) != 0 || databases[0].Script != storeddl.Table("greeting", "id", nil)+"\n" {
+	if len(databases[0].Rows) != 0 || databases[0].Script != storeddl.Table(storeddl.Shape{Snake: "greeting", Key: "id"})+"\n" {
 		t.Errorf("databases: %+v", databases)
 	}
 }

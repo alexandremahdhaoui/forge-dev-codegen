@@ -44,22 +44,62 @@ func Index(snake string, properties []string) string {
 	return snake + "_unique_by_" + Joint(properties)
 }
 
-func Table(snake, key string, uniques [][]string) string {
+func PageIndex(snake string, properties []string) string {
+	return snake + "_page_by_" + Joint(properties)
+}
+
+func Extract(property string) string {
+	return "json_extract(body, " + Literal("$."+property) + ")"
+}
+
+func OrderBy(order, key string) string {
+	if order == "" {
+		return Identifier(key)
+	}
+
+	return Extract(order) + ", " + Identifier(key)
+}
+
+type Shape struct {
+	Snake   string
+	Key     string
+	Order   string
+	Uniques [][]string
+	Pages   [][]string
+}
+
+func Table(shape Shape) string {
 	var b strings.Builder
 
-	b.WriteString("CREATE TABLE IF NOT EXISTS " + Identifier(snake) + " (" + Identifier(key) + " TEXT PRIMARY KEY, body TEXT NOT NULL);\n")
+	b.WriteString("CREATE TABLE IF NOT EXISTS " + Identifier(shape.Snake) + " (" + Identifier(shape.Key) + " TEXT PRIMARY KEY, body TEXT NOT NULL);\n")
 
-	for _, properties := range uniques {
-		extracts := make([]string, 0, len(properties))
+	for _, properties := range shape.Uniques {
+		b.WriteString("CREATE UNIQUE INDEX IF NOT EXISTS " + Identifier(Index(shape.Snake, properties)) + " ON " + Identifier(shape.Snake) + " (" + extracts(properties) + ");\n")
+	}
 
-		for _, property := range properties {
-			extracts = append(extracts, "json_extract(body, "+Literal("$."+property)+")")
-		}
-
-		b.WriteString("CREATE UNIQUE INDEX IF NOT EXISTS " + Identifier(Index(snake, properties)) + " ON " + Identifier(snake) + " (" + strings.Join(extracts, ", ") + ");\n")
+	for _, properties := range orderedPages(shape) {
+		b.WriteString("CREATE INDEX IF NOT EXISTS " + Identifier(PageIndex(shape.Snake, properties)) + " ON " + Identifier(shape.Snake) + " (" + extracts(properties) + ", " + OrderBy(shape.Order, shape.Key) + ");\n")
 	}
 
 	b.WriteString(auditTable)
 
 	return b.String()
+}
+
+func orderedPages(shape Shape) [][]string {
+	if shape.Order == "" {
+		return nil
+	}
+
+	return shape.Pages
+}
+
+func extracts(properties []string) string {
+	read := make([]string, 0, len(properties))
+
+	for _, property := range properties {
+		read = append(read, Extract(property))
+	}
+
+	return strings.Join(read, ", ")
 }

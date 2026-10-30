@@ -168,7 +168,8 @@ func TestTheSqliteAdapterSpellsTheTableAndTheKeyAsQuotedIdentifiersInEverySqlItW
 		`CREATE UNIQUE INDEX IF NOT EXISTS "greeting_unique_by_name" ON "greeting" (json_extract(body, '$.name'));`,
 		`"SELECT body FROM \"greeting\" WHERE \"id\" = ?1"`,
 		`"INSERT INTO \"greeting\" (\"id\", body) VALUES (?1, ?2) ON CONFLICT(\"id\") DO UPDATE SET body = excluded.body"`,
-		`"SELECT body FROM \"greeting\" WHERE {}\"id\" > ?{} ORDER BY \"id\" LIMIT ?{}"`,
+		`"SELECT body FROM \"greeting\" WHERE {} ORDER BY \"id\" LIMIT ?{}"`,
+		`clauses.push(format!("\"id\" > ?{}", bound.len() + 1));`,
 	)
 }
 

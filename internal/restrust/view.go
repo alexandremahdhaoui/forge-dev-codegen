@@ -126,6 +126,14 @@ type storeView struct {
 	HasSqlite          bool
 	HasOneLookup       bool
 	Publishes          *publishView
+	Order              string
+	OrderIdent         string
+	OrderBySQL         string
+	Cursor             string
+	Stamped            bool
+	PageAfter          string
+	RowsAfter          string
+	PassAfter          string
 }
 
 type eventView struct {
@@ -332,14 +340,21 @@ func buildView(spec *Spec, opts Options) view {
 			sv.HasMemory = sv.HasMemory || kind == StoreAdapterMemory
 		}
 
+		orderStore(&sv, s)
+
 		held := map[string]bool{}
 		uniques := [][]string{}
+		pages := [][]string{}
 
 		for _, l := range s.Store.Lookups {
 			sv.HasOneLookup = sv.HasOneLookup || l.Answers == LookupOne
 
 			if l.Answers == LookupOne {
 				uniques = append(uniques, l.By)
+			}
+
+			if l.Answers == LookupPage {
+				pages = append(pages, l.By)
 			}
 
 			for i, field := range l.By {
@@ -369,7 +384,13 @@ func buildView(spec *Spec, opts Options) view {
 			})
 		}
 
-		sv.Schema = storeddl.Table(s.Snake, s.Store.Key, uniques)
+		sv.Schema = storeddl.Table(storeddl.Shape{
+			Snake:   s.Snake,
+			Key:     s.Store.Key,
+			Order:   sv.Order,
+			Uniques: uniques,
+			Pages:   pages,
+		})
 		sv.SchemaError = schemaError(s.Snake, uniques)
 
 		if published, feeds := publishedBy[s.Name]; feeds {
@@ -507,6 +528,28 @@ func buildView(spec *Spec, opts Options) view {
 	v.WireImports = sortedKeys(wire)
 
 	return v
+}
+
+const dateTimeFormat = "date-time"
+
+func orderStore(sv *storeView, s TypeDef) {
+	order := s.Store.Order
+
+	sv.PageAfter = "Option<String>"
+	sv.RowsAfter = "Option<&str>"
+	sv.PassAfter = "after.as_deref()"
+
+	if order != nil {
+		sv.Order = order.Name
+		sv.OrderIdent = order.Ident
+		sv.Cursor = s.Name + "Cursor"
+		sv.Stamped = order.Format == dateTimeFormat
+		sv.PageAfter = "Option<" + sv.Cursor + ">"
+		sv.RowsAfter = "Option<&" + sv.Cursor + ">"
+		sv.PassAfter = "after.as_ref()"
+	}
+
+	sv.OrderBySQL = rustLiteral(storeddl.OrderBy(sv.Order, s.Store.Key))
 }
 
 func schemaError(snake string, uniques [][]string) string {

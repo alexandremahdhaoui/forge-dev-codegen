@@ -23,7 +23,13 @@ import (
 func Script(store Store, rows []Row) string {
 	var b strings.Builder
 
-	b.WriteString(storeddl.Table(store.Snake, store.Key, store.Uniques))
+	b.WriteString(storeddl.Table(storeddl.Shape{
+		Snake:   store.Snake,
+		Key:     store.Key,
+		Order:   store.Order,
+		Uniques: store.Uniques,
+		Pages:   store.Pages,
+	}))
 	b.WriteString("\n")
 
 	for _, row := range rows {

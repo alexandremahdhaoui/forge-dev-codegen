@@ -458,6 +458,50 @@ The table name and the key column are quoted identifiers in the schema
 and in every statement the adapter runs, so a key named after a SQL
 keyword still reads and writes.
 
+x-store holds four keys: `key`, `lookups`, `order` and `adapters`. A
+lookup holds two: `by` and `answers`. The engine refuses any other key
+by name, so a misspelled key never passes without a word.
+
+A store with no `order` reads every page in key order. Its page method
+takes `after: Option<String>`, and the cursor is the last key the
+caller read.
+
+A store that needs another order declares one property to order by.
+
+```yaml
+x-store:
+  key: id
+  lookups:
+    - { by: [chatId], answers: page }
+  order: postedAt
+  adapters: [sqlite, memory]
+```
+
+Every page lookup of that store reads in ascending `postedAt` order. The
+key breaks a tie. The port file gains `<Store>Cursor`, which holds the
+order value and the key. `<Store>Cursor::from(&row)` builds the cursor
+from the last row of a page. Every page method takes
+`after: Option<<Store>Cursor>` by value and answers the rows strictly
+after that pair, so a row deleted between two pages never moves the
+next page.
+
+Sqlite compares the pair `(order, key)` and writes the cursor clause
+only when a cursor is given. Each page lookup gets one index named
+`<store>_page_by_<joint>` over its `by` properties, the order and the
+key. testenv-sqlite seeds the same indexes. Memory sorts the matching
+rows by the order value and then the key.
+
+The order property must be a required string. The engine refuses an
+order that names the key, because a store with no order already reads
+in key order. The engine refuses an order on a store with no page
+lookup. The engine also refuses an order
+that names a property of a page lookup's own `by` list, because every
+row that lookup answers holds one value there. When the order property
+declares `format: date-time`, both adapters refuse at put any value not
+written as `YYYY-MM-DDTHH:MM:SS.mmmZ` in UTC. The refusal arrives as
+`Put` and names the property and the value. One stamp form keeps the
+byte order and the time order the same in every service.
+
 The sqlite adapter writes no row, so a new sqlite file opens empty.
 testenv-sqlite seeds every database a test runs against.
 
