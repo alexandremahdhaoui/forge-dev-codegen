@@ -16,7 +16,6 @@ package vectorsrust_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,10 +348,7 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
 func buildSessionCargoWorkspace(t *testing.T) (string, string) {
 	t.Helper()
 
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+	cargo := cargoOnPath(t)
 
 	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
@@ -420,7 +416,6 @@ func TestTheSessionVectorsPassAgainstTheGeneratedSessionCellAndAMockedGate(t *te
 
 	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
-		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
 

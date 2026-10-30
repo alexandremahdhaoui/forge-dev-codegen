@@ -266,12 +266,7 @@ const cargoVectors = `{
 func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root string, cargo string) {
 	t.Helper()
 
-	var err error
-
-	cargo, err = exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+	cargo = cargoOnPath(t)
 
 	restFiles, err := restrust.Generate([]byte(cargoSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
@@ -349,17 +344,15 @@ func runCargo(t *testing.T, root, cargo string, args ...string) ([]byte, error) 
 	return cmd.CombinedOutput()
 }
 
-func skipOnNetworkError(t *testing.T, err error, out []byte) {
+func cargoOnPath(t *testing.T) string {
 	t.Helper()
 
-	lower := strings.ToLower(string(out))
-	if strings.Contains(lower, "could not resolve host") ||
-		strings.Contains(lower, "failed to get") ||
-		strings.Contains(lower, "network") ||
-		strings.Contains(lower, "spurious network error") ||
-		strings.Contains(lower, "403 forbidden") {
-		t.Skipf("cargo test needs network access to crates.io, which this run did not have: %v\n%s", err, out)
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Fatalf("cargo is not on PATH, and every vectors cargo proof needs it: %v", err)
 	}
+
+	return cargo
 }
 
 func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t *testing.T) {
@@ -367,7 +360,6 @@ func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t 
 
 	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
-		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
 
@@ -381,7 +373,6 @@ func TestAGeneratedTestCrateHoldingANoContentCasePassesClippyWithWarningsDenied(
 
 	out, err := runCargo(t, root, cargo, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
 	if err != nil {
-		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo clippy: %v\n%s", err, out)
 	}
 
@@ -445,10 +436,7 @@ const cargoRosterVectors = `{
 }`
 
 func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGeneratedGrpcClientAndDriver(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+	cargo := cargoOnPath(t)
 
 	cellFiles, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
 	if err != nil {
@@ -499,7 +487,6 @@ func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGenerat
 
 	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
-		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
 
@@ -542,8 +529,6 @@ func TestAMangledRequestBodyMappingMakesTheWithPredicateFailTheGeneratedTest(t *
 	if err == nil {
 		t.Fatalf("cargo test succeeded although the driver mangles the request body before it reaches the controller:\n%s", out)
 	}
-
-	skipOnNetworkError(t, err, out)
 
 	if !strings.Contains(string(out), "creating_a_greeting_succeeds") {
 		t.Fatalf("cargo test failed but not on the test asserting the body, got:\n%s", out)

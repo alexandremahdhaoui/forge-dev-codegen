@@ -238,10 +238,7 @@ func writeCrateRootPorts(write func(rel, content string)) {
 }
 
 func TestTheGeneratedVectorsCarryTheBearerAndReadTheStreamAgainstTheGuardedDriver(t *testing.T) {
-	cargo, err := exec.LookPath("cargo")
-	if err != nil {
-		t.Skip("cargo is not on PATH")
-	}
+	cargo := cargoOnPath(t)
 
 	restFiles, err := restrust.Generate([]byte(guardedSpec), restrust.Options{Service: "songe-hello"})
 	if err != nil {
@@ -290,7 +287,6 @@ func TestTheGeneratedVectorsCarryTheBearerAndReadTheStreamAgainstTheGuardedDrive
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
 
