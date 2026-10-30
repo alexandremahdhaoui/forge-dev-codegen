@@ -354,12 +354,16 @@ use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $
 
 #[derive(Debug, thiserror::Error)]
 pub enum {{ .ClientError }} {
-{{- range .Rpcs }}
-    #[error("calling {{ .Ident }}")]
-    {{ .Pascal }} {
+    #[error("{{ .Runtime.ClientDisplay }}")]
+    {{ .Runtime.Variant }} {
+        operation: String,
+        message: String,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+{{- range .Taxonomy }}
+    #[error("{{ .ClientDisplay }}")]
+    {{ .Variant }} { operation: String, message: String },
 {{- end }}
 }
 
@@ -500,13 +504,32 @@ impl {{ .ClientTrait }} for {{ .ClientStruct }} {
                     .{{ .Ident }}({{ .PbRequest }}::from(request))
                     .await
                     .map(|response| {{ .Response }}::from(response.into_inner()))
-                    .map_err(|source| {{ $.ClientError }}::{{ .Pascal }} {
-                        source: Box::new(source),
-                    })
+                    .map_err(|status| decode_status("{{ .Name }}", status))
             })
         })
     }
 {{ end -}}
+}
+
+fn decode_status(operation: &str, status: tonic::Status) -> {{ .ClientError }} {
+    let operation = operation.to_string();
+    let message = status.message().to_string();
+
+    match status.code() {
+        tonic::Code::{{ .Runtime.GrpcCode }} => {{ .ClientError }}::{{ .Runtime.Variant }} {
+            operation,
+            message,
+            source: None,
+        },
+{{- range .Taxonomy }}
+        tonic::Code::{{ .GrpcCode }} => {{ $.ClientError }}::{{ .Variant }} { operation, message },
+{{- end }}
+        code => {{ .ClientError }}::{{ .Runtime.Variant }} {
+            operation,
+            message: format!("{code:?}: {message}"),
+            source: Some(Box::new(status)),
+        },
+    }
 }
 {{ end -}}
 
@@ -546,11 +569,11 @@ fn status(error: {{ .ControllerError }}) -> tonic::Status {
     match error {
         {{ .ControllerError }}::{{ .Runtime.Variant }} { .. } => {
             eprintln!("{error:?}");
-            tonic::Status::{{ .Runtime.GrpcMethod }}("internal error")
+            tonic::Status::new(tonic::Code::{{ .Runtime.GrpcCode }}, "internal error")
         }
 {{- $e := .ControllerError }}
 {{- range .Taxonomy }}
-        {{ $e }}::{{ .Variant }} { .. } => tonic::Status::{{ .GrpcMethod }}({{ .DetailExpr }}),
+        {{ $e }}::{{ .Variant }} { .. } => tonic::Status::new(tonic::Code::{{ .GrpcCode }}, {{ .DetailExpr }}),
 {{- end }}
     }
 }

@@ -72,6 +72,7 @@ type callServiceView struct {
 	ClientConfig    string
 	ClientModule    string
 	ClientTrait     string
+	ClientError     string
 	ClientPortMod   string
 	Ops             []callMockOp
 }
@@ -91,7 +92,7 @@ type callTestView struct {
 	ClientStruct             string
 	ClientConfig             string
 	Refused                  bool
-	ExpectedCode             string
+	ExpectedArm              string
 	ExpectedMember           string
 	HasExpectedSubstring     bool
 	ExpectedSubstringLiteral string
@@ -170,6 +171,7 @@ func buildCallServiceView(svc *callService) callServiceView {
 		ClientConfig:    svc.Pascal + "GrpcClientConfig",
 		ClientModule:    svc.Snake + "_grpc_client",
 		ClientTrait:     svc.Pascal + "Client",
+		ClientError:     svc.Pascal + "ClientError",
 		ClientPortMod:   svc.Snake + "_client",
 	}
 
@@ -228,7 +230,7 @@ func buildCallTest(c VectorCase, svc *callService, view callServiceView) (callTe
 			subject = rpc.Name
 		}
 
-		tv.ExpectedCode = member.GrpcCode
+		tv.ExpectedArm = view.ClientError + "::" + member.Variant
 		tv.ExpectedMember = member.Variant
 		tv.Returning = "Err(" + member.Literal(view.ControllerError, subject, taxonomy.VectorFiller) + ")"
 

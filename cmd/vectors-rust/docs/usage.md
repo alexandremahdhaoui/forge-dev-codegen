@@ -379,9 +379,9 @@ must read back.
 
 A refusal case carries `expectedError` instead, naming the taxonomy member
 the controller answers. The mock answers that member and the test asserts
-the `tonic::Code` the taxonomy maps it to, walking the client error chain
-for the `tonic::Status`. Remap a member to a different code and the test
-fails.
+with `matches!` that the generated client returns the `<Service>ClientError`
+arm of that same member. A client that decodes the code into another arm
+fails the test. The taxonomy table test pins the code each member owns.
 
 ```json
 {

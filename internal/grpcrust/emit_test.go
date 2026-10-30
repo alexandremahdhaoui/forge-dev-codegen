@@ -281,7 +281,7 @@ func TestGeneratingTheHelloProtoEmitsTheWholeFileSet(t *testing.T) {
 				"pub trait HelloClient: Send + Sync {",
 				"    fn ping(&self, request: PingRequest) -> Result<PingReply, HelloClientError>;",
 				"pub enum HelloClientError {",
-				"        source: Box<dyn std::error::Error + Send + Sync>,",
+				"        source: Option<Box<dyn std::error::Error + Send + Sync>>,",
 			},
 		},
 		{

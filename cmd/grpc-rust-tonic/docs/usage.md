@@ -119,7 +119,7 @@ For every `service` in the file:
 | Emitted, under the cell | Side | Holds |
 |---|---|---|
 | `types/zz_generated_<service>_messages.rs` | both | one plain serde struct per message reachable from the service's rpcs |
-| `port/zz_generated_<service>_client.rs` | client | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` |
+| `port/zz_generated_<service>_client.rs` | client | trait `<Service>Client`, one method per rpc, mockable under test, and its error enum `<Service>ClientError` with one arm per taxonomy member |
 | `adapter/zz_generated_<service>_grpc_client.rs` | client | `<Service>GrpcClient`, a tonic channel behind the port trait |
 | `controller/zz_generated_<service>_controller.rs` | server | trait `<Service>Controller`, its error enum and `<Service>ControllerImpl` holding one boxed port per `layout.ports` entry |
 | `controller/<service>_controller.rs` | server | the impl block, written once and never again |
@@ -147,30 +147,48 @@ can fill the same pair of crates.
 `<Service>ControllerError` carries the taxonomy CLAUDE.md section 7
 names, the same one the rest cell uses, so a player mistake and a
 runtime failure never look alike over gRPC. The driver maps each arm to
-its gRPC status code.
+its gRPC status code with `tonic::Status::new(tonic::Code::<Code>, ...)`.
 
-| Controller error | gRPC status | Why |
+| Controller error | `tonic::Code` | Why |
 |---|---|---|
-| `Runtime` | `internal` | the caller did nothing wrong and learns nothing, the chain goes to stderr |
-| `Authentication` | `unauthenticated` | the request carries no valid credential |
-| `Authorization` | `permission_denied` | the caller is known and may not do this |
-| `NotFound` | `not_found` | the named entity does not exist |
-| `Invalid` | `invalid_argument` | the request itself is wrong, whatever the state |
-| `Semantic` | `failed_precondition` | the request is well formed and the state refuses it |
-| `RateLimited` | `resource_exhausted` | a quota ran out |
-| `NotImplemented` | `unimplemented` | the rpc is not served |
+| `Runtime` | `Internal` | the caller did nothing wrong and learns nothing, the chain goes to stderr |
+| `Authentication` | `Unauthenticated` | the request carries no valid credential |
+| `Authorization` | `PermissionDenied` | the caller is known and may not do this |
+| `NotFound` | `NotFound` | the named entity does not exist |
+| `Invalid` | `InvalidArgument` | the request itself is wrong, whatever the state |
+| `Semantic` | `FailedPrecondition` | the request is well formed and the state refuses it |
+| `RateLimited` | `ResourceExhausted` | a quota ran out |
+| `NotImplemented` | `Unimplemented` | the rpc is not served |
 
 Only `Runtime` hides its message. Every other arm sends
 `error.to_string()` as the status message, so the caller reads what it
 did wrong.
 
+`<Service>ClientError` carries the same eight members, one arm each, and
+no arm per rpc. The client adapter decodes the status code back into the
+member that owns it, so a controller holding the client port tells a
+refusal from a failure without importing tonic.
+
+| Client error arm | Fields |
+|---|---|
+| `Runtime` | `operation`, `message`, `source: Option<Box<dyn Error>>` |
+| every other member | `operation`, `message` |
+
+`operation` is the rpc name as the proto spells it. `message` is the
+status message. A code no member owns becomes `Runtime` with the message
+`"{code:?}: {status message}"` and the `tonic::Status` as its source. A
+`Runtime` decoded from `Internal` carries no source. Each arm reads its
+display string from the wire member its taxonomy member names, the same
+wording the rest client prints.
+
 The table is not written in this engine. `internal/taxonomy` owns the
 members, the variant fields, the display string, the wire type, the REST
-status, the gRPC status and the generic rule. rest-rust, grpc-rust-tonic
+status, the gRPC code and the generic rule. rest-rust, grpc-rust-tonic
 and vectors-rust all render from it, so this cell and the rest cell cannot
 drift. A vectors case names a member in `expectedError` and the generated
-test asserts the `tonic::Code` this table maps it to, so remapping an arm
-fails a vector.
+test asserts the client error arm the refusal decodes into, so a client
+that decodes a code into another arm fails a vector. The taxonomy table
+test pins the code each member owns.
 
 ## Where the prost types live
 

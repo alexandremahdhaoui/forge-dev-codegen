@@ -36,7 +36,6 @@ type Member struct {
 	Wire           string
 	RestStatus     int
 	RestStatusExpr string
-	GrpcMethod     string
 	GrpcCode       string
 	Generic        bool
 }
@@ -65,6 +64,16 @@ func (m Member) Literal(errorType, subject, filler string) string {
 	return fmt.Sprintf("%s::%s { %s }", errorType, m.Variant, strings.Join(parts, ", "))
 }
 
+func (m Member) ClientDisplay() string {
+	for _, w := range wire {
+		if w.Type == m.Wire {
+			return w.Display
+		}
+	}
+
+	return ""
+}
+
 func (m Member) DetailExpr() string {
 	if m.Generic {
 		return `"internal error".to_string()`
@@ -88,7 +97,6 @@ var runtime = Member{
 	Wire:           wireRuntime,
 	RestStatus:     500,
 	RestStatusExpr: "StatusCode::INTERNAL_SERVER_ERROR",
-	GrpcMethod:     "internal",
 	GrpcCode:       "Internal",
 	Generic:        true,
 }
@@ -101,7 +109,6 @@ var detailed = []Member{
 		Wire:           "authentication",
 		RestStatus:     401,
 		RestStatusExpr: "StatusCode::UNAUTHORIZED",
-		GrpcMethod:     "unauthenticated",
 		GrpcCode:       "Unauthenticated",
 	},
 	{
@@ -111,7 +118,6 @@ var detailed = []Member{
 		Wire:           "authorization",
 		RestStatus:     403,
 		RestStatusExpr: "StatusCode::FORBIDDEN",
-		GrpcMethod:     "permission_denied",
 		GrpcCode:       "PermissionDenied",
 	},
 	{
@@ -121,7 +127,6 @@ var detailed = []Member{
 		Wire:           "semantic",
 		RestStatus:     404,
 		RestStatusExpr: "StatusCode::NOT_FOUND",
-		GrpcMethod:     "not_found",
 		GrpcCode:       "NotFound",
 	},
 	{
@@ -131,7 +136,6 @@ var detailed = []Member{
 		Wire:           "validation",
 		RestStatus:     0,
 		RestStatusExpr: "invalid",
-		GrpcMethod:     "invalid_argument",
 		GrpcCode:       "InvalidArgument",
 	},
 	{
@@ -141,7 +145,6 @@ var detailed = []Member{
 		Wire:           "semantic",
 		RestStatus:     409,
 		RestStatusExpr: "StatusCode::CONFLICT",
-		GrpcMethod:     "failed_precondition",
 		GrpcCode:       "FailedPrecondition",
 	},
 	{
@@ -151,7 +154,6 @@ var detailed = []Member{
 		Wire:           "rateLimiting",
 		RestStatus:     429,
 		RestStatusExpr: "StatusCode::TOO_MANY_REQUESTS",
-		GrpcMethod:     "resource_exhausted",
 		GrpcCode:       "ResourceExhausted",
 	},
 	{
@@ -161,7 +163,6 @@ var detailed = []Member{
 		Wire:           wireRuntime,
 		RestStatus:     501,
 		RestStatusExpr: "StatusCode::NOT_IMPLEMENTED",
-		GrpcMethod:     "unimplemented",
 		GrpcCode:       "Unimplemented",
 	},
 }

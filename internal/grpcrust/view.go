@@ -44,7 +44,7 @@ const (
 
 type rpcView struct {
 	Ident      string
-	Pascal     string
+	Name       string
 	Request    string
 	Response   string
 	PbRequest  string
@@ -310,7 +310,7 @@ func buildServiceView(spec *Spec, svc Service, opts Options, only bool) (service
 	for _, r := range svc.Rpcs {
 		sv.Rpcs = append(sv.Rpcs, rpcView{
 			Ident:      rustname.Snake(r.Name),
-			Pascal:     rustname.Pascal(r.Name),
+			Name:       r.Name,
 			Request:    rustname.Pascal(r.Request),
 			Response:   rustname.Pascal(r.Response),
 			PbRequest:  "pb::" + rustname.Pascal(r.Request),

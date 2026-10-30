@@ -361,41 +361,35 @@ func TestANamedErrorOnASuccessCaseIsRefused(t *testing.T) {
 	}
 }
 
-func TestEveryTaxonomyMemberCanBeNamedOnAGrpcCaseAndAssertsItsStatusCode(t *testing.T) {
-	tests := []struct {
-		member string
-		code   string
-	}{
-		{member: "Authentication", code: "Unauthenticated"},
-		{member: "Authorization", code: "PermissionDenied"},
-		{member: "NotFound", code: "NotFound"},
-		{member: "Invalid", code: "InvalidArgument"},
-		{member: "Semantic", code: "FailedPrecondition"},
-		{member: "RateLimited", code: "ResourceExhausted"},
-		{member: "NotImplemented", code: "Unimplemented"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.member, func(t *testing.T) {
-			cases := `{"cases": [{"case": "a", "operation": "grpc_Ping", "input": {"message": "songe", "count": 0}, "expectedError": "` + tc.member + `"}]}`
+func TestARefusedGrpcVectorAssertsTheClientErrorArmTheRefusalDecodesInto(t *testing.T) {
+	for _, member := range []string{"Authentication", "Authorization", "NotFound", "Invalid", "Semantic", "RateLimited", "NotImplemented"} {
+		t.Run(member, func(t *testing.T) {
+			cases := `{"cases": [{"case": "a", "operation": "grpc_Ping", "input": {"message": "songe", "count": 0}, "expectedError": "` + member + `"}]}`
 
 			files, err := vectorsrust.Generate([]byte(helloSpec), []byte(cases), callOptions())
 			if err != nil {
 				t.Fatalf("generating: %v", err)
 			}
 
-			if want := "tonic::Code::" + tc.code + ","; !strings.Contains(files[0].Content, want) {
-				t.Fatalf("the emitted test lacks %q\n%s", want, files[0].Content)
+			for _, want := range []string{
+				"Err(HelloControllerError::" + member + " {",
+				"matches!(error, HelloClientError::" + member + " { .. }),",
+			} {
+				if !strings.Contains(files[0].Content, want) {
+					t.Fatalf("the emitted test lacks %q\n%s", want, files[0].Content)
+				}
 			}
 
-			if want := "HelloControllerError::" + tc.member + " {"; !strings.Contains(files[0].Content, want) {
-				t.Fatalf("the emitted test lacks %q\n%s", want, files[0].Content)
+			for _, gone := range []string{"grpc_code", "tonic::Code", "downcast_ref::<tonic::Status>"} {
+				if strings.Contains(files[0].Content, gone) {
+					t.Fatalf("the emitted test still walks the chain for a tonic code through %q\n%s", gone, files[0].Content)
+				}
 			}
 		})
 	}
 }
 
-func TestAGrpcCaseWithoutARefusalCarriesNoStatusHelper(t *testing.T) {
+func TestAGrpcCaseWithoutARefusalImportsNoClientError(t *testing.T) {
 	cases := `{"cases": [{"case": "a", "operation": "grpc_Ping", "input": {"message": "songe", "count": 1}, "controllerReply": {"message": "songe", "count": 2}}]}`
 
 	files, err := vectorsrust.Generate([]byte(helloSpec), []byte(cases), callOptions())
@@ -403,7 +397,11 @@ func TestAGrpcCaseWithoutARefusalCarriesNoStatusHelper(t *testing.T) {
 		t.Fatalf("generating: %v", err)
 	}
 
-	if strings.Contains(files[0].Content, "fn grpc_code(") {
-		t.Fatalf("a file with no refused call carries the status helper\n%s", files[0].Content)
+	if !strings.Contains(files[0].Content, "use songe_hello::grpc::port::hello_client::HelloClient;") {
+		t.Fatalf("a file with no refused call lacks the client trait import\n%s", files[0].Content)
+	}
+
+	if strings.Contains(files[0].Content, "HelloClientError") {
+		t.Fatalf("a file with no refused call imports the client error it never matches\n%s", files[0].Content)
 	}
 }

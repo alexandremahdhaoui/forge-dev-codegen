@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/taxonomy"
-	"github.com/alexandremahdhaoui/forge-dev-codegen/pkg/rustname"
 )
 
 func TestEveryMemberNamesAWireTypeTheClientEnumDeclares(t *testing.T) {
@@ -35,14 +34,18 @@ func TestEveryMemberNamesAWireTypeTheClientEnumDeclares(t *testing.T) {
 	}
 }
 
-func TestEveryMemberCarriesARestStatusAGrpcMethodAndAGrpcCode(t *testing.T) {
+func TestEveryMemberCarriesARestStatusAGrpcCodeAndAClientDisplay(t *testing.T) {
 	for _, m := range taxonomy.All("greeting") {
 		if m.RestStatusExpr == "" {
 			t.Errorf("member %s carries no rest status expression", m.Variant)
 		}
 
-		if m.GrpcMethod == "" || m.GrpcCode == "" {
-			t.Errorf("member %s carries no grpc status, got method %q and code %q", m.Variant, m.GrpcMethod, m.GrpcCode)
+		if m.GrpcCode == "" {
+			t.Errorf("member %s carries no grpc code", m.Variant)
+		}
+
+		if m.ClientDisplay() == "" {
+			t.Errorf("member %s names wire type %q and reads no client display", m.Variant, m.Wire)
 		}
 
 		if len(m.Fields) == 0 {
@@ -51,26 +54,35 @@ func TestEveryMemberCarriesARestStatusAGrpcMethodAndAGrpcCode(t *testing.T) {
 	}
 }
 
-func TestTheGrpcMethodAndTheGrpcCodeNameOneStatus(t *testing.T) {
-	for _, m := range taxonomy.All("greeting") {
-		if want := rustname.Pascal(m.GrpcMethod); want != m.GrpcCode {
-			t.Errorf(
-				"member %s builds tonic::Status::%s and a vector asserts tonic::Code::%s, want tonic::Code::%s, the driver and the vector would disagree",
-				m.Variant, m.GrpcMethod, m.GrpcCode, want,
-			)
-		}
+func TestEveryTaxonomyMemberOwnsADistinctGrpcCodeSoTheClientDecodeIsTheInverseOfTheDriver(t *testing.T) {
+	want := map[string]string{
+		"Runtime":        "Internal",
+		"Authentication": "Unauthenticated",
+		"Authorization":  "PermissionDenied",
+		"NotFound":       "NotFound",
+		"Invalid":        "InvalidArgument",
+		"Semantic":       "FailedPrecondition",
+		"RateLimited":    "ResourceExhausted",
+		"NotImplemented": "Unimplemented",
 	}
-}
 
-func TestNoTwoMembersShareAGrpcCode(t *testing.T) {
-	seen := map[string]string{}
+	members := taxonomy.All("greeting")
+	if len(members) != len(want) {
+		t.Fatalf("the taxonomy holds %d members, the code table pins %d", len(members), len(want))
+	}
 
-	for _, m := range taxonomy.All("greeting") {
-		if other, taken := seen[m.GrpcCode]; taken {
-			t.Errorf("members %s and %s both map to tonic::Code::%s, a caller cannot tell them apart", other, m.Variant, m.GrpcCode)
+	owner := map[string]string{}
+
+	for _, m := range members {
+		if code, ok := want[m.Variant]; !ok || code != m.GrpcCode {
+			t.Errorf("member %s maps to tonic::Code::%s, the code table pins %q", m.Variant, m.GrpcCode, code)
 		}
 
-		seen[m.GrpcCode] = m.Variant
+		if other, taken := owner[m.GrpcCode]; taken {
+			t.Errorf("members %s and %s both map to tonic::Code::%s, the client cannot decode one of them back", other, m.Variant, m.GrpcCode)
+		}
+
+		owner[m.GrpcCode] = m.Variant
 	}
 }
 

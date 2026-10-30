@@ -265,7 +265,11 @@ use {{ .Crate }}::{{ .Datagram.Cell }}::types::{{ .Datagram.PushModule }}::{{ .D
 use {{ .Crate }}::{{ .Call.Cell }}::adapter::{{ .Call.ClientModule }}::{{ "{" }}{{ .Call.ClientStruct }}, {{ .Call.ClientConfig }}{{ "}" }};
 use {{ .Crate }}::{{ .Call.Cell }}::controller::{{ .Call.ControllerError }};
 use {{ .Crate }}::{{ .Call.Cell }}::driver::{{ .Call.DriverModule }}::{{ "{" }}{{ .Call.DriverStruct }}, {{ .Call.DriverConfig }}{{ "}" }};
+{{- if .HasRefusedCalls }}
+use {{ .Crate }}::{{ .Call.Cell }}::port::{{ .Call.ClientPortMod }}::{{ "{" }}{{ .Call.ClientTrait }}, {{ .Call.ClientError }}{{ "}" }};
+{{- else }}
 use {{ .Crate }}::{{ .Call.Cell }}::port::{{ .Call.ClientPortMod }}::{{ .Call.ClientTrait }};
+{{- end }}
 use {{ .Crate }}::{{ .Call.Cell }}::types::{{ .Call.TypesModule }} as {{ .Call.TypesAlias }};
 {{ end }}
 {{- if or .HasDatagrams .HasCalls }}
@@ -279,21 +283,6 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     }
 
     parts.join(": ")
-}
-{{ end }}
-{{- if .HasRefusedCalls }}
-fn grpc_code(error: &(dyn std::error::Error + 'static)) -> tonic::Code {
-    let mut current = Some(error);
-
-    while let Some(node) = current {
-        if let Some(status) = node.downcast_ref::<tonic::Status>() {
-            return status.code();
-        }
-
-        current = node.source();
-    }
-
-    panic!("the error chain carries no tonic status: {}", error_chain(error));
 }
 {{ end }}
 {{- if .NeedsBodyMatcher }}
@@ -921,14 +910,13 @@ async fn {{ .Name }}() {
 
     let chain = error_chain(&error);
 
-    assert_eq!(
-        grpc_code(&error),
-        tonic::Code::{{ .ExpectedCode }},
-        "{{ .ExpectedMember }} maps to tonic::Code::{{ .ExpectedCode }}, the status carried {chain:?}"
+    assert!(
+        matches!(error, {{ .ExpectedArm }} { .. }),
+        "{{ .ExpectedMember }} decodes into {{ .ExpectedArm }}, the client answered {chain:?}"
     );
 {{- if .HasExpectedSubstring }}
 
-    assert!(chain.contains({{ .ExpectedSubstringLiteral }}), "status {chain:?} lacks {:?}", {{ .ExpectedSubstringLiteral }});
+    assert!(chain.contains({{ .ExpectedSubstringLiteral }}), "the client error {chain:?} lacks {:?}", {{ .ExpectedSubstringLiteral }});
 {{- end }}
 {{- else }}
     let reply = client

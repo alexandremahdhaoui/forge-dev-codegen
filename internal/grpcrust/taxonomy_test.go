@@ -51,14 +51,14 @@ func TestTheGrpcDriverMapsEveryTaxonomyMemberToItsStatusCodeAndHidesARuntimeFail
 
 	for _, want := range []string{
 		"fn status(error: HelloControllerError) -> tonic::Status {",
-		"HelloControllerError::Runtime { .. } => {\n            eprintln!(\"{error:?}\");\n            tonic::Status::internal(\"internal error\")\n        }",
-		"HelloControllerError::Authentication { .. } => tonic::Status::unauthenticated(error.to_string()),",
-		"HelloControllerError::Authorization { .. } => tonic::Status::permission_denied(error.to_string()),",
-		"HelloControllerError::NotFound { .. } => tonic::Status::not_found(error.to_string()),",
-		"HelloControllerError::Invalid { .. } => tonic::Status::invalid_argument(error.to_string()),",
-		"HelloControllerError::Semantic { .. } => tonic::Status::failed_precondition(error.to_string()),",
-		"HelloControllerError::RateLimited { .. } => tonic::Status::resource_exhausted(error.to_string()),",
-		"HelloControllerError::NotImplemented { .. } => tonic::Status::unimplemented(error.to_string()),",
+		"HelloControllerError::Runtime { .. } => {\n            eprintln!(\"{error:?}\");\n            tonic::Status::new(tonic::Code::Internal, \"internal error\")\n        }",
+		"HelloControllerError::Authentication { .. } => tonic::Status::new(tonic::Code::Unauthenticated, error.to_string()),",
+		"HelloControllerError::Authorization { .. } => tonic::Status::new(tonic::Code::PermissionDenied, error.to_string()),",
+		"HelloControllerError::NotFound { .. } => tonic::Status::new(tonic::Code::NotFound, error.to_string()),",
+		"HelloControllerError::Invalid { .. } => tonic::Status::new(tonic::Code::InvalidArgument, error.to_string()),",
+		"HelloControllerError::Semantic { .. } => tonic::Status::new(tonic::Code::FailedPrecondition, error.to_string()),",
+		"HelloControllerError::RateLimited { .. } => tonic::Status::new(tonic::Code::ResourceExhausted, error.to_string()),",
+		"HelloControllerError::NotImplemented { .. } => tonic::Status::new(tonic::Code::Unimplemented, error.to_string()),",
 		".map_err(status)?;",
 	} {
 		if !strings.Contains(content, want) {
@@ -66,7 +66,63 @@ func TestTheGrpcDriverMapsEveryTaxonomyMemberToItsStatusCodeAndHidesARuntimeFail
 		}
 	}
 
-	if strings.Contains(content, "tonic::Status::internal(source.to_string())") {
-		t.Fatal("the driver still folds every controller error into the internal status")
+	for _, gone := range []string{"tonic::Status::internal(", "tonic::Status::not_found(", "tonic::Status::unauthenticated("} {
+		if strings.Contains(content, gone) {
+			t.Fatalf("the driver still spells a code through the method %q:\n%s", gone, content)
+		}
+	}
+}
+
+func TestTheGrpcClientErrorCarriesOneArmPerTaxonomyMemberAndNoArmPerRpc(t *testing.T) {
+	files, err := grpcrust.Generate([]byte(rosterProto), grpcrust.Options{Service: "songe-roster"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	var content string
+
+	for _, f := range files {
+		if f.Path == "port/zz_generated_roster_client.rs" {
+			content = f.Content
+		}
+	}
+
+	for _, want := range []string{
+		"pub enum RosterClientError {",
+		"    #[error(\"calling {operation:?}: {message}\")]\n    Runtime {\n        operation: String,\n        message: String,\n        #[source]\n        source: Option<Box<dyn std::error::Error + Send + Sync>>,\n    },",
+		"    #[error(\"calling {operation:?}: authentication refused: {message}\")]\n    Authentication { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: authorization refused: {message}\")]\n    Authorization { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: {message}\")]\n    NotFound { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: validation failed: {message}\")]\n    Invalid { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: {message}\")]\n    Semantic { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: rate limited: {message}\")]\n    RateLimited { operation: String, message: String },",
+		"    #[error(\"calling {operation:?}: {message}\")]\n    NotImplemented { operation: String, message: String },",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the client error lacks %q:\n%s", want, content)
+		}
+	}
+
+	for _, gone := range []string{"    List {", "    Forget {", "calling list", "calling forget"} {
+		if strings.Contains(content, gone) {
+			t.Errorf("the client error still carries an arm per rpc through %q:\n%s", gone, content)
+		}
+	}
+}
+
+func TestTheGrpcClientAdapterDecodesACodeOutsideTheTaxonomyAsRuntimeNamingTheCodeAndKeepingTheStatus(t *testing.T) {
+	content := generatedGrpcFile(t, "adapter/zz_generated_hello_grpc_client.rs")
+
+	for _, want := range []string{
+		".map_err(|status| decode_status(\"Ping\", status))",
+		"fn decode_status(operation: &str, status: tonic::Status) -> HelloClientError {",
+		"    let message = status.message().to_string();",
+		"        tonic::Code::Internal => HelloClientError::Runtime {\n            operation,\n            message,\n            source: None,\n        },",
+		"        tonic::Code::NotFound => HelloClientError::NotFound { operation, message },",
+		"        code => HelloClientError::Runtime {\n            operation,\n            message: format!(\"{code:?}: {message}\"),\n            source: Some(Box::new(status)),\n        },",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the client adapter lacks %q:\n%s", want, content)
+		}
 	}
 }
