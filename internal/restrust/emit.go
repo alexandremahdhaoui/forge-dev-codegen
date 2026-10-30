@@ -1126,7 +1126,7 @@ impl {{ $s.Port }} for {{ $s.Struct }} {
 {{- if $s.Publishes }}
         self.{{ $s.Publishes.PortSnake }}
             .publish(
-                &id,
+                &v.{{ $s.Publishes.KeyIdent }},
                 {{ $s.Publishes.Name }} {
 {{- range $s.Publishes.Assigns }}
                     {{ . }}
@@ -1347,7 +1347,7 @@ impl {{ $s.Port }} for {{ $s.MemoryStruct }} {
 {{- if $s.Publishes }}
         self.{{ $s.Publishes.PortSnake }}
             .publish(
-                &id,
+                &v.{{ $s.Publishes.KeyIdent }},
                 {{ $s.Publishes.Name }} {
 {{- range $s.Publishes.Assigns }}
                     {{ . }}

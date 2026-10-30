@@ -9,8 +9,8 @@ The document decides everything. A schema becomes a type. A schema
 marked `x-store` also becomes a store port and a sqlite adapter. An
 operation names its controller with `x-controller` and the ports that
 controller consumes with `x-ports`. An operation marked `x-auth: bearer`
-is guarded by a ticket verifier. A GET operation marked
-`x-stream: events` answers an event stream. A parameter declared
+is guarded by a ticket verifier. A GET operation marked `x-stream`
+answers an event stream. A parameter declared
 `in: path` or `in: query` becomes an argument of the controller method
 and of the client method. The paths become the axum router.
 
@@ -273,8 +273,27 @@ bodies together, which rustc cannot do.
 
 ## Streams
 
-`x-stream: events` on a GET operation makes its 2xx response a
-`text/event-stream`. The response schema, declared under
+`x-stream` on a GET operation makes its 2xx response a
+`text/event-stream`. The object names three things. `from` is the
+`x-store` schema whose saves feed the stream. `key` is a required string
+property of that schema, and both store adapters publish each saved
+record under the value of that property. `adapters` lists the feed
+adapters the engine emits.
+
+```yaml
+x-stream:
+  from: ChatLine
+  key: chatId
+  adapters: [memory]
+```
+
+A chat line stored under its `lineId` then reaches every subscriber of
+its `chatId`. The engine refuses an `x-stream` with no key, a key the
+`from` schema does not declare, and a key that is not a required string
+property. The key is spelled as the property is spelled in the schema,
+the same way an `x-store` key and lookup are spelled.
+
+The response schema, declared under
 `text/event-stream`, is the event type. The controller method answers
 `std::sync::mpsc::Receiver<Event>`, the controller decides who may
 subscribe, and the driver forwards every event as one `data:` frame

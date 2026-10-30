@@ -43,6 +43,7 @@ paths:
       x-auth: bearer
       x-stream:
         from: Greeting
+        key: id
         adapters: [memory]
       parameters:
         - name: id

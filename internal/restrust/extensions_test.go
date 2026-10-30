@@ -82,6 +82,7 @@ paths:
       x-auth: bearer
       x-stream:
         from: Greeting
+        key: id
         adapters: [memory]
       parameters:
         - name: id
@@ -448,7 +449,7 @@ func TestBothSidesEmitTheDriverAndTheClientInOneCell(t *testing.T) {
 func streamRefusal(t *testing.T, block, want string) {
 	t.Helper()
 
-	spec := strings.Replace(guardedSpec, "      x-stream:\n        from: Greeting\n        adapters: [memory]\n", block, 1)
+	spec := strings.Replace(guardedSpec, "      x-stream:\n        from: Greeting\n        key: id\n        adapters: [memory]\n", block, 1)
 
 	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
 	if err == nil || !strings.Contains(err.Error(), want) {
@@ -457,12 +458,12 @@ func streamRefusal(t *testing.T, block, want string) {
 }
 
 func TestTheWordFormOfXStreamIsRefusedInFavourOfTheObject(t *testing.T) {
-	streamRefusal(t, "      x-stream: events\n", `x-stream is "events", it is an object naming from and adapters`)
+	streamRefusal(t, "      x-stream: events\n", `x-stream is "events", it is an object naming from, key and adapters`)
 }
 
 func TestAStreamThatNamesNoFromOrNoAdaptersIsRefusedByName(t *testing.T) {
 	streamRefusal(t, "      x-stream:\n        adapters: [memory]\n", "x-stream names no from")
-	streamRefusal(t, "      x-stream:\n        from: Greeting\n", "x-stream names no adapters")
+	streamRefusal(t, "      x-stream:\n        from: Greeting\n        key: id\n", "x-stream names no adapters")
 }
 
 func TestAStreamReadingFromASchemaThatIsNotAStoreIsRefusedByName(t *testing.T) {
@@ -470,7 +471,7 @@ func TestAStreamReadingFromASchemaThatIsNotAStoreIsRefusedByName(t *testing.T) {
 }
 
 func TestAnUnknownFeedAdapterKindIsRefusedWithTheKindsThatAreAllowed(t *testing.T) {
-	streamRefusal(t, "      x-stream:\n        from: Greeting\n        adapters: [kafka]\n", `adapter kind "kafka", a feed adapter is one of memory`)
+	streamRefusal(t, "      x-stream:\n        from: Greeting\n        key: id\n        adapters: [kafka]\n", `adapter kind "kafka", a feed adapter is one of memory`)
 }
 
 func TestAnEventCarryingAPropertyTheStoredRecordDoesNotHoldIsRefusedByName(t *testing.T) {
@@ -514,7 +515,7 @@ func TestAnXAuthValueOtherThanBearerIsRefused(t *testing.T) {
 }
 
 func TestAnXStreamOperationThatIsNotAGetIsRefused(t *testing.T) {
-	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      parameters:", "x-auth: bearer\n      x-stream:\n        from: Greeting\n        adapters: [memory]\n      parameters:", 1)
+	spec := strings.Replace(guardedSpec, "x-auth: bearer\n      parameters:", "x-auth: bearer\n      x-stream:\n        from: Greeting\n        key: id\n        adapters: [memory]\n      parameters:", 1)
 
 	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-hello"})
 	if err == nil || !strings.Contains(err.Error(), "x-stream is only allowed on a GET operation") {

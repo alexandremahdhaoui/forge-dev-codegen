@@ -259,6 +259,7 @@ type Operation struct {
 	Auth           bool
 	Stream         bool
 	StreamFrom     string
+	StreamKey      string
 	StreamAdapters []string
 }
 
@@ -284,6 +285,8 @@ type Event struct {
 	TypeDef
 
 	From     TypeDef
+	Key      string
+	KeyIdent string
 	Adapters []string
 }
 
@@ -443,7 +446,13 @@ func eventTypes(operations []Operation, types []TypeDef) ([]Event, error) {
 			continue
 		}
 
-		events = append(events, Event{TypeDef: t, From: byName[op.StreamFrom], Adapters: op.StreamAdapters})
+		events = append(events, Event{
+			TypeDef:  t,
+			From:     byName[op.StreamFrom],
+			Key:      op.StreamKey,
+			KeyIdent: rustname.RustIdent(op.StreamKey),
+			Adapters: op.StreamAdapters,
+		})
 	}
 
 	return events, nil
@@ -1222,7 +1231,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		return Operation{}, err
 	}
 
-	stream, streamFrom, streamAdapters, err := parseStream(where, method, op, storeTypes)
+	stream, source, err := parseStream(where, method, op, storeTypes)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -1251,7 +1260,7 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 	}
 
 	if stream {
-		if err := checkStreamMapping(where, response, streamFrom, byName); err != nil {
+		if err := checkStreamMapping(where, response, source.From, byName); err != nil {
 			return Operation{}, err
 		}
 	}
@@ -1278,8 +1287,9 @@ func parseOperation(path, method string, raw json.RawMessage, schemas map[string
 		Ports:          ports,
 		Auth:           auth,
 		Stream:         stream,
-		StreamFrom:     streamFrom.Name,
-		StreamAdapters: streamAdapters,
+		StreamFrom:     source.From.Name,
+		StreamKey:      source.Key,
+		StreamAdapters: source.Adapters,
 	}, nil
 }
 
@@ -1294,53 +1304,84 @@ func parseAuth(where string, op operation) (bool, error) {
 	}
 }
 
-func parseStream(where, method string, op operation, stores map[string]TypeDef) (bool, TypeDef, []string, error) {
+type streamSource struct {
+	From     TypeDef
+	Key      string
+	Adapters []string
+}
+
+func parseStream(where, method string, op operation, stores map[string]TypeDef) (bool, streamSource, error) {
 	if len(op.Stream) == 0 {
-		return false, TypeDef{}, nil, nil
+		return false, streamSource{}, nil
 	}
 
 	var word string
 	if err := json.Unmarshal(op.Stream, &word); err == nil {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is %q, it is an object naming from and adapters", where, word)
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream is %q, it is an object naming from, key and adapters", where, word)
 	}
 
 	var declared struct {
 		From     string    `json:"from"`
+		Key      string    `json:"key"`
 		Adapters *[]string `json:"adapters"`
 	}
 
 	if err := json.Unmarshal(op.Stream, &declared); err != nil {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is an object naming from and adapters: %w", where, err)
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream is an object naming from, key and adapters: %w", where, err)
 	}
 
 	if method != "get" {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream is only allowed on a GET operation", where)
 	}
 
 	if declared.From == "" {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names no from, from names the x-store schema whose saves feed this stream", where)
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream names no from, from names the x-store schema whose saves feed this stream", where)
 	}
 
 	source, stored := stores[declared.From]
 	if !stored {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream reads from %q, which is not an x-store schema, the stores are %s", where, declared.From, list(sortedKeys(stores)))
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream reads from %q, which is not an x-store schema, the stores are %s", where, declared.From, list(sortedKeys(stores)))
+	}
+
+	if err := checkStreamKey(where, declared.Key, source); err != nil {
+		return false, streamSource{}, err
 	}
 
 	if declared.Adapters == nil {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names no adapters, adapters lists which of %s the engine emits", where, list(FeedAdapterKinds()))
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream names no adapters, adapters lists which of %s the engine emits", where, list(FeedAdapterKinds()))
 	}
 
 	if len(*declared.Adapters) == 0 {
-		return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names an empty adapters list, a feed nobody can build is a feed nobody can use", where)
+		return false, streamSource{}, fmt.Errorf("reading %s: x-stream names an empty adapters list, a feed nobody can build is a feed nobody can use", where)
 	}
 
 	for _, kind := range *declared.Adapters {
 		if kind != FeedAdapterMemory {
-			return false, TypeDef{}, nil, fmt.Errorf("reading %s: x-stream names adapter kind %q, a feed adapter is one of %s", where, kind, list(FeedAdapterKinds()))
+			return false, streamSource{}, fmt.Errorf("reading %s: x-stream names adapter kind %q, a feed adapter is one of %s", where, kind, list(FeedAdapterKinds()))
 		}
 	}
 
-	return true, source, *declared.Adapters, nil
+	return true, streamSource{From: source, Key: declared.Key, Adapters: *declared.Adapters}, nil
+}
+
+func checkStreamKey(where, key string, source TypeDef) error {
+	if key == "" {
+		return fmt.Errorf("reading %s: x-stream names no key, key names the required string property of %q whose value a saved record is published under", where, source.Name)
+	}
+
+	for _, f := range source.Fields {
+		if f.Name != key {
+			continue
+		}
+
+		if f.Optional || f.Type.Kind != "string" {
+			return fmt.Errorf("reading %s: the x-stream key names property %q of %q, which must be a required string property", where, key, source.Name)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("reading %s: the x-stream key names property %q, which %q does not declare", where, key, source.Name)
 }
 
 func checkStreamMapping(where, event string, source TypeDef, byName map[string]TypeDef) error {

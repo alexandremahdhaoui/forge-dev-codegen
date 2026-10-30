@@ -122,7 +122,17 @@ too.
 
 ## Stream cases
 
-An operation marked `x-stream: events` answers `text/event-stream`.
+An operation marked `x-stream` answers `text/event-stream`. Its
+`x-stream` object names `from`, `key` and `adapters`, as rest-rust reads
+them.
+
+```yaml
+x-stream:
+  from: Greeting
+  key: id
+  adapters: [memory]
+```
+
 `controllerReply` is one event. The mocked controller answers a receiver
 holding that one event and closes it. The test asserts the status, the
 content type, and matches `expectedBody` against the first `data:` frame

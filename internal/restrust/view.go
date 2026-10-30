@@ -96,6 +96,7 @@ type publishView struct {
 	Snake     string
 	Port      string
 	PortSnake string
+	KeyIdent  string
 	Assigns   []string
 }
 
@@ -301,6 +302,7 @@ func buildView(spec *Spec, opts Options) view {
 			Snake:     e.Snake,
 			Port:      e.Name + SubscribePortSuffix,
 			PortSnake: e.Snake + "_subscribe",
+			KeyIdent:  e.KeyIdent,
 			Assigns:   publishAssigns(e.TypeDef),
 		}
 	}
