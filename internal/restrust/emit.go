@@ -1734,13 +1734,24 @@ impl {{ $a.Struct }} {
         Ok((set, max_age))
     }
 
+    fn untrusted(&self, kid: &str) -> Result<{{ $p.Error }}, {{ $p.Error }}> {
+        if self.cache()?.keys.contains_key(kid) {
+            return Ok(refused(format!("the key id {kid:?} names no key the verifier trusts now")));
+        }
+
+        Ok(refused(format!("no published key carries the key id {kid:?}")))
+    }
+
     fn key(&self, kid: &str) -> Result<(DecodingKey, Algorithm), {{ $p.Error }}> {
-        let jwk = match self.cached(kid)? {
+        let found = match self.cached(kid)? {
             Some(jwk) => Some(jwk),
             None if self.window_open()? => None,
             None => self.fetched(kid)?,
-        }
-        .ok_or_else(|| refused(format!("no published key carries the key id {kid:?}")))?;
+        };
+
+        let Some(jwk) = found else {
+            return Err(self.untrusted(kid)?);
+        };
 
         if let AlgorithmParameters::OctetKey(_) = jwk.algorithm {
             return Err(refused(format!(

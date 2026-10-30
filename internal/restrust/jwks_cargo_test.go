@@ -490,7 +490,7 @@ async fn two_unknown_key_ids_while_the_key_set_url_answers_500_cause_one_fetch()
     let second = refusal(verifier.verify(&sign_with("never-published", &claims())));
 
     assert!(matches!(first, Err(GoogleVerifierError::Call { .. })), "{first:?}");
-    assert!(second.contains("never-published"), "{second}");
+    assert_eq!(second, "no published key carries the key id \"never-published\"");
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 }
 
@@ -520,7 +520,7 @@ async fn a_key_past_its_max_age_is_refused_while_the_key_set_url_answers_500() {
     let second = refusal(verifier.verify(&sign(&claims())));
 
     assert!(matches!(first, Err(GoogleVerifierError::Call { .. })), "{first:?}");
-    assert!(second.contains(KEY_ID), "{second}");
+    assert_eq!(second, format!("the key id {KEY_ID:?} names no key the verifier trusts now"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
