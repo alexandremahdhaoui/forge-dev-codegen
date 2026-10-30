@@ -158,6 +158,33 @@ func TestTheSqliteSchemaOfAStoreWithAnOrderHoldsTheIndexOfEveryPageLookup(t *tes
 	)
 }
 
+func TestAStoreOrderedByAPropertyWithNoFormatEmitsTheMillisecondStampCheckInNeitherAdapter(t *testing.T) {
+	plain := strings.Replace(chatLineSpec, "        postedAt:\n          type: string\n          format: date-time\n", "        postedAt:\n          type: string\n", 1)
+	if plain == chatLineSpec {
+		t.Fatal("the fixture still declares format date-time on postedAt, so this proof compares nothing")
+	}
+
+	byPath, err := generatedByPath(t, plain)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	wantIn(t, byPath, "port/zz_generated_chat_line_store.rs", "pub struct ChatLineCursor {")
+
+	for _, path := range []string{"adapter/zz_generated_chat_line_sqlite.rs", "adapter/zz_generated_chat_line_memory.rs"} {
+		content, ok := byPath[path]
+		if !ok {
+			t.Fatalf("no file at %s", path)
+		}
+
+		for _, absent := range []string{"holds_the_utc_millisecond_form", "Stamp {"} {
+			if strings.Contains(content, absent) {
+				t.Errorf("%s holds %q, which only an order property with format date-time carries:\n%s", path, absent, content)
+			}
+		}
+	}
+}
+
 func TestAStoreWithNoOrderKeepsItsKeyOrderAndItsStringCursor(t *testing.T) {
 	byPath, err := generatedByPath(t, helloSpec)
 	if err != nil {
