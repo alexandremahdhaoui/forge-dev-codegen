@@ -137,3 +137,38 @@ func TestGenerateRefusesTwoEmittedFilesOnOnePathNamingBothTemplatesAndThePath(t 
 		t.Fatalf("two files on one path were not refused by name\n got %v\nwant %s", err, want)
 	}
 }
+
+const lineStreamPath = `  /lines/{lineId}/stream:
+    get:
+      operationId: streamOneLine
+      x-controller: chat
+      x-stream:
+        from: ChatLine
+        key: lineId
+        adapters: [memory]
+      parameters:
+        - name: lineId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The saves of one line
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ChatLine"
+components:
+`
+
+func TestTwoXStreamOperationsThatStreamOneEventUnderTwoDifferentKeysAreRefusedByName(t *testing.T) {
+	spec := strings.Replace(chatLineFeedSpec(t), "components:\n", lineStreamPath, 1)
+
+	_, err := restrust.Generate([]byte(spec), restrust.Options{Service: "songe-social"})
+
+	want := `reading the x-stream operations: "streamChatLines" and "streamOneLine" both carry "ChatLine" and publish it under "chatId" and "lineId", one event has one key`
+	if err == nil || err.Error() != want {
+		t.Fatalf("two keys for one event were not refused by name\n got %v\nwant %s", err, want)
+	}
+}

@@ -435,6 +435,10 @@ func eventTypes(operations []Operation, types []TypeDef) ([]Event, error) {
 			return nil, fmt.Errorf("reading the x-stream operations: %q and %q both carry %q and read it from %q and %q, one event has one source", known.ID, op.ID, op.Response, known.StreamFrom, op.StreamFrom)
 		}
 
+		if seen && known.StreamKey != op.StreamKey {
+			return nil, fmt.Errorf("reading the x-stream operations: %q and %q both carry %q and publish it under %q and %q, one event has one key", known.ID, op.ID, op.Response, known.StreamKey, op.StreamKey)
+		}
+
 		streamed[op.Response] = op
 	}
 
