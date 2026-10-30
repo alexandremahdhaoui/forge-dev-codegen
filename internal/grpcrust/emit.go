@@ -367,6 +367,14 @@ pub enum {{ .ClientError }} {
 {{- end }}
 }
 
+impl {{ .ClientError }} {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::{{ .Runtime.Variant }} { operation, .. }{{ range .Taxonomy }} | Self::{{ .Variant }} { operation, .. }{{ end }} => operation.clone(),
+        }
+    }
+}
+
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .ClientTrait }}: Send + Sync {
 {{- range .Rpcs }}
@@ -381,12 +389,20 @@ pub trait {{ .ClientTrait }}: Send + Sync {
 use std::sync::Arc;
 {{ end }}
 {{- range .Ports }}
-use crate::port::{{ .Snake }}::{{ .Name }};
+use crate::port::{{ .Snake }}::{{ "{" }}{{ .Name }}, {{ .Name }}Error{{ "}" }};
 {{- end }}
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
 
 #[derive(Debug, thiserror::Error)]
 pub enum {{ .ControllerError }} {
+{{- range .Ports }}
+    #[error("calling the {{ .Snake }} port for {id:?}")]
+    {{ .Name }} {
+        id: String,
+        #[source]
+        source: {{ .Name }}Error,
+    },
+{{- end }}
     #[error("{{ .Runtime.Display }}")]
     {{ .Runtime.Variant }} {
         operation: String,
@@ -398,7 +414,16 @@ pub enum {{ .ControllerError }} {
     {{ .Variant }} { {{ .FieldList }} },
 {{- end }}
 }
-
+{{ range .Ports }}
+impl From<{{ .Name }}Error> for {{ $.ControllerError }} {
+    fn from(source: {{ .Name }}Error) -> Self {
+        Self::{{ .Name }} {
+            id: source.subject(),
+            source,
+        }
+    }
+}
+{{ end }}
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .ControllerTrait }}: Send + Sync {
 {{- range .Rpcs }}
@@ -567,6 +592,13 @@ impl From<{{ .Name }}> for pb::{{ .Name }} {
 {{ end }}
 fn status(error: {{ .ControllerError }}) -> tonic::Status {
     match error {
+{{- $c := . }}
+{{- range .Ports }}
+        {{ $c.ControllerError }}::{{ .Name }} { .. } => {
+            eprintln!("{error:?}");
+            tonic::Status::new(tonic::Code::{{ $c.Runtime.GrpcCode }}, "internal error")
+        }
+{{- end }}
         {{ .ControllerError }}::{{ .Runtime.Variant }} { .. } => {
             eprintln!("{error:?}");
             tonic::Status::new(tonic::Code::{{ .Runtime.GrpcCode }}, "internal error")

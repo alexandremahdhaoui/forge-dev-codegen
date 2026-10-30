@@ -676,6 +676,19 @@ pub enum {{ .Store.Port }}Error {
 {{- end }}
 }
 
+impl {{ .Store.Port }}Error {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::Put { id, .. } | Self::Get { id, .. } | Self::Delete { id, .. } => id.clone(),
+            Self::Lookup { value, .. } => value.clone(),
+            Self::Missing { key } => key.clone(),
+{{- if .Store.HasOneLookup }}
+            Self::Duplicate { values, .. } => values.clone(),
+{{- end }}
+        }
+    }
+}
+
 {{ if .Store.Columns }}#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum {{ .Store.Name }}Column {
 {{- range .Store.Columns }}
@@ -729,6 +742,14 @@ pub enum {{ .Event.Port }}Error {
     },
 }
 
+impl {{ .Event.Port }}Error {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::Subscribe { key, .. } | Self::Publish { key, .. } => key.clone(),
+        }
+    }
+}
+
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .Event.Port }}: Send + Sync {
     fn subscribe(&self, key: &str) -> Result<std::sync::mpsc::Receiver<{{ .Event.Name }}>, {{ .Event.Port }}Error>;
@@ -752,6 +773,14 @@ pub enum {{ $p.Error }} {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+}
+
+impl {{ $p.Error }} {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::Refused { method, .. } | Self::Call { method, .. } => method.clone(),
+        }
+    }
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -781,6 +810,14 @@ pub enum {{ $c.Error }} {
     #[error("{{ .Display }}")]
     {{ .Variant }} { operation: String, message: String },
 {{- end }}
+}
+
+impl {{ $c.Error }} {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::{{ $c.WireRuntime.Variant }} { operation, .. }{{ range $c.WireTaxonomy }} | Self::{{ .Variant }} { operation, .. }{{ end }} => operation.clone(),
+        }
+    }
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -820,7 +857,16 @@ pub enum {{ $c.Pascal }}ControllerError {
     {{ .Variant }} { {{ .FieldList }} },
 {{- end }}
 }
-
+{{ range $c.Ports }}
+impl From<{{ .Port }}Error> for {{ $c.Pascal }}ControllerError {
+    fn from(source: {{ .Port }}Error) -> Self {
+        Self::{{ .Port }} {
+            id: source.subject(),
+            source,
+        }
+    }
+}
+{{ end }}
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ $c.Pascal }}Controller: Send + Sync {
 {{- range $c.Ops }}

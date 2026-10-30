@@ -58,12 +58,9 @@ impl HelloDatagramController for HelloDatagramControllerImpl {
         let tick = self.tick_counter.next();
 
         self.hello_datagram_broadcast
-            .send_all(HelloDatagramPush::Counter(Counter { tick }))
-            .map(|_| ())
-            .map_err(|source| HelloDatagramControllerError::Broadcast {
-                kind: "Counter".to_string(),
-                source,
-            })
+            .send_all(HelloDatagramPush::Counter(Counter { tick }))?;
+
+        Ok(())
     }
 }
 `

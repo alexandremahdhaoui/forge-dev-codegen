@@ -756,6 +756,16 @@ pub enum {{ .BroadcastError }} {
     },
 }
 
+impl {{ .BroadcastError }} {
+    pub fn subject(&self) -> String {
+        match self {
+            Self::Encode { session_id, .. }
+            | Self::UnknownSession { session_id, .. }
+            | Self::PeerTable { session_id, .. } => format!("{session_id:?}"),
+        }
+    }
+}
+
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .BroadcastTrait }}: Send + Sync {
     fn send_to(&self, session_id: &[u8; 16], push: {{ .PushEnum }}) -> Result<(), {{ .BroadcastError }}>;
@@ -780,6 +790,16 @@ pub enum {{ .ClientError }} {
 {{- end }}
 }
 
+impl {{ .ClientError }} {
+    pub fn subject(&self) -> String {
+        match *self {
+{{- range .Inbound }}
+            Self::{{ .Pascal }} { .. } => "{{ .FullMethod }}".to_string(),
+{{- end }}
+        }
+    }
+}
+
 pub trait {{ .ClientTrait }}: Send + Sync {
 {{- range .Inbound }}
     fn {{ .Ident }}(
@@ -799,27 +819,36 @@ use std::sync::Arc;
 use {{ .CratePath }}port::{{ .BroadcastModule }}::{{ "{" }}{{ .BroadcastError }}, {{ .BroadcastTrait }}{{ "}" }};
 {{- end }}
 {{- range .Ports }}
-use {{ if .Generated }}{{ $.CratePath }}{{ else }}crate::{{ end }}port::{{ .Snake }}::{{ .Name }};
+use {{ if .Generated }}{{ $.CratePath }}{{ else }}crate::{{ end }}port::{{ .Snake }}::{{ if .Error }}{{ "{" }}{{ .Name }}, {{ .Error }}{{ "}" }}{{ else }}{{ .Name }}{{ end }};
 {{- end }}
 use {{ .CratePath }}types::context::Context;
 use {{ .CratePath }}types::{{ .ServiceSnake }}_messages::{{ "{" }}{{ range $i, $t := .TraitTypes }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}{{ "}" }};
 
 #[derive(Debug, thiserror::Error)]
 pub enum {{ .ControllerError }} {
+{{- range .FailingPorts }}
+    #[error("calling the {{ .Snake }} port for {id:?}")]
+    {{ .Name }} {
+        id: String,
+        #[source]
+        source: {{ .Error }},
+    },
+{{- end }}
     #[error("validating {field:?}: {reason}")]
     Invalid { field: String, reason: String },
     #[error("running {operation:?}: not implemented")]
     NotImplemented { operation: String },
-{{- if .Session }}
-    #[error("broadcasting {kind}")]
-    Broadcast {
-        kind: String,
-        #[source]
-        source: {{ .BroadcastError }},
-    },
-{{- end }}
 }
-
+{{ range .FailingPorts }}
+impl From<{{ .Error }}> for {{ $.ControllerError }} {
+    fn from(source: {{ .Error }}) -> Self {
+        Self::{{ .Name }} {
+            id: source.subject(),
+            source,
+        }
+    }
+}
+{{ end }}
 #[cfg_attr(test, mockall::automock)]
 pub trait {{ .ControllerTrait }}: Send + Sync {
 {{- range .Inbound }}

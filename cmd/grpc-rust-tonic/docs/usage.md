@@ -106,6 +106,15 @@ port to. The manifest names the ports on the controller and lists them
 under `requires.ports`, so the skeleton refuses when no cell provides
 one and `wiring.yaml` picks the adapter.
 
+`<Service>ControllerError` gains one arm per port,
+`<Port> { id: String, source: <Port>Error }`, and the file writes
+`impl From<<Port>Error> for <Service>ControllerError`. The conversion
+fills `id` from the `subject()` every port error answers. A body reaches
+a port with `?` and writes no `map_err`. A controller that must answer a
+refusal matches it before the question mark. The driver logs a port arm
+and answers it as `Runtime`. `<Service>ClientError::subject()` answers
+its `operation`.
+
 A cell naming no port gets an empty ports struct that `new` still takes.
 A struct holding ports carries `#[allow(dead_code)]`, so a body that has
 not reached one of its ports yet still builds. The compiler still
@@ -151,6 +160,7 @@ its gRPC status code with `tonic::Status::new(tonic::Code::<Code>, ...)`.
 
 | Controller error | `tonic::Code` | Why |
 |---|---|---|
+| a port arm | `Internal` | the same answer as `Runtime` |
 | `Runtime` | `Internal` | the caller did nothing wrong and learns nothing, the chain goes to stderr |
 | `Authentication` | `Unauthenticated` | the request carries no valid credential |
 | `Authorization` | `PermissionDenied` | the caller is known and may not do this |

@@ -582,10 +582,7 @@ async fn {{ .Name }}() {
             pushing
                 .send_all({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }}))
                 .map(|_reached| ())
-                .map_err(|source| {{ .ControllerError }}::Broadcast {
-                    kind: "{{ .PushVariant }}".to_string(),
-                    source,
-                })
+                .map_err({{ .ControllerError }}::from)
         });
 
     let stack = stand_up_{{ .ServiceSnake }}({{ .ControllerVar }}, {{ .ServiceSnake }}_gate(true), peer_table).await;
@@ -644,11 +641,7 @@ async fn {{ .Name }}() {
             let {{ $.DrawIdent }} = {{ $.Crate }}::{{ $.Rng.Module }}::{{ $.Rng.Trait }}::{{ $.Rng.Method }}(&rng);
 {{ end }}
             pushing
-                .send_all({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }}))
-                .map_err(|source| {{ .ControllerError }}::Broadcast {
-                    kind: "{{ .PushVariant }}".to_string(),
-                    source,
-                })?;
+                .send_all({{ .PushEnum }}::{{ .PushVariant }}({{ .PushLiteral }}))?;
 
             Ok(controller_reply.clone())
         });

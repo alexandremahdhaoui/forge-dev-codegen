@@ -44,8 +44,8 @@ func TestAGrpcControllerHoldsEveryPortItsCellNamesAsABoxedFieldAndTheManifestReq
 	for _, want := range []string{
 		"use std::sync::Arc;",
 		"#[allow(dead_code)]\npub struct HelloControllerImpl {",
-		"use crate::port::ticket_store::TicketStore;",
-		"use crate::port::greeting_clock::GreetingClock;",
+		"use crate::port::ticket_store::{TicketStore, TicketStoreError};",
+		"use crate::port::greeting_clock::{GreetingClock, GreetingClockError};",
 		"pub(crate) ticket_store: Arc<dyn TicketStore + Send + Sync>,",
 		"pub(crate) greeting_clock: Arc<dyn GreetingClock + Send + Sync>,",
 	} {

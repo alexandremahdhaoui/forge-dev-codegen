@@ -377,6 +377,23 @@ client enum and the client's reverse mapping from it, grpc-rust-tonic
 renders its enum and its status mapping from it, and vectors-rust arms its
 mocks from it. A ninth member is one edit in one file.
 
+## Every held port error converts into its controller error
+
+Every port error answers `fn subject(&self) -> String`. The method
+answers the identifier the error already carries. A store error answers
+its id, its key, its lookup value or its duplicate values. A subscribe
+error answers its key. A declared port error answers its method. A
+client error answers its operation. A crate root port error carries no
+identifier and answers its port name in snake case, such as
+`ticket_verifier`.
+
+The controller file writes `impl From<<Port>Error> for
+<Name>ControllerError` for every port the controller holds, and a port
+of another cell counts too. The conversion fills the `id` of the port
+arm from `subject()`. A body reaches a port with `?` and writes no
+`map_err`. A controller that must answer a refusal matches it before the
+question mark.
+
 ## The adapters
 
 `<Store>SqliteStore::new` takes `<Store>SqliteStoreConfig`, whose only

@@ -114,6 +114,12 @@ pub enum TicketVerifierError {
     },
 }
 
+impl TicketVerifierError {
+    pub fn subject(&self) -> String {
+        "ticket_verifier".to_string()
+    }
+}
+
 #[cfg_attr(test, mockall::automock)]
 pub trait TicketVerifier: Send + Sync {
     fn verify(&self, token: &str) -> Result<Subject, TicketVerifierError>;
@@ -128,6 +134,12 @@ func TokenSourceSource(header string) string {
 pub enum TokenSourceError {
     #[error("reading the current token: {reason}")]
     Unavailable { reason: String },
+}
+
+impl TokenSourceError {
+    pub fn subject(&self) -> String {
+        "token_source".to_string()
+    }
 }
 
 #[cfg_attr(test, mockall::automock)]

@@ -301,7 +301,7 @@ func TestAPushRpcHasNoInboundMethodAndTheCodecEncodesItThroughThePushEnum(t *tes
 		"fn on_tick(&self) -> Result<(), HelloDatagramControllerError>;",
 		"pub(crate) hello_datagram_broadcast: Arc<dyn HelloDatagramBroadcast + Send + Sync>,",
 		"pub fn new(ports: HelloDatagramControllerPorts) -> Self {",
-		"Broadcast {\n        kind: String,\n        #[source]\n        source: HelloDatagramBroadcastError,\n    },",
+		"HelloDatagramBroadcast {\n        id: String,\n        #[source]\n        source: HelloDatagramBroadcastError,\n    },",
 	} {
 		if !strings.Contains(controller, want) {
 			t.Errorf("the controller lacks %q\n%s", want, controller)
@@ -529,7 +529,7 @@ func TestAControllerPortWithNoKindNamesAPortAnotherCellProvidesAndTheCellWritesN
 
 	controller := byPath["controller/zz_generated_hello_datagram_controller.rs"]
 
-	if !strings.Contains(controller, "use crate::port::clock::Clock;") {
+	if !strings.Contains(controller, "use crate::port::clock::{Clock, ClockError};") {
 		t.Errorf("the controller never reached the port through the crate root\n%s", controller)
 	}
 

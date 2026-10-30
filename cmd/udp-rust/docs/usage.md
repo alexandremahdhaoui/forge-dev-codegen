@@ -82,6 +82,19 @@ A controller holding no port takes an empty ports struct. State
 a controller keeps across calls lives behind such a port, never in a
 static.
 
+`<Service>ControllerError` gains one arm per held port that answers an
+error, `<Port> { id: String, source: <Port>Error }`, and the file writes
+`impl From<<Port>Error> for <Service>ControllerError`. The conversion
+fills `id` from the `subject()` every port error answers. A body reaches
+a port with `?` and writes no `map_err`. A controller that must answer a
+refusal matches it before the question mark. A counter port answers no
+error, so it gets no arm. `<Service>ClientError::subject()` answers the
+full method name of its rpc.
+
+The udp driver answers every controller error the same way, a port arm
+included. It logs the error chain and drops the datagram, because the
+wire carries no refusal.
+
 Every emitted path is relative to the cell directory. The engine never
 writes above it.
 
@@ -124,8 +137,10 @@ too.
 | `driver/zz_generated_<service>_tick_driver.rs` | `<Service>TickDriver`, calls `on_tick` on the controller every `interval_ms` |
 
 The controller trait gains `on_tick(&self)`. The struct gains one
-field, the broadcast port, and `new` takes it. The error enum gains
-`Broadcast { kind, source }`. A push rpc gets no inbound method on the
+field, the broadcast port, and `new` takes it. The error enum gains the
+port arm `<Service>Broadcast { id, source }` like every other held
+port. `<Service>BroadcastError::subject()` answers the session id
+rendered with `{:?}`. A push rpc gets no inbound method on the
 controller and no method on the client port. The codec still names its
 method and hash and emits `encode_push` and `decode_push`.
 

@@ -93,6 +93,7 @@ type portView struct {
 	Name               string
 	Snake              string
 	Kind               string
+	Error              string
 	Methods            []string
 	Generated          bool
 	HasMemory          bool
@@ -105,10 +106,22 @@ type portView struct {
 func (v serviceView) HeldPorts() []portView {
 	held := []portView{}
 	if v.Session {
-		held = append(held, portView{Name: v.BroadcastTrait, Snake: v.BroadcastSnake})
+		held = append(held, portView{Name: v.BroadcastTrait, Snake: v.BroadcastSnake, Error: v.BroadcastError})
 	}
 
 	return append(held, v.Ports...)
+}
+
+func (v serviceView) FailingPorts() []portView {
+	failing := []portView{}
+
+	for _, port := range v.HeldPorts() {
+		if port.Error != "" {
+			failing = append(failing, port)
+		}
+	}
+
+	return failing
 }
 
 type serviceView struct {
@@ -361,7 +374,7 @@ func buildPortView(spec PortSpec) (portView, error) {
 			return portView{}, fmt.Errorf("naming the controller ports: %q names adapters and no kind, adapters says how to build a port and kind says what the port is", spec.Name)
 		}
 
-		return portView{Name: spec.Name, Snake: snake}, nil
+		return portView{Name: spec.Name, Snake: snake, Error: spec.Name + "Error"}, nil
 	}
 
 	if spec.Kind != CounterPortKind {
