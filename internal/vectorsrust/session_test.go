@@ -418,7 +418,7 @@ func buildSessionCargoWorkspace(t *testing.T) (string, string) {
 func TestTheSessionVectorsPassAgainstTheGeneratedSessionCellAndAMockedGate(t *testing.T) {
 	root, cargo := buildSessionCargoWorkspace(t)
 
-	out, err := runCargoTest(t, root, cargo)
+	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
 		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)

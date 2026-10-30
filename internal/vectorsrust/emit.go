@@ -160,16 +160,20 @@ func Generate(openapiDoc, vectorsDoc []byte, opts Options) ([]File, error) {
 	}, nil
 }
 
-func declaredOperations(spec *restrust.Spec) func(string) bool {
-	declared := map[string]bool{}
+func declaredOperations(spec *restrust.Spec) func(string) (restrust.Operation, bool) {
+	declared := map[string]restrust.Operation{}
 
 	for _, c := range spec.Controllers {
 		for _, op := range c.Operations {
-			declared[op.ID] = true
+			declared[op.ID] = op
 		}
 	}
 
-	return func(id string) bool { return declared[id] }
+	return func(id string) (restrust.Operation, bool) {
+		op, ok := declared[id]
+
+		return op, ok
+	}
 }
 
 func declaredDatagrams(svc *datagramService) func(string) bool {
@@ -1008,6 +1012,9 @@ async fn {{ .Name }}() {
     let got: serde_json::Value = serde_json::from_slice(&body_bytes).expect("a JSON body");
     let message = got.get("message").and_then(|m| m.as_str()).unwrap_or_default();
     assert!(message.contains({{ .ExpectedSubstringLiteral }}), "message {:?} lacks {:?}", message, {{ .ExpectedSubstringLiteral }});
+{{- end }}
+{{- if not (or .HasExpectedBody .HasExpectedSubstring) }}
+    assert!(body_bytes.is_empty(), "{{ .Name }} declares no expectedBody and the body is {body_bytes:?}");
 {{- end }}
 }
 {{ end -}}

@@ -490,6 +490,28 @@ func TestVectorsThatExpectNoBodyEmitNoBodyMatcher(t *testing.T) {
 	}
 }
 
+func TestANoContentCaseThatDeclaresNoExpectedBodyAssertsTheResponseBodyIsEmpty(t *testing.T) {
+	files, err := vectorsrust.Generate([]byte(cargoSpec), []byte("{\"cases\": [\n"+cargoRestCases+"\n]}"), vectorsrust.Options{Service: "songe-hello"})
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	content := files[0].Content
+
+	start := strings.Index(content, "async fn deleting_a_greeting_answers_no_content() {")
+	if start < 0 {
+		t.Fatalf("the generated file lacks the no content test:\n%s", content)
+	}
+
+	body := content[start:]
+	body = body[:strings.Index(body, "\n}\n")]
+
+	const want = `assert!(body_bytes.is_empty(), "deleting_a_greeting_answers_no_content declares no expectedBody and the body is {body_bytes:?}");`
+	if !strings.Contains(body, want) {
+		t.Fatalf("the no content test does not assert an empty body, want %q in:\n%s", want, body)
+	}
+}
+
 func TestParsingVectorsRejectsAMalformedDocument(t *testing.T) {
 	tests := []struct {
 		name string

@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-dev-codegen/internal/restrust"
 )
 
 type VectorsFile struct {
@@ -60,7 +62,7 @@ func (c VectorCase) IsPush() bool {
 var rustTestIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 type declared struct {
-	operation func(string) bool
+	operation func(string) (restrust.Operation, bool)
 	datagram  func(string) bool
 	grpc      func(string) bool
 	surfaces  []string
@@ -155,7 +157,8 @@ func parseVectors(doc []byte, d declared) (*VectorsFile, error) {
 			continue
 		}
 
-		if !d.operation(c.Operation) {
+		op, ok := d.operation(c.Operation)
+		if !ok {
 			return nil, fmt.Errorf("reading vector %q: operation %q names nothing the cell declares, the cell declares %s", c.Case, c.Operation, strings.Join(d.surfaces, ", "))
 		}
 
@@ -165,6 +168,10 @@ func parseVectors(doc []byte, d declared) (*VectorsFile, error) {
 
 		if len(c.ControllerReply) == 0 && c.ExpectedErrorSubstring == "" {
 			return nil, fmt.Errorf("reading vector %q: an error case needs expectedErrorSubstring, and a success case needs controllerReply", c.Case)
+		}
+
+		if op.Stream && len(c.ExpectedBody) == 0 && c.ExpectedErrorSubstring == "" {
+			return nil, fmt.Errorf("reading vector %q: operation %q streams events and an event stream has no empty body to assert, so a success case needs expectedBody, the first event the stream answers", c.Case, c.Operation)
 		}
 
 		kept = append(kept, c)

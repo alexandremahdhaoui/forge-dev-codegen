@@ -70,7 +70,6 @@ pub mod udp;
 const cargoGreetingControllerImpl = `use crate::rest::controller::{
     GreetingController, GreetingControllerError, GreetingControllerImpl,
 };
-use crate::rest::port::greeting_store::GreetingStore;
 use crate::rest::types::create_greeting_request::CreateGreetingRequest;
 use crate::rest::types::greeting::Greeting;
 
@@ -103,6 +102,12 @@ impl GreetingController for GreetingControllerImpl {
                 source,
             })?
             .ok_or(GreetingControllerError::NotFound { id: id.to_string() })
+    }
+
+    fn delete_greeting(&self, id: &str) -> Result<(), GreetingControllerError> {
+        let _ = id;
+
+        Ok(())
     }
 }
 `
@@ -166,6 +171,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Greeting"
+    delete:
+      operationId: deleteGreeting
+      x-controller: greeting
+      x-ports: [GreetingStore]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: The greeting is gone
 components:
   schemas:
     CreateGreetingRequest:
@@ -221,6 +239,13 @@ const cargoRestCases = `    {
       "input": { "id": "missing" },
       "expectedStatus": 404,
       "expectedErrorSubstring": "not found"
+    },
+    {
+      "case": "deleting_a_greeting_answers_no_content",
+      "operation": "deleteGreeting",
+      "input": { "id": "g1" },
+      "controllerReply": {},
+      "expectedStatus": 204
     }`
 
 const cargoDatagramCases = `    {
@@ -315,10 +340,10 @@ func buildCargoWorkspace(t *testing.T, mangleWire func(string) string) (root str
 	return root, cargo
 }
 
-func runCargoTest(t *testing.T, root, cargo string) ([]byte, error) {
+func runCargo(t *testing.T, root, cargo string, args ...string) ([]byte, error) {
 	t.Helper()
 
-	cmd := exec.Command(cargo, "test", "--workspace")
+	cmd := exec.Command(cargo, args...)
 	cmd.Dir = root
 
 	return cmd.CombinedOutput()
@@ -340,11 +365,27 @@ func skipOnNetworkError(t *testing.T, err error, out []byte) {
 func TestTheGeneratedVectorsPassAgainstTheGeneratedDriverAndAMockedController(t *testing.T) {
 	root, cargo := buildCargoWorkspace(t, nil)
 
-	out, err := runCargoTest(t, root, cargo)
+	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
 		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
 	}
+
+	if !strings.Contains(string(out), "deleting_a_greeting_answers_no_content ... ok") {
+		t.Fatalf("cargo test never reported the no content case passing\n%s", out)
+	}
+}
+
+func TestAGeneratedTestCrateHoldingANoContentCasePassesClippyWithWarningsDenied(t *testing.T) {
+	root, cargo := buildCargoWorkspace(t, nil)
+
+	out, err := runCargo(t, root, cargo, "clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
+	if err != nil {
+		skipOnNetworkError(t, err, out)
+		t.Fatalf("cargo clippy: %v\n%s", err, out)
+	}
+
+	t.Logf("cargo clippy ran over a crate holding the no content case deleting_a_greeting_answers_no_content\n%s", out)
 }
 
 const cargoRosterManifest = `[package]
@@ -456,7 +497,7 @@ func TestARepeatedScalarARepeatedMessageAndAnEmptyListRoundTripThroughTheGenerat
 
 	write("src/grpc/controller/roster_controller.rs", cargoRosterControllerImpl)
 
-	out, err := runCargoTest(t, root, cargo)
+	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err != nil {
 		skipOnNetworkError(t, err, out)
 		t.Fatalf("cargo test: %v\n%s", err, out)
@@ -497,7 +538,7 @@ func TestAMangledRequestBodyMappingMakesTheWithPredicateFailTheGeneratedTest(t *
 
 	root, cargo := buildCargoWorkspace(t, mangle)
 
-	out, err := runCargoTest(t, root, cargo)
+	out, err := runCargo(t, root, cargo, "test", "--workspace")
 	if err == nil {
 		t.Fatalf("cargo test succeeded although the driver mangles the request body before it reaches the controller:\n%s", out)
 	}

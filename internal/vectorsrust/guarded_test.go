@@ -333,6 +333,17 @@ func TestASubjectWithoutABearerIsRefused(t *testing.T) {
 	}
 }
 
+func TestAStreamSuccessCaseWithNoExpectedBodyIsRefusedByNameBecauseAnEventStreamHasNoEmptyBodyToAssert(t *testing.T) {
+	vectors := `{"cases": [{"case": "streaming_with_no_event_to_check", "operation": "streamGreetingEvents", "input": {"id": "g1"}, "bearer": "open", "subject": "friend", "controllerReply": {"id": "g1", "count": 1}, "expectedStatus": 200}]}`
+
+	_, err := vectorsrust.Generate([]byte(guardedSpec), []byte(vectors), vectorsrust.Options{Service: "songe-hello"})
+
+	const want = `reading vector "streaming_with_no_event_to_check": operation "streamGreetingEvents" streams events and an event stream has no empty body to assert, so a success case needs expectedBody, the first event the stream answers`
+	if err == nil || err.Error() != want {
+		t.Fatalf("a stream case with no expectedBody was not refused by name\n got %v\nwant %s", err, want)
+	}
+}
+
 func TestA401OnAnOperationWithoutXAuthArmsTheControllerAuthenticationErrorInsteadOfTheVerifier(t *testing.T) {
 	vectors := `{"cases": [{"case": "a", "operation": "getGreeting", "input": {"id": "g1"}, "expectedStatus": 401, "expectedErrorSubstring": "stranger"}]}`
 
