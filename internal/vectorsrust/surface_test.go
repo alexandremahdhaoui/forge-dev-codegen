@@ -103,6 +103,22 @@ func TestACellWithoutAnOpenapiDocumentEmitsTheDatagramVectorsAndNoAxumImport(t *
 	}
 }
 
+func TestADatagramCellWithNoHelloImportsNoCodecBecauseNoCaseReadsIt(t *testing.T) {
+	content, err := generateNested(t, nestedProto, nestedCases)
+	if err != nil {
+		t.Fatalf("generating: %v", err)
+	}
+
+	const unwanted = "use songe_play::udp::controller::play_datagram_codec as play_datagram_codec;"
+	if strings.Contains(content, unwanted) {
+		t.Fatalf("a datagram cell with no hello imports the codec that no case reads\n%s", content)
+	}
+
+	if strings.Contains(content, "play_datagram_codec::") {
+		t.Fatalf("the test reads the codec, so the fixture no longer proves the import is unused\n%s", content)
+	}
+}
+
 func TestACellWithoutAnOpenapiDocumentAndNoProtoIsRefusedByName(t *testing.T) {
 	_, err := vectorsrust.Generate(nil, []byte(nestedCases), vectorsrust.Options{Service: "songe-play"})
 

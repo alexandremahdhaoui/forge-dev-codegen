@@ -280,7 +280,7 @@ func buildView(spec *restrust.Spec, vectors *VectorsFile, datagrams *datagramSer
 			v.HasPush = v.HasPush || tv.Kind == kindPush || tv.Kind == kindRequestPush
 			v.HasRequestPush = v.HasRequestPush || tv.Kind == kindRequestPush
 			v.HasReconnect = v.HasReconnect || tv.Kind == kindReconnect
-			v.NeedsRegister = v.NeedsRegister || tv.Kind == kindPush || tv.Kind == kindRequestPush || tv.Kind == kindReconnect || (tv.Registered && !tv.IsHello)
+			v.NeedsRegister = v.NeedsRegister || tv.Kind == kindPush || tv.Kind == kindRequestPush || tv.Kind == kindReconnect || (datagrams.Session && tv.Registered && !tv.IsHello)
 		}
 	}
 
